@@ -11,6 +11,14 @@ Designed for busy executives, researchers, and creators who need high-yield inte
 
 ---
 
+## 📸 Visual Preview
+
+Here is an example of the rich **Premium Dark** cinematic HTML email digest delivered directly to Gmail/iOS Mail:
+
+![Premium Dark Theme Briefing](assets/email_mockup.png)
+
+---
+
 ## 🚀 Key Features
 
 *   **📰 Smart RSS Video Discovery:** Monitors YouTube feeds dynamically based on a customizable lookback window.
@@ -68,8 +76,8 @@ graph TD
 Clone the repository and initialize the virtual environment:
 
 ```bash
-git clone https://github.com/yourusername/youtube-notebooklm-sync.git
-cd youtube-notebooklm-sync
+git clone https://github.com/vkr1729/youtube-notebooklm.git
+cd youtube-notebooklm
 
 # Create virtual environment
 python3 -m venv .venv
@@ -81,7 +89,7 @@ pip install -r requirements.txt
 
 ### 3. Configuration
 
-Copy the example environment file and configure your SMTP credentials, target recipient, and YouTube API keys:
+1. Copy the example environment file and configure your SMTP credentials, target recipient, and YouTube API keys:
 
 ```bash
 cp .env.example .env
@@ -106,8 +114,14 @@ CHANNELS_FILE=channels.json
 STATE_FILE=state.json
 ```
 
+2. Copy the example channels configuration and specify the name and YouTube channel ID for each target creator you want to follow:
+
+```bash
+cp channels.json.example channels.json
+nano channels.json
+```
+
 #### Configure Target Channels (`channels.json`):
-Specify the name and YouTube channel ID for each target creator:
 ```json
 [
   { "name": "Physionic", "channel_id": "UCj3p_1jOCJXB_L_we-DjLbA" },

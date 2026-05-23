@@ -9,6 +9,7 @@ antigravity-init.sh
 .env
 .env.bak
 *.env
+channels.json
 
 # Local Pipeline State & Logs
 state.json
