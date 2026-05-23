@@ -197,13 +197,7 @@ Absolutely. The structure and style of the summaries and podcasts are driven by 
 ### Does this cost anything to run?
 No. Unlike standard pipelines that charge you per-token to send transcripts to GPT-4, Google NotebookLM is completely free, meaning you can summarize hours of long-form video content without incurring API fees.
 
----
 
-## 🏷️ Recommended GitHub Topics / SEO Tags
-For developers hosting and publishing the repository, add the following tags to maximize GitHub feed discovery:
-`youtube-to-email`, `notebooklm`, `notebooklm-api`, `automation-script`, `newsletter-generator`, `youtube-summarizer`, `ai-digest`, `systemd-timer`, `rss-reader`, `email-newsletter`.
-
----
 
 ## 📄 License
 
