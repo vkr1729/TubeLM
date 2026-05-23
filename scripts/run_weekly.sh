@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/run_weekly.sh — Weekly YouTube→NotebookLM pipeline wrapper
+# scripts/run_weekly.sh — Weekly TubeLM pipeline wrapper
 #
 # Called by systemd timer (youtube-digest.timer) every Saturday.
 # Handles: network wait, cookie refresh, pipeline execution, logging.

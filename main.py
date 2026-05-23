@@ -1,5 +1,5 @@
 """
-main.py — YouTube → NotebookLM Weekly Sync
+main.py — TubeLM Weekly Sync
 
 Entry point. Orchestrates:
   1. Pre-run cookie refresh
@@ -612,7 +612,7 @@ async def async_main(dry_run: bool, skip_email: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="YouTube → NotebookLM Weekly Sync",
+        description="TubeLM: Premium YouTube to NotebookLM Weekly Sync",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"

@@ -1,13 +1,17 @@
-# 📹 YouTube → NotebookLM Weekly Briefing Sync
+<p align="center">
+  <img src="assets/logo.png" alt="TubeLM Logo" width="220px">
+</p>
+
+# 🎬 TubeLM — Premium YouTube to NotebookLM Digest Pipeline
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey)](https://www.kernel.org/)
 [![Built with NotebookLM-py](https://img.shields.io/badge/built%20with-notebooklm--py-blueviolet)](https://github.com/leptonai/notebooklm-py)
 
-A production-grade, fully automated pipeline that fetches new uploads from a list of YouTube channels, filters out Short-form video content, orchestrates Google's **NotebookLM** to generate high-density summaries, generates visual infographics, and delivers a stunning **Premium Dark** themed HTML email digest directly to your inbox.
+An elite, automated intelligence briefing service translating YouTube subscriptions into high-density NotebookLM digests. Delivered weekly directly to your inbox in a stunning, custom-styled dark-mode cinematic theme.
 
-Designed for busy executives, researchers, and creators who need high-yield intelligence briefings without spending hours watching video streams.
+Designed for busy executives, researchers, and content creators who need high-yield insights from video content without the noise of video feeds.
 
 ---
 
@@ -76,8 +80,8 @@ graph TD
 Clone the repository and initialize the virtual environment:
 
 ```bash
-git clone https://github.com/vkr1729/youtube-notebooklm.git
-cd youtube-notebooklm
+git clone https://github.com/vkr1729/TubeLM.git
+cd TubeLM
 
 # Create virtual environment
 python3 -m venv .venv
@@ -138,7 +142,7 @@ To make the script run completely automatically when you open your laptop on a S
 1. Create a service file at `~/.config/systemd/user/youtube-digest.service`:
 ```ini
 [Unit]
-Description=YouTube to NotebookLM Weekly Sync Service
+Description=TubeLM Weekly Briefing Sync Service
 After=network-online.target
 
 [Service]
@@ -151,7 +155,7 @@ StandardError=journal
 2. Create a timer file at `~/.config/systemd/user/youtube-digest.timer`:
 ```ini
 [Unit]
-Description=Run YouTube to NotebookLM Sync Weekly
+Description=Run TubeLM Weekly Sync
 
 [Timer]
 OnCalendar=Sat *-*-* 08:00:00
