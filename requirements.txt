@@ -1,0 +1,6 @@
+notebooklm-py[browser]
+feedparser
+requests
+jinja2
+python-dotenv
+rookiepy

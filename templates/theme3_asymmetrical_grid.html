@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ channel.channel_name }} Digest — {{ run_date }}</title>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #F1F5F9;
+      color: #475569;
+      line-height: 1.5;
+      padding: 32px 16px;
+    }
+    
+    /* ── Outer wrapper ────────────────────────────────────────────────────── */
+    .email-wrapper {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #FFFFFF;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #E2E8F0;
+      padding: 24px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.025);
+    }
+
+    /* ── Header ───────────────────────────────────────────────────────────── */
+    .header {
+      background-color: #FFFFFF;
+      padding-bottom: 20px;
+      border-bottom: 2px dashed #E2E8F0;
+      margin-bottom: 24px;
+    }
+    .header-badge {
+      display: inline-block;
+      background: #4F46E5;
+      color: #FFFFFF;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 20px;
+      margin-bottom: 12px;
+    }
+    .header h1 {
+      font-size: 26px;
+      font-weight: 800;
+      color: #0F172A;
+      margin-bottom: 6px;
+      letter-spacing: -0.02em;
+    }
+    .header .subtitle {
+      font-size: 13px;
+      color: #475569;
+    }
+
+    /* ── Stats bar ────────────────────────────────────────────────────────── */
+    .stats-bar {
+      display: flex;
+      background-color: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-radius: 10px;
+      margin-bottom: 28px;
+    }
+    .stat {
+      flex: 1;
+      padding: 14px 16px;
+      text-align: center;
+      border-right: 1px solid #E2E8F0;
+    }
+    .stat:last-child { border-right: none; }
+    .stat-number {
+      font-size: 22px;
+      font-weight: 800;
+      color: #4F46E5;
+      display: block;
+      line-height: 1.2;
+    }
+    .stat-label {
+      font-size: 10px;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    /* ── Action Bar / Buttons ─────────────────────────────────────────────── */
+    .action-bar {
+      margin-bottom: 28px;
+    }
+    .notebook-btn {
+      display: inline-block;
+      background-color: #4F46E5;
+      color: #FFFFFF !important;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border-radius: 8px;
+      text-decoration: none !important;
+      transition: background-color 0.2s ease;
+    }
+    .notebook-btn:hover { background-color: #4338ca; }
+
+    /* ── Error notice ─────────────────────────────────────────────────────── */
+    .error-notice {
+      background-color: #FEF2F2;
+      border: 1px solid #FCA5A5;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #B91C1C;
+      margin-bottom: 20px;
+    }
+
+    /* ── Section labels ───────────────────────────────────────────────────── */
+    .section-label {
+      font-size: 12px;
+      font-weight: 800;
+      color: #0F172A;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 16px;
+      margin-top: 24px;
+    }
+
+    /* ── Hero Video (Featured Card) ───────────────────────────────────────── */
+    .hero-video-card {
+      margin-bottom: 32px;
+      padding-bottom: 32px;
+      border-bottom: 2px dashed #E2E8F0;
+    }
+    .hero-thumbnail-container {
+      width: 100%;
+      height: 300px;
+      background-color: #0F172A;
+      border-radius: 8px;
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .hero-thumbnail-bg {
+      width: 100%;
+      height: 100%;
+      background-size: cover;
+      background-position: center;
+    }
+    .hero-play-btn {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 52px;
+      height: 52px;
+      background: #4F46E5;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 52px;
+      color: #FFFFFF;
+      font-size: 20px;
+    }
+    .hero-play-btn span {
+      margin-left: 3px;
+    }
+    .hero-featured-tag {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: #4F46E5;
+      color: #FFFFFF;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .hero-title {
+      font-size: 20px;
+      font-weight: 800;
+      line-height: 1.3;
+      color: #0F172A;
+      letter-spacing: -0.02em;
+      margin: 16px 0 8px 0;
+    }
+    .hero-title a {
+      color: #0F172A;
+      text-decoration: none;
+    }
+    .hero-title a:hover {
+      color: #4F46E5;
+    }
+    .hero-meta {
+      font-size: 12px;
+      color: #475569;
+      margin-bottom: 12px;
+    }
+
+    /* ── Sub-cards (Grid List) ────────────────────────────────────────────── */
+    .sub-thumbnail-container {
+      width: 100%;
+      height: 150px;
+      background-color: #0F172A;
+      border-radius: 6px;
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .sub-thumbnail-bg {
+      width: 100%;
+      height: 100%;
+      background-size: cover;
+      background-position: center;
+    }
+    .sub-play-btn {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 32px;
+      height: 32px;
+      background: rgba(15, 23, 42, 0.9);
+      border-radius: 50%;
+      text-align: center;
+      line-height: 32px;
+      color: #FFFFFF;
+      font-size: 12px;
+    }
+    .sub-play-btn span {
+      margin-left: 2px;
+    }
+    .sub-title {
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.4;
+      color: #0F172A;
+      margin: 10px 0 6px 0;
+    }
+    .sub-title a {
+      color: #0F172A;
+      text-decoration: none;
+    }
+    .sub-title a:hover {
+      color: #4F46E5;
+    }
+    .sub-link {
+      font-size: 12px;
+      color: #4F46E5;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .sub-link:hover {
+      text-decoration: underline;
+    }
+
+    /* ── Infographic section ──────────────────────────────────────────────── */
+    .infographic-section {
+      margin: 24px 0 32px;
+      text-align: center;
+    }
+    .infographic-img {
+      max-width: 100%;
+      border-radius: 10px;
+      border: 1px solid #E2E8F0;
+    }
+
+    /* ── Summary Box & Rendered Markdown HTML ─────────────────────────────── */
+    .summary-box {
+      background-color: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-left: 4px solid #4F46E5;
+      border-radius: 10px;
+      padding: 24px;
+    }
+    .no-summary {
+      font-size: 13px;
+      color: #475569;
+      font-style: italic;
+    }
+
+    /* Markdown Styling */
+    .summary-html h2 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #0F172A;
+      margin-top: 28px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #E2E8F0;
+      padding-bottom: 6px;
+    }
+    .summary-html h2:first-child {
+      margin-top: 0;
+    }
+    .summary-html h3 {
+      font-size: 11px;
+      font-weight: 700;
+      color: #4F46E5;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 20px;
+      margin-bottom: 8px;
+    }
+    .summary-html p {
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+    .summary-html p:last-child {
+      margin-bottom: 0;
+    }
+    .summary-html ul, .summary-html ol {
+      margin-bottom: 16px;
+      padding-left: 20px;
+    }
+    .summary-html li {
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+    .summary-html li:last-child {
+      margin-bottom: 0;
+    }
+    .summary-html strong {
+      color: #0F172A;
+      font-weight: 700;
+    }
+    .summary-html hr {
+      border: 0;
+      border-top: 1px solid #E2E8F0;
+      margin: 24px 0;
+    }
+
+    /* ── Footer ───────────────────────────────────────────────────────────── */
+    .footer {
+      border-top: 1px solid #E2E8F0;
+      padding-top: 24px;
+      margin-top: 36px;
+      text-align: center;
+    }
+    .footer p {
+      font-size: 11px;
+      color: #64748B;
+      margin-bottom: 4px;
+    }
+    .footer .footer-brand {
+      font-size: 12px;
+      color: #0F172A;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+<div class="email-wrapper">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-badge">📹 Executive Digest</div>
+    <h1>{{ channel.channel_name }}</h1>
+    <p class="subtitle">Briefing for {{ run_date }} · Powered by NotebookLM</p>
+  </div>
+
+  <!-- Stats bar -->
+  <div class="stats-bar">
+    <div class="stat">
+      <span class="stat-number">{{ total_videos }}</span>
+      <span class="stat-label">New Videos</span>
+    </div>
+    <div class="stat">
+      <span class="stat-number">{% if channel.notebook_url %}1{% else %}0{% endif %}</span>
+      <span class="stat-label">Notebook</span>
+    </div>
+    <div class="stat">
+      <span class="stat-number">{% if infographic_cid %}📊{% else %}—{% endif %}</span>
+      <span class="stat-label">Infographic</span>
+    </div>
+  </div>
+
+  <!-- Content area -->
+  <div>
+    
+    {% if channel.error %}
+    <div class="error-notice">⚠️ {{ channel.error }}</div>
+    {% endif %}
+
+    <!-- Action Bar -->
+    {% if channel.notebook_url %}
+    <div class="action-bar">
+      <a class="notebook-btn" href="{{ channel.notebook_url }}" target="_blank">
+        Launch Video Stream
+      </a>
+    </div>
+    {% endif %}
+
+    <!-- Infographic Section -->
+    {% if infographic_cid %}
+    <div class="section-label">📊 Visual Infographic</div>
+    <div class="infographic-section">
+      <img src="cid:{{ infographic_cid }}" alt="Channel Infographic" class="infographic-img" />
+    </div>
+    {% endif %}
+
+    <!-- Featured Hero Video -->
+    {% if channel.videos %}
+      {% set hero_v = channel.videos[0] %}
+      <div class="section-label">Featured Release</div>
+      <div class="hero-video-card">
+        <div class="hero-thumbnail-container">
+          <a href="{{ hero_v.url }}" target="_blank">
+            <div class="hero-thumbnail-bg" style="background-image: url('https://img.youtube.com/vi/{{ hero_v.video_id }}/hqdefault.jpg');"></div>
+            <div class="hero-featured-tag">★ Featured Feature</div>
+            <div class="hero-play-btn"><span>▶</span></div>
+          </a>
+        </div>
+        <h2 class="hero-title"><a href="{{ hero_v.url }}" target="_blank">{{ hero_v.title }}</a></h2>
+        <div class="hero-meta">Published on {{ hero_v.published }}</div>
+      </div>
+
+      <!-- Secondary Split Grid (if multiple videos) -->
+      {% if channel.videos|length > 1 %}
+        <div class="section-label">More Recent Releases</div>
+        <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 24px;">
+          {% for i in range(1, channel.videos|length, 2) %}
+          <tr>
+            {% set v1 = channel.videos[i] %}
+            <td width="264" valign="top">
+              <div class="sub-thumbnail-container">
+                <a href="{{ v1.url }}" target="_blank">
+                  <div class="sub-thumbnail-bg" style="background-image: url('https://img.youtube.com/vi/{{ v1.video_id }}/hqdefault.jpg');"></div>
+                  <div class="sub-play-btn"><span>▶</span></div>
+                </a>
+              </div>
+              <h4 class="sub-title"><a href="{{ v1.url }}" target="_blank">{{ v1.title }}</a></h4>
+              <a href="{{ v1.url }}" target="_blank" class="sub-link">Watch Video →</a>
+            </td>
+            
+            <td width="24">&nbsp;</td>
+            
+            <td width="264" valign="top">
+              {% if i + 1 < channel.videos|length %}
+                {% set v2 = channel.videos[i+1] %}
+                <div class="sub-thumbnail-container">
+                  <a href="{{ v2.url }}" target="_blank">
+                    <div class="sub-thumbnail-bg" style="background-image: url('https://img.youtube.com/vi/{{ v2.video_id }}/hqdefault.jpg');"></div>
+                    <div class="sub-play-btn"><span>▶</span></div>
+                  </a>
+                </div>
+                <h4 class="sub-title"><a href="{{ v2.url }}" target="_blank">{{ v2.title }}</a></h4>
+                <a href="{{ v2.url }}" target="_blank" class="sub-link">Watch Video →</a>
+              {% else %}
+                &nbsp;
+              {% endif %}
+            </td>
+          </tr>
+          {% if not loop.last %}
+          <tr><td colspan="3" style="height: 24px; line-height: 24px; font-size: 24px;">&nbsp;</td></tr>
+          {% endif %}
+          {% endfor %}
+        </table>
+      {% endif %}
+    {% endif %}
+
+    <!-- AI Summary Section -->
+    <div style="margin-top: 32px;" class="section-label">AI Summary</div>
+    <div class="summary-box">
+      {% if summary_html %}
+      <div class="summary-html">{{ summary_html | safe }}</div>
+      {% else %}
+      <p class="no-summary">Summary details are available inside the NotebookLM studio.</p>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <p class="footer-brand">YouTube → NotebookLM Briefing Digest</p>
+    <p>Generated on {{ run_date }} · {{ total_videos }} video{{ 's' if total_videos != 1 else '' }} analyzed</p>
+    <p>Notebook includes Audio Overview — check NotebookLM Studio for playback.</p>
+  </div>
+
+</div>
+</body>
+</html>

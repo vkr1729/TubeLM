@@ -1,0 +1,35 @@
+# AI Orchestration state files (strictly local)
+GEMINI.md
+CLAUDE.md
+implementation_plan.md
+success_criteria.md
+antigravity-init.sh
+
+# Sensitive Environment Configurations
+.env
+.env.bak
+*.env
+
+# Local Pipeline State & Logs
+state.json
+logs/
+summaries/
+scratch/
+*.log
+*.bak
+
+# Virtual Environment & Python Caches
+.venv/
+venv/
+ENV/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# OS/IDE Configurations
+.DS_Store
+.vscode/
+.idea/
