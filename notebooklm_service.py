@@ -61,6 +61,31 @@ Discuss key insights, themes, and takeaways in a conversational tone.\
 """
 
 
+def _get_notebooklm_bin() -> str:
+    exe_dir = os.path.dirname(sys.executable)
+    proj_dir = os.path.dirname(os.path.abspath(__file__))
+    paths_to_check = []
+    if sys.platform == "win32":
+        paths_to_check.extend([
+            os.path.join(exe_dir, "notebooklm.exe"),
+            os.path.join(exe_dir, "notebooklm"),
+            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm.exe"),
+            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm"),
+            os.path.join(proj_dir, ".venv", "Scripts", "notebooklm.exe"),
+            os.path.join(proj_dir, ".venv", "Scripts", "notebooklm")
+        ])
+    else:
+        paths_to_check.extend([
+            os.path.join(exe_dir, "notebooklm"),
+            os.path.join(exe_dir, "_internal", "bin", "notebooklm"),
+            os.path.join(proj_dir, ".venv", "bin", "notebooklm")
+        ])
+    for p in paths_to_check:
+        if os.path.exists(p):
+            return p
+    return "notebooklm"
+
+
 def verify_notebooklm_auth() -> bool:
     """Check whether NotebookLM authentication cookies are valid.
 
@@ -70,8 +95,7 @@ def verify_notebooklm_auth() -> bool:
     This function never raises — all subprocess errors are caught and
     logged so the caller can decide how to handle the failure.
     """
-    bin_dir = os.path.dirname(sys.executable)
-    notebooklm_bin = os.path.join(bin_dir, "notebooklm")
+    notebooklm_bin = _get_notebooklm_bin()
 
     try:
         result = subprocess.run(
@@ -110,8 +134,7 @@ def _refresh_cookies_for_retry() -> bool:
     Called when authentication expires during processing. Uses the same
     mechanism as the pre-run refresh in main.py.
     """
-    bin_dir = os.path.dirname(sys.executable)
-    notebooklm_bin = os.path.join(bin_dir, "notebooklm")
+    notebooklm_bin = _get_notebooklm_bin()
     try:
         result = subprocess.run(
             [notebooklm_bin, "login", "--browser-cookies", "chrome"],

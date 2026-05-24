@@ -621,13 +621,27 @@ WantedBy=timers.target
         return jsonify({"error": str(e)}), 500
 
 def get_notebooklm_bin():
+    exe_dir = os.path.dirname(sys.executable)
+    paths_to_check = []
     if sys.platform == "win32":
-        venv_notebooklm = PROJECT_DIR / ".venv" / "Scripts" / "notebooklm.exe"
-        if not venv_notebooklm.exists():
-            venv_notebooklm = PROJECT_DIR / ".venv" / "Scripts" / "notebooklm"
+        paths_to_check.extend([
+            os.path.join(exe_dir, "notebooklm.exe"),
+            os.path.join(exe_dir, "notebooklm"),
+            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm.exe"),
+            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm"),
+            os.path.join(str(PROJECT_DIR), ".venv", "Scripts", "notebooklm.exe"),
+            os.path.join(str(PROJECT_DIR), ".venv", "Scripts", "notebooklm")
+        ])
     else:
-        venv_notebooklm = PROJECT_DIR / ".venv" / "bin" / "notebooklm"
-    return str(venv_notebooklm) if venv_notebooklm.exists() else "notebooklm"
+        paths_to_check.extend([
+            os.path.join(exe_dir, "notebooklm"),
+            os.path.join(exe_dir, "_internal", "bin", "notebooklm"),
+            os.path.join(str(PROJECT_DIR), ".venv", "bin", "notebooklm")
+        ])
+    for p in paths_to_check:
+        if os.path.exists(p):
+            return p
+    return "notebooklm"
 
 @app.route("/api/auth/status")
 def api_auth_status():

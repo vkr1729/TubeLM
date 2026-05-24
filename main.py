@@ -60,6 +60,31 @@ INTER_CHANNEL_COOLDOWN = 60
 
 # ── Cookie refresh ─────────────────────────────────────────────────────────────
 
+def _get_notebooklm_bin() -> str:
+    exe_dir = os.path.dirname(sys.executable)
+    proj_dir = os.path.dirname(os.path.abspath(__file__))
+    paths_to_check = []
+    if sys.platform == "win32":
+        paths_to_check.extend([
+            os.path.join(exe_dir, "notebooklm.exe"),
+            os.path.join(exe_dir, "notebooklm"),
+            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm.exe"),
+            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm"),
+            os.path.join(proj_dir, ".venv", "Scripts", "notebooklm.exe"),
+            os.path.join(proj_dir, ".venv", "Scripts", "notebooklm")
+        ])
+    else:
+        paths_to_check.extend([
+            os.path.join(exe_dir, "notebooklm"),
+            os.path.join(exe_dir, "_internal", "bin", "notebooklm"),
+            os.path.join(proj_dir, ".venv", "bin", "notebooklm")
+        ])
+    for p in paths_to_check:
+        if os.path.exists(p):
+            return p
+    return "notebooklm"
+
+
 def refresh_cookies() -> bool:
     """Refresh NotebookLM cookies from Chrome before the run.
 
@@ -67,8 +92,7 @@ def refresh_cookies() -> bool:
     Returns True if successful, False otherwise (non-fatal — existing cookies
     may still be valid).
     """
-    bin_dir = os.path.dirname(sys.executable)
-    notebooklm_bin = os.path.join(bin_dir, "notebooklm")
+    notebooklm_bin = _get_notebooklm_bin()
 
     logger.info("Refreshing NotebookLM cookies from Chrome…")
     try:
