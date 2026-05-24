@@ -699,6 +699,12 @@ def main() -> None:
         help="Launch the TubeLM Local Web Dashboard GUI.",
     )
     parser.add_argument(
+        "--port",
+        type=int,
+        default=5000,
+        help="Port to run the GUI server on (default: 5000).",
+    )
+    parser.add_argument(
         "--channels",
         type=str,
         help="Comma-separated list of YouTube Channel IDs to run selectively.",
@@ -718,7 +724,7 @@ def main() -> None:
         # Import and run GUI server
         try:
             from gui import run_gui
-            run_gui()
+            run_gui(port=args.port)
         except Exception as e:
             print(f"Error launching GUI: {e}")
             sys.exit(1)

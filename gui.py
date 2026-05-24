@@ -836,4 +836,8 @@ def run_gui(port=5000):
     app.run(host="127.0.0.1", port=port, debug=False)
 
 if __name__ == "__main__":
-    run_gui()
+    import argparse
+    parser = argparse.ArgumentParser(description="TubeLM GUI Dashboard")
+    parser.add_argument("--port", type=int, default=5000, help="Port to run the GUI server on")
+    args = parser.parse_args()
+    run_gui(port=args.port)
