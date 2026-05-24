@@ -742,17 +742,113 @@ def api_delete_notebook(notebook_id):
 
 @app.route("/api/digests")
 def api_digests():
-    digests = []
+    # 1. Load channels to get name -> safe_name mapping
+    channels = []
+    if CHANNELS_FILE.exists():
+        try:
+            channels = json.loads(CHANNELS_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.error("Error reading channels.json: %s", e)
+
+    # Build safe_name to real_name mapping
+    safe_to_real = {}
+    for ch in channels:
+        name = ch.get("name", "")
+        safe = re.sub(r'[^a-zA-Z0-9_\-]', '_', name)
+        safe_to_real[safe] = name
+
+    artifacts = []
     if SUMMARIES_DIR.exists():
-        for f in SUMMARIES_DIR.glob("*_digest.md"):
-            digests.append({
-                "filename": f.name,
-                "date": f.name.split("_")[0],
-                "size": f.stat().st_size
-            })
-    # Sort descending by date
-    digests.sort(key=lambda x: x["date"], reverse=True)
-    return jsonify(digests)
+        for f in SUMMARIES_DIR.iterdir():
+            if not f.is_file():
+                continue
+            name = f.name
+            
+            # Pattern 1: YYYY-MM-DD_digest.md (Global digest)
+            md_match = re.match(r'^(\d{4}-\d{2}-\d{2})_digest\.md$', name)
+            if md_match:
+                date_str = md_match.group(1)
+                artifacts.append({
+                    "filename": name,
+                    "date": date_str,
+                    "type": "md",
+                    "channel_safe": "global",
+                    "channel_name": "Global Briefings",
+                    "size": f.stat().st_size
+                })
+                continue
+
+            # Pattern 2: YYYY-MM-DD_{safe_name}_digest.html (Cinematic Newsletter)
+            html_match = re.match(r'^(\d{4}-\d{2}-\d{2})_(.+)_digest\.html$', name)
+            if html_match:
+                date_str = html_match.group(1)
+                safe_name = html_match.group(2)
+                real_name = safe_to_real.get(safe_name, safe_name.replace("_", " "))
+                artifacts.append({
+                    "filename": name,
+                    "date": date_str,
+                    "type": "html",
+                    "channel_safe": safe_name,
+                    "channel_name": real_name,
+                    "size": f.stat().st_size
+                })
+                continue
+
+            # Pattern 3: YYYY-MM-DD_{safe_name}_infographic.{png|jpg|jpeg|gif} (Visual Infographic)
+            img_match = re.match(r'^(\d{4}-\d{2}-\d{2})_(.+)_infographic\.(png|jpg|jpeg|gif)$', name, re.IGNORECASE)
+            if img_match:
+                date_str = img_match.group(1)
+                safe_name = img_match.group(2)
+                real_name = safe_to_real.get(safe_name, safe_name.replace("_", " "))
+                artifacts.append({
+                    "filename": name,
+                    "date": date_str,
+                    "type": "png",
+                    "channel_safe": safe_name,
+                    "channel_name": real_name,
+                    "size": f.stat().st_size
+                })
+                continue
+
+            # Pattern 4: YYYY-MM-DD_{safe_name}_podcast.{mp3|wav|ogg} (Audio Overview)
+            audio_match = re.match(r'^(\d{4}-\d{2}-\d{2})_(.+)_podcast\.(mp3|wav|ogg)$', name, re.IGNORECASE)
+            if audio_match:
+                date_str = audio_match.group(1)
+                safe_name = audio_match.group(2)
+                real_name = safe_to_real.get(safe_name, safe_name.replace("_", " "))
+                artifacts.append({
+                    "filename": name,
+                    "date": date_str,
+                    "type": "audio",
+                    "channel_safe": safe_name,
+                    "channel_name": real_name,
+                    "size": f.stat().st_size
+                })
+                continue
+
+            # Pattern 5: YYYY-MM-DD_{safe_name}_podcast.{mp4|webm} (Video briefing)
+            video_match = re.match(r'^(\d{4}-\d{2}-\d{2})_(.+)_podcast\.(mp4|webm)$', name, re.IGNORECASE)
+            if video_match:
+                date_str = video_match.group(1)
+                safe_name = video_match.group(2)
+                real_name = safe_to_real.get(safe_name, safe_name.replace("_", " "))
+                artifacts.append({
+                    "filename": name,
+                    "date": date_str,
+                    "type": "video",
+                    "channel_safe": safe_name,
+                    "channel_name": real_name,
+                    "size": f.stat().st_size
+                })
+                continue
+
+    # Sort descending by date, then type priority (md: 0, html: 1, png: 2, audio: 3, video: 4)
+    type_priority = {"md": 0, "html": 1, "png": 2, "audio": 3, "video": 4}
+    artifacts.sort(key=lambda x: (x["date"], type_priority.get(x["type"], 99)), reverse=True)
+    return jsonify({
+        "channels": channels,
+        "artifacts": artifacts
+    })
 
 @app.route("/api/digests/<filename>")
 def api_get_digest(filename):
