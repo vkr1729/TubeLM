@@ -620,11 +620,18 @@ WantedBy=timers.target
         logger.exception("Failed to setup systemd timer")
         return jsonify({"error": str(e)}), 500
 
+def get_notebooklm_bin():
+    if sys.platform == "win32":
+        venv_notebooklm = PROJECT_DIR / ".venv" / "Scripts" / "notebooklm.exe"
+        if not venv_notebooklm.exists():
+            venv_notebooklm = PROJECT_DIR / ".venv" / "Scripts" / "notebooklm"
+    else:
+        venv_notebooklm = PROJECT_DIR / ".venv" / "bin" / "notebooklm"
+    return str(venv_notebooklm) if venv_notebooklm.exists() else "notebooklm"
+
 @app.route("/api/auth/status")
 def api_auth_status():
-    venv_notebooklm = PROJECT_DIR / ".venv" / "bin" / "notebooklm"
-    notebooklm_bin = str(venv_notebooklm) if venv_notebooklm.exists() else "notebooklm"
-    
+    notebooklm_bin = get_notebooklm_bin()
     try:
         res = subprocess.run(
             [notebooklm_bin, "auth", "check", "--test"],
@@ -639,9 +646,7 @@ def api_auth_status():
 
 @app.route("/api/auth/login", methods=["POST"])
 def api_auth_login():
-    venv_notebooklm = PROJECT_DIR / ".venv" / "bin" / "notebooklm"
-    notebooklm_bin = str(venv_notebooklm) if venv_notebooklm.exists() else "notebooklm"
-    
+    notebooklm_bin = get_notebooklm_bin()
     try:
         res = subprocess.run(
             [notebooklm_bin, "login", "--browser-cookies", "chrome"],
