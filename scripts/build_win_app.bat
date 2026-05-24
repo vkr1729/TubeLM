@@ -9,7 +9,7 @@ cd /d "%~dp0\.."
 
 REM Ensure venv exists
 if not exist .venv (
-    echo Creating Python virtual environment (.venv)...
+    echo Creating Python virtual environment venv...
     python -m venv .venv
 )
 
