@@ -44,7 +44,7 @@ If installed via the `setup.sh` wizard in **GUI Mode** (default), launch the das
 ```bash
 .venv/bin/python main.py --gui
 ```
-This launches a local web server at `http://localhost:5000` and automatically opens a tab in your default browser.
+This launches a local web server at `http://localhost:5000` (which dynamically falls back to the next available port if `5000` is already in use) and automatically opens a tab in your default browser.
 
 ### 2. Dashboard Features
 

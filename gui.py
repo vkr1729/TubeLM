@@ -10,6 +10,7 @@ import sys
 import json
 import re
 import queue
+import socket
 import logging
 import threading
 import subprocess
@@ -791,10 +792,36 @@ def api_stream_logs():
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
+def find_available_port(start_port=5000, max_port=6000):
+    """Dynamically scan for a free local TCP port."""
+    for p in range(start_port, max_port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("127.0.0.1", p))
+                return p
+            except OSError:
+                continue
+    raise RuntimeError(f"Could not find an available port in range {start_port}-{max_port}")
+
 def run_gui(port=5000):
     # Ensure summaries dir exists
     SUMMARIES_DIR.mkdir(exist_ok=True)
     
+    # Check if the requested port is available. If not, dynamically find another one.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(("127.0.0.1", port))
+    except OSError:
+        logger.warning("Port %d is already in use. Searching for an available port...", port)
+        try:
+            port = find_available_port(start_port=port + 1)
+            logger.info("Selected available port: %d", port)
+        except Exception as e:
+            logger.critical("Could not find any available port: %s", e)
+            sys.exit(1)
+            
     # Auto-launch browser
     def open_browser():
         try:

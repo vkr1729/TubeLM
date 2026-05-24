@@ -71,7 +71,7 @@ if [ "$INSTALL_GUI" = true ]; then
     echo -e "\nTo run the TubeLM Web Dashboard GUI, execute:"
     echo -e "    ${CYAN}.venv/bin/python main.py --gui${NC}"
     echo -e "\nThen open your browser and navigate to:"
-    echo -e "    ${CYAN}http://localhost:5000${NC}"
+    echo -e "    ${CYAN}http://localhost:5000${NC} (or the next available port if 5000 is in use)"
 else
     echo -e "\nTo run the TubeLM CLI Pipeline, execute:"
     echo -e "    ${CYAN}.venv/bin/python main.py${NC}"
