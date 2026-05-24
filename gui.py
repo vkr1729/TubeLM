@@ -172,11 +172,25 @@ def get_systemd_status():
         "next_run": "Not Scheduled",
         "service_running": False,
         "service_status": "Unknown",
-        "installed": False
+        "installed": False,
+        "day_of_week": "Sat",
+        "time": "08:00"
     }
     
     timer_path = Path("~/.config/systemd/user/youtube-digest.timer").expanduser()
     service_path = Path("~/.config/systemd/user/youtube-digest.service").expanduser()
+    
+    # Parse existing calendar schedule
+    if timer_path.exists():
+        try:
+            content = timer_path.read_text(encoding="utf-8")
+            match = re.search(r"OnCalendar=(\w+)\s+\*-\*-\*\s+(\d{2}:\d{2})", content)
+            if match:
+                status["day_of_week"] = match.group(1)
+                status["time"] = match.group(2)
+        except Exception:
+            pass
+            
     if not timer_path.exists() and not service_path.exists():
         return status
         
@@ -543,6 +557,66 @@ def api_systemd_toggle():
             return jsonify({"success": True, "timer_active": not status["timer_active"]})
         return jsonify({"error": res.stderr.strip()}), 500
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/systemd/setup", methods=["POST"])
+def api_systemd_setup():
+    timer_dir = Path("~/.config/systemd/user").expanduser()
+    try:
+        timer_dir.mkdir(parents=True, exist_ok=True)
+        
+        service_path = timer_dir / "youtube-digest.service"
+        timer_path = timer_dir / "youtube-digest.timer"
+        
+        script_path = PROJECT_DIR / "scripts" / "run_weekly.sh"
+        
+        # Parse day of week and time from JSON request
+        day = "Sat"
+        time_str = "08:00"
+        if request.is_json:
+            req_data = request.json or {}
+            day = req_data.get("day_of_week", "Sat")
+            time_str = req_data.get("time", "08:00")
+            
+        service_content = f"""[Unit]
+Description=TubeLM Weekly Briefing Sync Service
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={script_path}
+StandardOutput=journal
+StandardError=journal
+"""
+        
+        timer_content = f"""[Unit]
+Description=Run TubeLM Weekly Sync
+
+[Timer]
+OnCalendar={day} *-*-* {time_str}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+        
+        service_path.write_text(service_content, encoding="utf-8")
+        timer_path.write_text(timer_content, encoding="utf-8")
+        
+        # Make script executable
+        try:
+            import os
+            os.chmod(str(script_path), 0o755)
+        except Exception:
+            pass
+            
+        # Reload daemon and enable timer
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, check=True)
+        subprocess.run(["systemctl", "--user", "enable", "--now", "youtube-digest.timer"], capture_output=True, check=True)
+        
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.exception("Failed to setup systemd timer")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/auth/status")

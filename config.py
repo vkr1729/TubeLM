@@ -83,16 +83,17 @@ def load_config() -> Config:
     """Load and validate all configuration from environment variables.
 
     Raises:
-        ConfigurationError: If any required variable is missing.
-        ValueError: If SMTP_PORT is not a valid integer.
+        ConfigurationError: If ports are invalid integers.
     """
-    smtp_port_raw = _get_required("SMTP_PORT")
-    try:
-        smtp_port = int(smtp_port_raw)
-    except ValueError as exc:
-        raise ConfigurationError(
-            f"SMTP_PORT must be an integer, got: {smtp_port_raw!r}"
-        ) from exc
+    smtp_port_raw = _get_optional("SMTP_PORT")
+    smtp_port = 0
+    if smtp_port_raw:
+        try:
+            smtp_port = int(smtp_port_raw)
+        except ValueError as exc:
+            raise ConfigurationError(
+                f"SMTP_PORT must be an integer, got: {smtp_port_raw!r}"
+            ) from exc
 
     retention_limit_raw = _get_optional("NOTEBOOKS_RETENTION_LIMIT", "0")
     try:
@@ -103,13 +104,13 @@ def load_config() -> Config:
         ) from exc
 
     return Config(
-        smtp_server=_get_required("SMTP_SERVER"),
+        smtp_server=_get_optional("SMTP_SERVER"),
         smtp_port=smtp_port,
-        smtp_username=_get_required("SMTP_USERNAME"),
-        smtp_password=_get_required("SMTP_PASSWORD"),
-        sender_email=_get_required("SENDER_EMAIL"),
-        recipient_email=_get_required("RECIPIENT_EMAIL"),
-        youtube_api_key=_get_required("YOUTUBE_API_KEY"),
+        smtp_username=_get_optional("SMTP_USERNAME"),
+        smtp_password=_get_optional("SMTP_PASSWORD"),
+        sender_email=_get_optional("SENDER_EMAIL"),
+        recipient_email=_get_optional("RECIPIENT_EMAIL"),
+        youtube_api_key=_get_optional("YOUTUBE_API_KEY"),
         summary_prompt=_load_prompt_file("Summary_Prompt.md"),
         podcast_prompt=_load_prompt_file("Podcast_Prompt.md"),
         channels_file=Path(_get_optional("CHANNELS_FILE", "channels.json")),

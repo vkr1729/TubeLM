@@ -495,6 +495,11 @@ async def async_main(dry_run: bool, skip_email: bool, channels_filter: str | Non
         sys.exit(1)
 
     # ── Validate SMTP connection ───────────────────────────────────────────
+    has_smtp = all([cfg.smtp_server, cfg.smtp_username, cfg.smtp_password, cfg.sender_email, cfg.recipient_email])
+    if not has_smtp:
+        logger.warning("SMTP configuration is incomplete. Automatically skipping email delivery.")
+        skip_email = True
+
     if not dry_run and not skip_email:
         try:
             from email_service import verify_smtp_connection
@@ -561,12 +566,15 @@ async def async_main(dry_run: bool, skip_email: bool, channels_filter: str | Non
             successful_channel_ids.append(channel_id)
             continue
 
-        # Layer 3: Duration filter via YouTube Data API (always applied)
-        filtered = fetch_durations_and_filter(filtered, cfg.youtube_api_key)
-        if not filtered:
-            logger.info("[%s] All videos filtered by duration — skipping.", name)
-            successful_channel_ids.append(channel_id)
-            continue
+        # Layer 3: Duration filter via YouTube Data API (skipped if API key is not set)
+        if cfg.youtube_api_key:
+            filtered = fetch_durations_and_filter(filtered, cfg.youtube_api_key)
+            if not filtered:
+                logger.info("[%s] All videos filtered by duration — skipping.", name)
+                successful_channel_ids.append(channel_id)
+                continue
+        else:
+            logger.warning("[%s] YouTube API Key is not set. Skipping duration-based Shorts filtering layer.", name)
 
         logger.info("[%s] %d new video(s) to process.", name, len(filtered))
         channel_videos.append((ch, filtered))
@@ -628,13 +636,28 @@ async def async_main(dry_run: bool, skip_email: bool, channels_filter: str | Non
     md_path = write_markdown_digest(results, run_date)
     logger.info("Markdown digest saved to %s", md_path)
 
+    # ── Write per-channel HTML digests locally ──────────────────────────────
+    from email_service import _render_channel_html
+    for ch_result in results:
+        try:
+            safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', ch_result.get("channel_name", "channel"))
+            html_body = _render_channel_html(ch_result, run_date, None)
+            html_path = Path("summaries") / f"{run_date}_{safe_name}_digest.html"
+            html_path.write_text(html_body, encoding="utf-8")
+            logger.info("Local HTML digest saved to %s", html_path)
+        except Exception:
+            logger.exception(
+                "Failed to write local HTML digest for channel %r.",
+                ch_result.get("channel_name", "unknown")
+            )
+
     # ── Update state BEFORE sending email ─────────────────────────────────
     if successful_channel_ids:
         save_state(cfg.state_file, successful_channel_ids)
 
     # ── Send per-channel email digests ─────────────────────────────────────
     if skip_email:
-        logger.info("Email delivery skipped (--skip-email flag).")
+        logger.info("Email delivery skipped (--skip-email flag or missing SMTP credentials).")
     else:
         for ch_result in results:
             try:

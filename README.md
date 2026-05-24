@@ -34,6 +34,41 @@ Delivers a publication-grade, mobile-optimized HTML newsletter optimized for Gma
 
 ---
 
+## 🖥️ Local Web Dashboard (GUI)
+
+TubeLM features a premium, glassmorphic local web dashboard to manage your YouTube automation pipeline directly in your browser. The GUI installation is **enabled by default** and serves as the primary way to interact with the pipeline.
+
+### 1. Launching the Dashboard
+
+If installed via the `setup.sh` wizard in **GUI Mode** (default), launch the dashboard with:
+```bash
+.venv/bin/python main.py --gui
+```
+This launches a local web server at `http://localhost:5000` and automatically opens a tab in your default browser.
+
+### 2. Dashboard Features
+
+* **📊 Dashboard Overview:** Monitor active subscriptions, check local Google Account session cookies, trigger cookie cache refreshes, and inspect timer logs.
+* **📒 NotebookLM Workspaces Manager:**
+  * Displays all notebooks on your Google Account grouped by monitored YouTube channel, sorted by date.
+  * Allows **manual selection and parallel bulk deletion** using checkboxes and the `Delete Selected (N)` button.
+  * Toggles **Select All per Channel** groups or uncategorized groups with modern indeterminate UI support.
+* **🚀 Selective Run & Live Logs Console:**
+  * View lookback date/time timestamps for each YouTube channel individually.
+  * **Edit last run timestamps inline** with a datetime picker or reset them to default lookback windows.
+  * Run the pipeline selectively for specific checked channels (e.g. `Physionic` or `Markets by Zerodha`).
+  * Watch output logs stream line-by-line in real time via Server-Sent Events (SSE).
+* **📺 Monitored Channels:** Add or delete YouTube channels dynamically from the dashboard.
+* **⚙️ Configuration & Secrets Editor:** Save email settings, API credentials, and retention rules (e.g. `NOTEBOOKS_RETENTION_LIMIT` to retain the N latest notebooks per channel and auto-prune older ones) directly to `.env`.
+* **📅 Automation Controller (Weekly Scheduler):**
+  * View whether the background automation timer is enabled or disabled.
+  * **Schedule the weekly run** directly from the GUI by selecting a custom **Day of the Week** and **Time** (e.g., Monday at 14:30).
+  * Update the active systemd timer dynamically at any time with a single click.
+* **📝 Prompts Customizer:** Live-edit research summaries (`Summary_Prompt.md`) and podcast templates (`Podcast_Prompt.md`).
+* **📁 Historical Digests Library:** View and read past generated HTML briefings directly in your browser.
+
+---
+
 ## 🚀 Key Features
 
 *   **📰 Automated RSS Channel Monitoring:** Regularly polls YouTube RSS feeds for new uploads based on custom lookback schedules.
@@ -67,29 +102,7 @@ Most AI-powered YouTube newsletter summaries rely on OpenAI GPT-4 or Anthropic C
 
 ---
 
-## 🗺️ System Flow Architecture
-
-```mermaid
-graph TD
-    A[Start: Saturday Boot / Timer] --> B[Wait for Wi-Fi Connectivity]
-    B --> C[Extract Chrome Session Cookies using rookiepy]
-    C --> D[Fetch YouTube RSS Feeds]
-    D --> E[Filter out Shorts & Hashtag Spams]
-    E --> F[Verify Minimum Length via YouTube API]
-    F --> G[Initialize NotebookLM Client]
-    G --> H[For each channel: Create Notebook & Upload Sources]
-    H --> I[Query Chat for Structured Briefing]
-    I --> J[Generate & Download Infographic PNG]
-    J --> K[Trigger Podcast Audio Overview]
-    K --> L[Format Summaries & Strip Citations]
-    L --> M[Render Premium Dark HTML email_digest]
-    M --> N[SMTP SSL/STARTTLS Email Delivery]
-    N --> O[Write Local Markdown Log & Update state.json]
-```
-
----
-
-## 🛠️ Quick Start
+## 🛠️ Installation & Setup
 
 ### 1. Prerequisites
 
@@ -97,7 +110,7 @@ graph TD
 *   **Python 3.10+** (with virtual environment).
 *   **Google Chrome** (you must be logged in to your Google Account in Chrome, as cookies are extracted dynamically from your local Chrome profile).
 
-### 2. Installation & Quick Setup
+### 2. Interactive Setup Wizard
 
 TubeLM provides an interactive setup script that automatically sets up your virtual environment and installs the required packages.
 
@@ -112,30 +125,13 @@ During installation, you can choose between:
 * **Option 1: GUI Mode (Default & Recommended):** Installs all core dependencies and additional packages for the local Web Dashboard GUI.
 * **Option 2: Core Only Mode:** A lightweight setup that installs only the core pipeline engine, skipping Flask web dependencies.
 
-### 3. Setup Configuration
+### 3. Basic Configuration
 
 1. **Environment Config (`.env`):**
-   Copy the example template and fill in your SMTP credentials, recipient addresses, and YouTube API key:
+   Copy the example template and fill in your details:
    ```bash
    cp .env.example .env
    nano .env
-   ```
-
-   ```ini
-   # SMTP Email Settings
-   SMTP_SERVER=smtp.gmail.com
-   SMTP_PORT=587
-   SMTP_USERNAME=your.email@gmail.com
-   SMTP_PASSWORD=your_app_specific_password
-   SENDER_EMAIL=your.email@gmail.com
-   RECIPIENT_EMAIL=recipient.email@gmail.com
-
-   # YouTube API Key (v3)
-   YOUTUBE_API_KEY=AIzaSyYourAPIKeyHere
-
-   # Local database / config paths
-   CHANNELS_FILE=channels.json
-   STATE_FILE=state.json
    ```
 
 2. **Channel Config (`channels.json`):**
@@ -154,42 +150,30 @@ During installation, you can choose between:
 
 ---
 
-## 🖥️ Local Web Dashboard (GUI)
+## 🔋 Zero-Credential Standalone Local Mode
 
-TubeLM features a premium, glassmorphic local web dashboard to manage your YouTube automation pipeline directly in your browser.
+TubeLM supports a fully offline, **zero-credential local mode**. You do not need to register for Google Cloud APIs or set up custom SMTP servers to use TubeLM. 
 
-The GUI installation is **entirely optional**. You do not need to run the dashboard if you only want to use the pipeline via CLI or background cron timers.
+If `YOUTUBE_API_KEY` is not provided and SMTP configurations are omitted/empty in your `.env` file:
+1. **API Key Bypassed:** TubeLM will skip duration-based video checks (Layer 3) and instead rely on title and tag heuristics to filter out short-form spam.
+2. **SMTP Bypassed:** SMTP authentication checks are skipped entirely and no email is sent.
+3. **Local Digests Saved:** TubeLM executes the full intelligence analysis pipeline and writes the outputs directly to the local directory:
+   - **Markdown Digests:** Written to `summaries/{run_date}_digest.md`.
+   - **Cinematic HTML Digests:** Written to `summaries/{run_date}_{channel_name}_digest.html`.
 
-### 1. Launching the Dashboard
-
-If installed via the `setup.sh` wizard in **GUI Mode** (or by running `pip install -r requirements-gui.txt`), launch the dashboard with:
-```bash
-.venv/bin/python main.py --gui
-```
-This launches a local web server at `http://localhost:5000` and automatically opens a tab in your default browser.
-
-### 2. Dashboard Features
-
-* **📊 Dashboard Overview:** Monitor active subscriptions, check local Google Account session cookies, trigger cookie cache refreshes, and inspect timer logs.
-* **📒 NotebookLM Workspaces Manager:**
-  * Displays all notebooks on your Google Account grouped by monitored YouTube channel, sorted by date.
-  * Allows **manual selection and parallel bulk deletion** using checkboxes and the `Delete Selected (N)` button.
-  * Toggles **Select All per Channel** groups or uncategorized groups with modern indeterminate UI support.
-* **🚀 Selective Run & Live Logs Console:**
-  * View lookback date/time timestamps for each YouTube channel individually.
-  * **Edit last run timestamps inline** with a datetime picker or reset them to default lookback windows.
-  * Run the pipeline selectively for specific checked channels (e.g. `Physionic` or `Markets by Zerodha`).
-  * Watch output logs stream line-by-line in real time via Server-Sent Events (SSE).
-* **📺 Monitored Channels:** Add or delete YouTube channels dynamically from the dashboard.
-* **⚙️ Configuration & Secrets Editor:** Save email settings, API credentials, and retention rules (e.g. `NOTEBOOKS_RETENTION_LIMIT` to retain the N latest notebooks per channel and auto-prune older ones) directly to `.env`.
-* **📝 Prompts Customizer:** Live-edit research summaries (`Summary_Prompt.md`) and podcast templates (`Podcast_Prompt.md`).
-* **📁 Historical Digests Library:** View and read past generated HTML briefings directly in your browser.
+You can view these offline briefs directly in your browser or Markdown reader at any time, allowing you to use TubeLM completely locally and privately out of the box!
 
 ---
 
 ## ⚙️ Background Automation (systemd user timer)
 
-To set up TubeLM as a persistent background daemon that runs automatically every Saturday morning (or immediately when you open your laptop if it was offline during the schedule):
+TubeLM can run as a persistent background daemon that checks for new uploads and processes them on a regular schedule.
+
+### 1. Quick GUI Scheduling (Recommended)
+Launch the **Local Web Dashboard**, go to **Config** (or the main controller card), select your preferred **Day of Week** and **Time**, and click **Setup Scheduler Daemon**. The system will dynamically generate and register the user systemd files for you!
+
+### 2. Manual Config (Alternative)
+To schedule the runs manually:
 
 1. Write a user service file at `~/.config/systemd/user/youtube-digest.service`:
    ```ini
@@ -204,7 +188,7 @@ To set up TubeLM as a persistent background daemon that runs automatically every
    StandardError=journal
    ```
 
-2. Write a user timer file at `~/.config/systemd/user/youtube-digest.timer`:
+2. Write a user timer file at `~/.config/systemd/user/youtube-digest.timer` (adjusting Day of Week and Time under `OnCalendar` as desired):
    ```ini
    [Unit]
    Description=Run TubeLM Weekly Sync
@@ -217,11 +201,59 @@ To set up TubeLM as a persistent background daemon that runs automatically every
    WantedBy=timers.target
    ```
 
-3. Enable the daemon:
+3. Enable and start the timer daemon:
    ```bash
    systemctl --user daemon-reload
    systemctl --user enable --now youtube-digest.timer
    ```
+
+---
+
+## 💻 CLI Usage (Non-GUI Core)
+
+For headless or keyboard-driven workflows, you can run the pipeline directly from the command line:
+
+```bash
+# Run the full pipeline for all channels
+.venv/bin/python main.py
+
+# Run for a specific subset of YouTube channel IDs
+.venv/bin/python main.py --channels "UCj3p_1jOCJXB_L_we-DjLbA,UCZ0zZ_A30TDFn9-K_n-mP2g"
+
+# Run the pipeline but skip email delivery (saves summaries locally)
+.venv/bin/python main.py --skip-email
+
+# Dry-run: discover videos only, skip all AI calls and uploads
+.venv/bin/python main.py --dry-run
+```
+
+---
+
+## 🗺️ System Flow Architecture
+
+```mermaid
+graph TD
+    A[Start: Schedule Trigger / Manual Run] --> B[Wait for Wi-Fi Connectivity]
+    B --> C[Extract Chrome Session Cookies using rookiepy]
+    C --> D[Fetch YouTube RSS Feeds]
+    D --> E[Filter out Shorts & Hashtag Spams]
+    E --> F{YOUTUBE_API_KEY set?}
+    F -- Yes --> G[Verify Video Length via YouTube API]
+    F -- No --> H[Skip Duration Checks Heuristics Only]
+    G --> I[Initialize NotebookLM Client]
+    H --> I
+    I --> J[For each channel: Create Notebook & Upload Sources]
+    J --> K[Query Chat for Structured Briefing]
+    K --> L[Generate & Download Infographic PNG]
+    L --> M[Trigger Podcast Audio Overview]
+    M --> N[Format Summaries & Strip Citations]
+    N --> O[Write Local Markdown & Cinematic HTML digests to /summaries]
+    O --> P{SMTP Settings Configured?}
+    P -- Yes --> Q[SMTP SSL/STARTTLS Email Delivery]
+    P -- No --> R[Skip Email Delivery, Log Warning]
+    Q --> S[Update state.json]
+    R --> S[Update state.json]
+```
 
 ---
 
@@ -241,7 +273,7 @@ Absolutely. The structure and style of the summaries and podcasts are driven by 
 ### Does this cost anything to run?
 No. Unlike standard pipelines that charge you per-token to send transcripts to GPT-4, Google NotebookLM is completely free, meaning you can summarize hours of long-form video content without incurring API fees.
 
-
+---
 
 ## 📄 License
 

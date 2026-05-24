@@ -651,9 +651,35 @@
             <div class="glass-card">
                 <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Automation Controller</h3>
                 <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;" id="systemd-desc">
-                    Toggles background schedules handled by systemd timer.
+                    Configure and toggle the weekly automation background daemon (systemd).
                 </p>
-                <button class="btn" id="btn-toggle-systemd">Toggle Scheduler</button>
+                
+                <div id="scheduler-config-panel" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 12px; max-width: 320px;">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <div style="flex: 1;">
+                            <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Day of Week</label>
+                            <select id="schedule-day" style="width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-primary);">
+                                <option value="Mon">Monday</option>
+                                <option value="Tue">Tuesday</option>
+                                <option value="Wed">Wednesday</option>
+                                <option value="Thu">Thursday</option>
+                                <option value="Fri">Friday</option>
+                                <option value="Sat" selected>Saturday</option>
+                                <option value="Sun">Sunday</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Time</label>
+                            <input type="time" id="schedule-time" value="08:00" style="width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-primary);">
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" id="btn-save-schedule" style="margin-top: 8px; width: 100%;">Update Schedule Calendar</button>
+                </div>
+                
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn" id="btn-toggle-systemd">Toggle Scheduler</button>
+                    <button class="btn" id="btn-setup-systemd" style="display: none; background: var(--accent-blue);">Setup Scheduler Daemon</button>
+                </div>
             </div>
         </div>
 
@@ -964,6 +990,8 @@
                     const sysEl = document.getElementById('stat-systemd');
                     const nextEl = document.getElementById('stat-nextrun');
                     const toggleBtn = document.getElementById('btn-toggle-systemd');
+                    const setupBtn = document.getElementById('btn-setup-systemd');
+                    const saveScheduleBtn = document.getElementById('btn-save-schedule');
                     
                     if (systemd.installed) {
                         sysEl.innerText = systemd.timer_active ? "Enabled" : "Disabled";
@@ -971,13 +999,25 @@
                         nextEl.innerText = "Next scheduled: " + systemd.next_run;
                         toggleBtn.innerText = systemd.timer_active ? "Disable Automation" : "Enable Automation";
                         toggleBtn.style.display = "inline-flex";
+                        if (setupBtn) setupBtn.style.display = "none";
+                        if (saveScheduleBtn) saveScheduleBtn.style.display = "block";
                         document.getElementById('systemd-desc').innerText = "Toggles background schedules handled by systemd timer.";
                     } else {
                         sysEl.innerText = "Uninstalled";
                         sysEl.style.color = "var(--text-muted)";
                         nextEl.innerText = "systemd configuration files missing.";
                         toggleBtn.style.display = "none";
+                        if (setupBtn) setupBtn.style.display = "inline-flex";
+                        if (saveScheduleBtn) saveScheduleBtn.style.display = "none";
                         document.getElementById('systemd-desc').innerText = "Systemd timer service files not found. Setup timer daemon locally to use scheduler.";
+                    }
+                    
+                    // Pre-fill schedule selectors
+                    if (systemd.day_of_week) {
+                        document.getElementById('schedule-day').value = systemd.day_of_week;
+                    }
+                    if (systemd.time) {
+                        document.getElementById('schedule-time').value = systemd.time;
                     }
                     
                     // Update auth badge
@@ -1051,6 +1091,74 @@
                     else alert("Error toggling systemd timer: " + data.error);
                 });
         });
+
+        // Setup systemd scheduler
+        const setupBtn = document.getElementById('btn-setup-systemd');
+        if (setupBtn) {
+            setupBtn.addEventListener('click', () => {
+                setupBtn.innerText = "Installing...";
+                setupBtn.disabled = true;
+                const payload = {
+                    day_of_week: document.getElementById('schedule-day').value,
+                    time: document.getElementById('schedule-time').value
+                };
+                fetch('/api/systemd/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        setupBtn.innerText = "Setup Scheduler Daemon";
+                        setupBtn.disabled = false;
+                        if (data.success) {
+                            alert("Weekly systemd scheduler daemon successfully created, enabled, and started!");
+                            loadStatus();
+                        } else {
+                            alert("Error setting up scheduler daemon: " + data.error);
+                        }
+                    })
+                    .catch(err => {
+                        setupBtn.innerText = "Setup Scheduler Daemon";
+                        setupBtn.disabled = false;
+                        alert("Network error setting up scheduler: " + err.message);
+                    });
+            });
+        }
+
+        // Save/Update systemd scheduler calendar
+        const saveScheduleBtn = document.getElementById('btn-save-schedule');
+        if (saveScheduleBtn) {
+            saveScheduleBtn.addEventListener('click', () => {
+                saveScheduleBtn.innerText = "Updating...";
+                saveScheduleBtn.disabled = true;
+                const payload = {
+                    day_of_week: document.getElementById('schedule-day').value,
+                    time: document.getElementById('schedule-time').value
+                };
+                fetch('/api/systemd/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        saveScheduleBtn.innerText = "Update Schedule Calendar";
+                        saveScheduleBtn.disabled = false;
+                        if (data.success) {
+                            alert("Weekly systemd scheduler calendar successfully updated!");
+                            loadStatus();
+                        } else {
+                            alert("Error updating scheduler calendar: " + data.error);
+                        }
+                    })
+                    .catch(err => {
+                        saveScheduleBtn.innerText = "Update Schedule Calendar";
+                        saveScheduleBtn.disabled = false;
+                        alert("Network error updating schedule: " + err.message);
+                    });
+            });
+        }
 
         // Verify session auth button
         document.getElementById('btn-check-auth').addEventListener('click', () => {
