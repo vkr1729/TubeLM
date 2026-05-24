@@ -42,4 +42,3 @@ echo     %CD%\dist\TubeLM\TubeLM.exe
 echo.
 echo To run your application, simply double-click TubeLM.exe!
 echo.
-pause
