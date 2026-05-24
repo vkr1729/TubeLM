@@ -16,6 +16,35 @@ Designed for busy executives, researchers, developers, and creators who need max
 
 ---
 
+## 🚀 One-Click Desktop Apps (Windows, macOS, & Linux)
+
+For non-technical users who want to run the TubeLM Web Dashboard **without** using the command line, cloning Git, or installing Python manually:
+
+| macOS (Apple Silicon/Intel) | Windows (10/11) | Linux (Ubuntu/Debian) |
+| :---: | :---: | :---: |
+| [![Download macOS](https://img.shields.io/badge/Download-macOS%20App-blue?style=for-the-badge&logo=apple)](https://github.com/vkr1729/TubeLM/releases/latest) | [![Download Windows](https://img.shields.io/badge/Download-Windows%20App-blue?style=for-the-badge&logo=windows)](https://github.com/vkr1729/TubeLM/releases/latest) | [![Download Linux](https://img.shields.io/badge/Download-Debian%20%2F%20Ubuntu-blue?style=for-the-badge&logo=ubuntu)](https://github.com/vkr1729/TubeLM/releases/latest) |
+| **`TubeLM-macOS.zip`** | **`TubeLM-Windows.zip`** | **`tubelm_1.0.0_amd64.deb`** |
+
+### 🍏 macOS Quick Start:
+1. **Download:** Get `TubeLM-macOS.zip` from the [Latest Releases](https://github.com/vkr1729/TubeLM/releases/latest).
+2. **Unzip:** Extract the `.zip` file on your Mac.
+3. **Launch:** Double-click the native **`TubeLM.app`** status bar app! It will silently run in your menu bar (showing a native `📺` icon) and auto-open the dashboard in your default browser.
+
+### 🪟 Windows Quick Start:
+1. **Download:** Get `TubeLM-Windows.zip` from the [Latest Releases](https://github.com/vkr1729/TubeLM/releases/latest).
+2. **Unzip:** Extract the folder to a safe place (e.g., your Desktop).
+3. **Launch:** Double-click the **`TubeLM.exe`** status tray app! It will run in your Windows system taskbar tray (showing a native status icon) and automatically launch the dashboard in your browser.
+
+### 🐧 Ubuntu / Debian Quick Start:
+1. **Download:** Get the `tubelm_1.0.0_amd64.deb` installer from the [Latest Releases](https://github.com/vkr1729/TubeLM/releases/latest).
+2. **Install:** Double-click the `.deb` package to open Ubuntu Software Center and click **Install**, or run:
+   ```bash
+   sudo dpkg -i tubelm_1.0.0_amd64.deb
+   ```
+3. **Launch:** Open your applications menu, search for **TubeLM**, and click the icon to launch!
+
+---
+
 ## 📸 Visual Preview
 
 ### 🖥️ Local Web Dashboard GUI
