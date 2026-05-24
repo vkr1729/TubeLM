@@ -1,7 +1,7 @@
 @echo off
-REM scripts/build_win_app.bat — Compiles and bundles TubeLM into a native Windows Application
+REM scripts/build_win_app.bat - Compiles and bundles TubeLM into a native Windows Application
 echo =========================================================================
-echo                   📺 TubeLM Windows App Bundler Wizard 📺                  
+echo                   TubeLM Windows App Bundler Wizard
 echo =========================================================================
 
 REM Navigate to project root
@@ -35,7 +35,7 @@ pyinstaller ^
 
 echo.
 echo =========================================================================
-echo              🎉 Application Compiled Successfully! 🎉                   
+echo              Application Compiled Successfully!
 echo =========================================================================
 echo You can locate your native Windows App executable here:
 echo     %CD%\dist\TubeLM\TubeLM.exe
