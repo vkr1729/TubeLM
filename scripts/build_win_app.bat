@@ -26,7 +26,7 @@ pyinstaller ^
     --noconsole ^
     --clean ^
     --name="TubeLM" ^
-    --icon="assets\logo.png" ^
+    --icon="assets\logo.ico" ^
     --add-data "templates;templates" ^
     --add-data "assets;assets" ^
     --add-data "Summary_Prompt.md;." ^
