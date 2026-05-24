@@ -103,40 +103,58 @@ def refresh_cookies() -> bool:
 
 # ── State management ───────────────────────────────────────────────────────────
 
-def load_state(state_file: Path) -> datetime:
-    """Return the last-run datetime (UTC, timezone-aware).
+def load_channel_state(state_file: Path, channel_id: str) -> datetime:
+    """Return the last-run datetime for a specific channel (UTC, timezone-aware).
 
-    Falls back to DEFAULT_LOOKBACK_DAYS ago if the file is missing,
-    unreadable, or contains a null/invalid timestamp.
+    Falls back to global last_run_time or DEFAULT_LOOKBACK_DAYS ago if not found.
     """
     default = datetime.now(timezone.utc) - timedelta(days=DEFAULT_LOOKBACK_DAYS)
     try:
+        if not state_file.exists():
+            return default
         text = state_file.read_text(encoding="utf-8")
         data = json.loads(text)
-        ts = data.get("last_run_time")
+        
+        # Check channel-specific timestamp
+        channels_state = data.get("channels", {})
+        ts = channels_state.get(channel_id) if isinstance(channels_state, dict) else None
+        
+        # Fallback to global last_run_time
         if not ts:
-            logger.info("No last_run_time in state.json — using %d-day lookback.", DEFAULT_LOOKBACK_DAYS)
+            ts = data.get("last_run_time")
+            
+        if not ts:
             return default
+            
         dt = datetime.fromisoformat(ts)
         # Ensure timezone-aware
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        logger.info("Loaded last_run_time: %s", dt.isoformat())
         return dt
-    except FileNotFoundError:
-        logger.info("state.json not found — using %d-day lookback.", DEFAULT_LOOKBACK_DAYS)
-        return default
-    except (json.JSONDecodeError, ValueError) as exc:
-        logger.warning("Could not parse state.json (%s) — using %d-day lookback.", exc, DEFAULT_LOOKBACK_DAYS)
+    except Exception as exc:
+        logger.warning("Could not parse state for channel %s (%s) — using %d-day lookback.", channel_id, exc, DEFAULT_LOOKBACK_DAYS)
         return default
 
 
-def save_state(state_file: Path) -> None:
-    """Write the current UTC timestamp to state.json."""
-    now = datetime.now(timezone.utc)
-    data = {"last_run_time": now.isoformat()}
+def save_state(state_file: Path, processed_channels: list[str]) -> None:
+    """Update state.json with the current UTC timestamp for processed channels."""
+    now = datetime.now(timezone.utc).isoformat()
+    data = {}
+    try:
+        if state_file.exists():
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    
+    if "channels" not in data or not isinstance(data["channels"], dict):
+        data["channels"] = {}
+        
+    for ch_id in processed_channels:
+        data["channels"][ch_id] = now
+        
+    data["last_run_time"] = now  # update global last_run_time as well
     state_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    logger.info("state.json updated: %s", now.isoformat())
+    logger.info("state.json updated for channels: %s", ", ".join(processed_channels))
 
 
 # ── Channel list loader ────────────────────────────────────────────────────────
@@ -461,12 +479,13 @@ def write_markdown_digest(channels_data: list[dict], run_date: str) -> Path:
 
 # ── Main orchestration ─────────────────────────────────────────────────────────
 
-async def async_main(dry_run: bool, skip_email: bool) -> None:
+async def async_main(dry_run: bool, skip_email: bool, channels_filter: str | None = None) -> None:
     """Async entry point.
 
     Args:
         dry_run: If True, only discover and print videos — no NotebookLM calls.
         skip_email: If True, skip email delivery after processing.
+        channels_filter: Comma-separated list of channel IDs to run selectively.
     """
     # ── Load configuration ─────────────────────────────────────────────────
     try:
@@ -499,10 +518,19 @@ async def async_main(dry_run: bool, skip_email: bool) -> None:
 
     # ── Load channels and state ────────────────────────────────────────────
     channels = load_channels(cfg.channels_file)
-    since_dt = load_state(cfg.state_file)
+    if channels_filter:
+        selected_ids = {cid.strip() for cid in channels_filter.split(",") if cid.strip()}
+        channels = [ch for ch in channels if ch["channel_id"] in selected_ids]
+        logger.info(
+            "Running selectively for %d channel(s): %s",
+            len(channels),
+            ", ".join(ch["name"] for ch in channels),
+        )
+
     run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    logger.info("Discovering videos published after %s…", since_dt.isoformat())
+    # We will track which channels were successfully checked/processed
+    successful_channel_ids = []
 
     # ── Discover new videos per channel ───────────────────────────────────
     channel_videos: list[tuple[dict, list[dict]]] = []
@@ -510,28 +538,34 @@ async def async_main(dry_run: bool, skip_email: bool) -> None:
     for ch in channels:
         name = ch["name"]
         channel_id = ch["channel_id"]
+        since_dt = load_channel_state(cfg.state_file, channel_id)
 
+        logger.info("[%s] Discovering videos published after %s…", name, since_dt.isoformat())
         raw_videos = fetch_channel_videos(channel_id, since_dt)
         if not raw_videos:
             logger.info("[%s] No new videos found.", name)
+            successful_channel_ids.append(channel_id)
             continue
 
         # Layer 1: Keyword filter (#shorts)
         filtered = filter_shorts(raw_videos)
         if not filtered:
             logger.info("[%s] All %d video(s) were Shorts — skipping.", name, len(raw_videos))
+            successful_channel_ids.append(channel_id)
             continue
 
         # Layer 2: Title heuristic filter (hashtag-heavy)
         filtered = filter_shorts_by_title_heuristics(filtered)
         if not filtered:
             logger.info("[%s] All videos filtered by title heuristic — skipping.", name)
+            successful_channel_ids.append(channel_id)
             continue
 
         # Layer 3: Duration filter via YouTube Data API (always applied)
         filtered = fetch_durations_and_filter(filtered, cfg.youtube_api_key)
         if not filtered:
             logger.info("[%s] All videos filtered by duration — skipping.", name)
+            successful_channel_ids.append(channel_id)
             continue
 
         logger.info("[%s] %d new video(s) to process.", name, len(filtered))
@@ -553,7 +587,8 @@ async def async_main(dry_run: bool, skip_email: bool) -> None:
 
     if not channel_videos:
         logger.info("No channels have new videos. Updating state and exiting.")
-        save_state(cfg.state_file)
+        if successful_channel_ids:
+            save_state(cfg.state_file, successful_channel_ids)
         return
 
     # ── Process each channel sequentially ─────────────────────────────────
@@ -577,13 +612,16 @@ async def async_main(dry_run: bool, skip_email: bool) -> None:
         try:
             result = await process_channel_videos(ch["name"], videos, cfg)
             results.append(result)
+            if not result.get("error"):
+                successful_channel_ids.append(ch["channel_id"])
         except NotebookLimitError:
             quota_exceeded = True
             logger.critical("Notebook quota exceeded — stopping channel processing.")
 
     if not results:
         logger.warning("No channels were successfully processed.")
-        save_state(cfg.state_file)
+        if successful_channel_ids:
+            save_state(cfg.state_file, successful_channel_ids)
         return
 
     # ── Write Markdown digest ──────────────────────────────────────────────
@@ -591,7 +629,8 @@ async def async_main(dry_run: bool, skip_email: bool) -> None:
     logger.info("Markdown digest saved to %s", md_path)
 
     # ── Update state BEFORE sending email ─────────────────────────────────
-    save_state(cfg.state_file)
+    if successful_channel_ids:
+        save_state(cfg.state_file, successful_channel_ids)
 
     # ── Send per-channel email digests ─────────────────────────────────────
     if skip_email:
@@ -631,8 +670,38 @@ def main() -> None:
         action="store_true",
         help="Run full pipeline but skip email delivery.",
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the TubeLM Local Web Dashboard GUI.",
+    )
+    parser.add_argument(
+        "--channels",
+        type=str,
+        help="Comma-separated list of YouTube Channel IDs to run selectively.",
+    )
     args = parser.parse_args()
-    asyncio.run(async_main(dry_run=args.dry_run, skip_email=args.skip_email))
+
+    if args.gui:
+        try:
+            import flask
+        except ImportError:
+            print("Error: TubeLM GUI requires additional dependencies to run.")
+            print("Please install them by running:\n")
+            print("    pip install -r requirements-gui.txt")
+            print()
+            sys.exit(1)
+        
+        # Import and run GUI server
+        try:
+            from gui import run_gui
+            run_gui()
+        except Exception as e:
+            print(f"Error launching GUI: {e}")
+            sys.exit(1)
+        sys.exit(0)
+
+    asyncio.run(async_main(dry_run=args.dry_run, skip_email=args.skip_email, channels_filter=args.channels))
 
 
 if __name__ == "__main__":

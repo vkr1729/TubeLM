@@ -18,9 +18,19 @@ Designed for busy executives, researchers, developers, and creators who need max
 
 ## 📸 Visual Preview
 
-Enjoy a premium, publication-grade executive summary formatted in a **Netflix-inspired Dark Cinematic Theme** optimized for mobile Gmail/iOS:
+### 🖥️ Local Web Dashboard GUI
+Experience a premium, glassmorphic dark-theme control panel to monitor active subscriptions, edit channel timestamps inline, manage Google session cookies, and batch-delete workspaces in parallel:
 
-![TubeLM Premium Dark Briefing Preview](assets/email_mockup.png)
+![TubeLM Local Web Dashboard](assets/gui_dashboard.png)
+
+---
+
+### 📱 Premium Mobile Email Digest (Markets by Zerodha)
+Delivers a publication-grade, mobile-optimized HTML newsletter optimized for Gmail/iOS with cinema-style dark cards, high-yield bullet metrics, and native, high-resolution infographics:
+
+| 1. Header & Infographic | 2. Video Card & Thesis | 3. Hard Data Points |
+| :---: | :---: | :---: |
+| ![Header & Infographic](assets/email_preview_header.jpg) | ![Video Card & Thesis](assets/email_preview_thesis.jpg) | ![Bullet Highlights](assets/email_preview_data.jpg) |
 
 ---
 
@@ -87,19 +97,20 @@ graph TD
 *   **Python 3.10+** (with virtual environment).
 *   **Google Chrome** (you must be logged in to your Google Account in Chrome, as cookies are extracted dynamically from your local Chrome profile).
 
-### 2. Installation
+### 2. Installation & Quick Setup
 
+TubeLM provides an interactive setup script that automatically sets up your virtual environment and installs the required packages.
+
+Clone the repository and run the setup wizard:
 ```bash
 git clone https://github.com/vkr1729/TubeLM.git
 cd TubeLM
-
-# Initialize virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies (includes cookie decryptors and headless browser utilities)
-pip install -r requirements.txt
+./setup.sh
 ```
+
+During installation, you can choose between:
+* **Option 1: GUI Mode (Default & Recommended):** Installs all core dependencies and additional packages for the local Web Dashboard GUI.
+* **Option 2: Core Only Mode:** A lightweight setup that installs only the core pipeline engine, skipping Flask web dependencies.
 
 ### 3. Setup Configuration
 
@@ -140,6 +151,39 @@ pip install -r requirements.txt
      { "name": "Doctor Brad Stanfield", "channel_id": "UCZ0zZ_A30TDFn9-K_n-mP2g" }
    ]
    ```
+
+---
+
+## 🖥️ Local Web Dashboard (GUI)
+
+TubeLM features a premium, glassmorphic local web dashboard to manage your YouTube automation pipeline directly in your browser.
+
+The GUI installation is **entirely optional**. You do not need to run the dashboard if you only want to use the pipeline via CLI or background cron timers.
+
+### 1. Launching the Dashboard
+
+If installed via the `setup.sh` wizard in **GUI Mode** (or by running `pip install -r requirements-gui.txt`), launch the dashboard with:
+```bash
+.venv/bin/python main.py --gui
+```
+This launches a local web server at `http://localhost:5000` and automatically opens a tab in your default browser.
+
+### 2. Dashboard Features
+
+* **📊 Dashboard Overview:** Monitor active subscriptions, check local Google Account session cookies, trigger cookie cache refreshes, and inspect timer logs.
+* **📒 NotebookLM Workspaces Manager:**
+  * Displays all notebooks on your Google Account grouped by monitored YouTube channel, sorted by date.
+  * Allows **manual selection and parallel bulk deletion** using checkboxes and the `Delete Selected (N)` button.
+  * Toggles **Select All per Channel** groups or uncategorized groups with modern indeterminate UI support.
+* **🚀 Selective Run & Live Logs Console:**
+  * View lookback date/time timestamps for each YouTube channel individually.
+  * **Edit last run timestamps inline** with a datetime picker or reset them to default lookback windows.
+  * Run the pipeline selectively for specific checked channels (e.g. `Physionic` or `Markets by Zerodha`).
+  * Watch output logs stream line-by-line in real time via Server-Sent Events (SSE).
+* **📺 Monitored Channels:** Add or delete YouTube channels dynamically from the dashboard.
+* **⚙️ Configuration & Secrets Editor:** Save email settings, API credentials, and retention rules (e.g. `NOTEBOOKS_RETENTION_LIMIT` to retain the N latest notebooks per channel and auto-prune older ones) directly to `.env`.
+* **📝 Prompts Customizer:** Live-edit research summaries (`Summary_Prompt.md`) and podcast templates (`Podcast_Prompt.md`).
+* **📁 Historical Digests Library:** View and read past generated HTML briefings directly in your browser.
 
 ---
 

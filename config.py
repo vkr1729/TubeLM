@@ -68,6 +68,9 @@ class Config:
     channels_file: Path
     state_file: Path
 
+    # Retention configuration
+    notebooks_retention_limit: int
+
     # Derived: use SSL (port 465) or STARTTLS (port 587)
     use_ssl: bool = field(init=False)
 
@@ -91,6 +94,14 @@ def load_config() -> Config:
             f"SMTP_PORT must be an integer, got: {smtp_port_raw!r}"
         ) from exc
 
+    retention_limit_raw = _get_optional("NOTEBOOKS_RETENTION_LIMIT", "0")
+    try:
+        notebooks_retention_limit = int(retention_limit_raw) if retention_limit_raw.strip() else 0
+    except ValueError as exc:
+        raise ConfigurationError(
+            f"NOTEBOOKS_RETENTION_LIMIT must be an integer, got: {retention_limit_raw!r}"
+        ) from exc
+
     return Config(
         smtp_server=_get_required("SMTP_SERVER"),
         smtp_port=smtp_port,
@@ -103,4 +114,5 @@ def load_config() -> Config:
         podcast_prompt=_load_prompt_file("Podcast_Prompt.md"),
         channels_file=Path(_get_optional("CHANNELS_FILE", "channels.json")),
         state_file=Path(_get_optional("STATE_FILE", "state.json")),
+        notebooks_retention_limit=notebooks_retention_limit,
     )

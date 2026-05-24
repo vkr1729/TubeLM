@@ -1,0 +1,1926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TubeLM Dashboard</title>
+    <meta name="color-scheme" content="dark">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg-dark: #0b0b0f;
+            --bg-gradient: radial-gradient(circle at 20% 25%, #161622 0%, #08080c 100%);
+            --sidebar-bg: rgba(14, 14, 20, 0.7);
+            --card-bg: rgba(22, 22, 33, 0.4);
+            --card-bg-hover: rgba(30, 30, 45, 0.6);
+            --border-color: rgba(255, 255, 255, 0.06);
+            --border-focus: rgba(229, 9, 20, 0.4);
+            --accent-red: #e50914;
+            --accent-red-hover: #ff1e27;
+            --accent-blue: #00bcd4;
+            --text-primary: #f5f5f7;
+            --text-secondary: #a0a0ab;
+            --text-muted: #60606a;
+            --sidebar-width: 260px;
+            
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            
+            --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+            --scrollbar-track: rgba(0, 0, 0, 0.2);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-dark);
+            background-image: var(--bg-gradient);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── Custom Scrollbar ── */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--scrollbar-track);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--scrollbar-thumb);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        @supports (scrollbar-color: auto) {
+            * {
+                scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+                scrollbar-width: thin;
+            }
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 24px;
+            height: 100vh;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 36px;
+        }
+
+        .brand-logo {
+            width: 32px;
+            height: 32px;
+            background: var(--accent-red);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 20px;
+            color: white;
+            font-family: 'Outfit', sans-serif;
+            box-shadow: 0 0 20px rgba(229, 9, 20, 0.4);
+        }
+
+        .brand-name {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 20px;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 0%, #a0a0ab 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-menu {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex-grow: 1;
+        }
+
+        .nav-item button {
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: left;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .nav-item button:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.04);
+            transform: translateX(4px);
+        }
+
+        .nav-item.active button {
+            color: white;
+            background: rgba(229, 9, 20, 0.15);
+            border-left: 3px solid var(--accent-red);
+            padding-left: 13px;
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            border-top: 1px solid var(--border-color);
+            padding-top: 20px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-dot.active {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+        .status-dot.inactive {
+            background: var(--danger);
+            box-shadow: 0 0 8px var(--danger);
+        }
+        .status-dot.warning {
+            background: var(--warning);
+            box-shadow: 0 0 8px var(--warning);
+        }
+
+        /* ── Main Content Area ── */
+        .content-area {
+            flex-grow: 1;
+            padding: 40px;
+            overflow-y: auto;
+            height: 100vh;
+            position: relative;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .header {
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 32px;
+            letter-spacing: -0.8px;
+            margin-bottom: 6px;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 15px;
+        }
+
+        /* ── Cards & Grid ── */
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .glass-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .glass-card:hover {
+            background: var(--card-bg-hover);
+            border-color: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .stat-value {
+            font-family: 'Outfit', sans-serif;
+            font-size: 36px;
+            font-weight: 700;
+            margin: 8px 0;
+            color: white;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* ── Forms and Inputs ── */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input[type="text"], input[type="email"], input[type="password"], textarea, select {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: white;
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--accent-red);
+            box-shadow: 0 0 0 3px rgba(229, 9, 20, 0.15);
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: var(--accent-red);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .btn:hover {
+            background: var(--accent-red-hover);
+            box-shadow: 0 0 15px rgba(229, 9, 20, 0.3);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            box-shadow: none;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+        }
+        .btn-danger:hover {
+            background: #d32f2f;
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+        }
+
+        /* ── Tables ── */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 16px;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            color: var(--text-primary);
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        /* ── Terminal Console ── */
+        .console-container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 240px);
+            background: #060608;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+        }
+
+        .console-header {
+            background: #111116;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .console-dot-group {
+            display: flex;
+            gap: 6px;
+        }
+
+        .console-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        .console-dot:nth-child(1) { background: #ef4444; }
+        .console-dot:nth-child(2) { background: #f59e0b; }
+        .console-dot:nth-child(3) { background: #10b981; }
+
+        .console-title {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .console-screen {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #39ff14; /* Matrix Green */
+            background: #050507;
+        }
+
+        .console-screen pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* ── Markdown & Digest Viewer ── */
+        .digest-split {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 24px;
+            height: calc(100vh - 180px);
+        }
+
+        .digest-sidebar {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .digest-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .digest-list-item button {
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: left;
+            font-family: inherit;
+            font-size: 13px;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+
+        .digest-list-item button:hover {
+            color: white;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .digest-list-item.active button {
+            color: white;
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--border-color);
+            font-weight: 500;
+        }
+
+        .digest-viewer {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 32px;
+            overflow-y: auto;
+            line-height: 1.7;
+        }
+
+        .digest-body h1, .digest-body h2, .digest-body h3 {
+            font-family: 'Outfit', sans-serif;
+            color: white;
+            margin-top: 24px;
+            margin-bottom: 12px;
+        }
+
+        .digest-body h1 { font-size: 24px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
+        .digest-body h2 { font-size: 20px; }
+        .digest-body h3 { font-size: 16px; }
+
+        .digest-body p { margin-bottom: 16px; color: var(--text-primary); }
+        .digest-body ul { margin-left: 20px; margin-bottom: 16px; }
+        .digest-body li { margin-bottom: 6px; }
+        .digest-body hr { border: none; border-top: 1px solid var(--border-color); margin: 24px 0; }
+        .digest-body a { color: var(--accent-red); text-decoration: none; }
+        .digest-body a:hover { text-decoration: underline; }
+        .digest-body blockquote {
+            border-left: 4px solid var(--accent-red);
+            background: rgba(255, 255, 255, 0.02);
+            padding: 12px 20px;
+            margin-bottom: 16px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .digest-body img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            margin: 16px 0;
+            display: block;
+        }
+
+        .digest-empty {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 15px;
+            flex-direction: column;
+            gap: 12px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="brand">
+            <img src="/assets/logo_cropped.png" alt="TubeLM Logo" style="width: 34px; height: 34px; object-fit: contain; filter: drop-shadow(0 0 8px rgba(229, 9, 20, 0.4)) drop-shadow(0 0 4px rgba(0, 188, 212, 0.3)); margin-right: 4px;">
+            <div class="brand-name">TubeLM</div>
+        </div>
+        
+        <ul class="nav-menu">
+            <li class="nav-item active" data-tab="dashboard">
+                <button>📊 Dashboard</button>
+            </li>
+            <li class="nav-item" data-tab="channels">
+                <button>📺 Channels</button>
+            </li>
+            <li class="nav-item" data-tab="notebooks">
+                <button>📒 Notebooks</button>
+            </li>
+            <li class="nav-item" data-tab="config">
+                <button>⚙️ Config & Secrets</button>
+            </li>
+            <li class="nav-item" data-tab="prompts">
+                <button>📝 Prompts Editor</button>
+            </li>
+            <li class="nav-item" data-tab="run">
+                <button>🚀 Run & Logs</button>
+            </li>
+            <li class="nav-item" data-tab="digests">
+                <button>📁 Digests Library</button>
+            </li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="status-badge" id="auth-status-badge">
+                <span class="status-dot warning" id="auth-status-dot"></span>
+                <span id="auth-status-text">Checking Auth...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="content-area">
+        
+        <!-- Dashboard Tab -->
+        <div class="tab-content active" id="dashboard">
+            <div class="header">
+                <h1>Overview</h1>
+                <p>Welcome to TubeLM pipeline control desk.</p>
+            </div>
+            
+            <div class="grid-3">
+                <div class="glass-card">
+                    <div class="stat-label">Monitored Channels</div>
+                    <div class="stat-value" id="stat-channels">0</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);"> monitoed via channels.json </div>
+                </div>
+                <div class="glass-card">
+                    <div class="stat-label">Last Sync Execution</div>
+                    <div class="stat-value" id="stat-lastrun" style="font-size: 16px; margin: 20px 0;">Never</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);"> timestamp from state.json </div>
+                </div>
+                <div class="glass-card">
+                    <div class="stat-label">Weekly Automation</div>
+                    <div class="stat-value" id="stat-systemd" style="font-size: 16px; margin: 20px 0;">Checking...</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);" id="stat-nextrun">Next run: Unknown</div>
+                </div>
+            </div>
+
+            <div class="glass-card" style="margin-bottom: 24px;">
+                <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">NotebookLM Auth Credentials</h3>
+                <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                    TubeLM interacts with NotebookLM using Chrome cookies decryption locally.
+                </p>
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn" id="btn-check-auth">Verify Session Auth</button>
+                    <button class="btn btn-secondary" id="btn-login-cookies">Refresh Cookie Cache</button>
+                </div>
+            </div>
+
+            <div class="glass-card" style="margin-bottom: 24px;">
+                <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">NotebookLM Workspaces</h3>
+                <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                    Direct links to the NotebookLM workspaces generated for each channel.
+                </p>
+                <div id="notebook-links-list">
+                    <div style="color: var(--text-muted); font-size: 13px;">Loading workspaces...</div>
+                </div>
+            </div>
+
+            <div class="glass-card">
+                <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Automation Controller</h3>
+                <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;" id="systemd-desc">
+                    Toggles background schedules handled by systemd timer.
+                </p>
+                <button class="btn" id="btn-toggle-systemd">Toggle Scheduler</button>
+            </div>
+        </div>
+
+        <!-- Channels Tab -->
+        <div class="tab-content" id="channels">
+            <div class="header">
+                <h1>Monitor Channels</h1>
+                <p>Add or delete YouTube channels to fetch latest feeds.</p>
+            </div>
+            
+            <div class="glass-card" style="margin-bottom: 32px;">
+                <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Add Channel</h3>
+                <form id="form-add-channel">
+                    <div class="form-group" style="margin-bottom: 24px;">
+                        <label>Auto-Extract from YouTube Channel URL / Handle</label>
+                        <div style="display: flex; gap: 12px;">
+                            <input type="text" id="extract-url" placeholder="e.g. https://www.youtube.com/@Physionic or https://www.youtube.com/channel/UCj3p_1jOCJXB_L_we-DjLbA" style="flex-grow: 1;">
+                            <button type="button" class="btn btn-secondary" id="btn-extract-channel" style="flex-shrink: 0; padding: 12px 20px;">Extract Info</button>
+                        </div>
+                        <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Paste any YouTube channel link and click Extract to auto-populate fields below.</span>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Channel Name</label>
+                            <input type="text" id="add-channel-name" placeholder="e.g. Doctor Alex" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Channel ID</label>
+                            <input type="text" id="add-channel-id" placeholder="e.g. UCj3p_1jOCJXB_L_we-DjLbA" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn">Add Channel</button>
+                </form>
+            </div>
+
+            <div class="glass-card">
+                <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Active Subscription List</h3>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Channel Name</th>
+                                <th>Channel ID</th>
+                                <th>NotebookLM Workspace</th>
+                                <th style="width: 100px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="channels-table-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notebooks Tab -->
+        <div class="tab-content" id="notebooks">
+            <div class="header">
+                <h1>NotebookLM Workspaces</h1>
+                <p>View and manage all active notebooks on your NotebookLM account.</p>
+            </div>
+            
+            <div class="glass-card" style="margin-bottom: 24px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+                <div>
+                    <h3 style="font-family: 'Outfit', sans-serif;">Live Account Listing</h3>
+                    <p style="color: var(--text-secondary); font-size: 14px; margin-top: 4px;">Sync real-time notebooks list from the Google Account.</p>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" id="btn-select-all-notebooks" onclick="selectAllRealNotebooks(true)" style="padding: 12px 16px; font-size: 13px; display: none;">Select All</button>
+                    <button class="btn btn-secondary" id="btn-deselect-all-notebooks" onclick="selectAllRealNotebooks(false)" style="padding: 12px 16px; font-size: 13px; display: none;">Clear Selection</button>
+                    <button class="btn btn-secondary btn-danger" id="btn-delete-selected-notebooks" onclick="deleteSelectedRealNotebooks()" style="display: none; padding: 12px 16px; font-size: 13px;">Delete Selected (0)</button>
+                    <button class="btn" id="btn-refresh-real-notebooks" onclick="loadRealNotebooks(true)">Refresh Real-Time List</button>
+                </div>
+            </div>
+
+            <div id="real-notebooks-container">
+                <div class="glass-card" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                    Click 'Refresh Real-Time List' above to load live notebooks from NotebookLM.
+                </div>
+            </div>
+        </div>
+
+        <!-- Config Tab -->
+        <div class="tab-content" id="config">
+            <div class="header">
+                <h1>Settings & Secrets</h1>
+                <p>Manage email settings and API credentials in your .env file.</p>
+            </div>
+            
+            <div class="glass-card">
+                <form id="form-config">
+                    <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">SMTP Email Configuration</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>SMTP Server</label>
+                            <input type="text" name="SMTP_SERVER" required>
+                        </div>
+                        <div class="form-group">
+                            <label>SMTP Port</label>
+                            <input type="text" name="SMTP_PORT" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>SMTP Username (Sender Account)</label>
+                            <input type="email" name="SMTP_USERNAME" required>
+                        </div>
+                        <div class="form-group">
+                            <label>SMTP Password (App Password)</label>
+                            <input type="password" name="SMTP_PASSWORD" placeholder="Enter new password to update">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Sender Address</label>
+                            <input type="email" name="SENDER_EMAIL" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Recipient Address</label>
+                            <input type="email" name="RECIPIENT_EMAIL" required>
+                        </div>
+                    </div>
+
+                    <h3 style="margin-top: 24px; margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Credentials & File Targets</h3>
+                    <div class="form-group">
+                        <label>YouTube API Key</label>
+                        <input type="password" name="YOUTUBE_API_KEY" required>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Channels Configuration File</label>
+                            <input type="text" name="CHANNELS_FILE">
+                        </div>
+                        <div class="form-group">
+                            <label>State Log Database File</label>
+                            <input type="text" name="STATE_FILE">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Notebooks Retention Limit (per channel)</label>
+                            <input type="number" name="NOTEBOOKS_RETENTION_LIMIT" min="0" placeholder="e.g. 4 (0 or empty for unlimited)">
+                            <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Retains the N latest notebooks per channel and automatically deletes older ones after each run.</span>
+                        </div>
+                        <div class="form-group">
+                            <!-- empty spacer -->
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn" style="margin-top: 16px;">Save Configuration</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Prompts Tab -->
+        <div class="tab-content" id="prompts">
+            <div class="header">
+                <h1>Prompts Editor</h1>
+                <p>Customize system guidelines that shape NotebookLM AI outputs.</p>
+            </div>
+            
+            <div class="glass-card">
+                <form id="form-prompts">
+                    <div class="form-group">
+                        <label>Intelligence Summary Prompt Template</label>
+                        <textarea id="prompt-summary" style="height: 220px;" required></textarea>
+                        <span style="font-size: 11px; color: var(--text-muted);">Must contain `{channel_name}` where appropriate to inject context.</span>
+                    </div>
+                    
+                    <div class="form-group" style="margin-top: 24px;">
+                        <label>Podcast Deep Dive Instructions</label>
+                        <textarea id="prompt-podcast" style="height: 160px;" required></textarea>
+                        <span style="font-size: 11px; color: var(--text-muted);">Must contain `{channel_name}` where appropriate to inject context.</span>
+                    </div>
+
+                    <button type="submit" class="btn" style="margin-top: 16px;">Save System Prompts</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Run & Logs Tab -->
+        <div class="tab-content" id="run">
+            <div class="header">
+                <h1>Run Pipeline</h1>
+                <p>Trigger and observe a real-time manual sync run.</p>
+            </div>
+            
+            <div class="glass-card" style="margin-bottom: 24px;">
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; gap: 8px; text-transform: none; font-size: 14px; cursor: pointer; color: var(--text-primary);">
+                        <input type="checkbox" id="run-dry" style="accent-color: var(--accent-red); width: 16px; height: 16px;">
+                        Dry Run (Discover feeds only, no API requests)
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; text-transform: none; font-size: 14px; cursor: pointer; color: var(--text-primary);">
+                        <input type="checkbox" id="run-skip-email" style="accent-color: var(--accent-red); width: 16px; height: 16px;">
+                        Skip Email Delivery
+                    </label>
+                </div>
+                
+                <div style="margin-bottom: 24px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                        <h4 style="font-family: 'Outfit', sans-serif; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary);">Selective Channel Execution</h4>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="btn btn-secondary" id="btn-select-all-channels" style="padding: 4px 8px; font-size: 11px;">Select All</button>
+                            <button type="button" class="btn btn-secondary" id="btn-deselect-all-channels" style="padding: 4px 8px; font-size: 11px;">Deselect All</button>
+                        </div>
+                    </div>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Select specific channels to run. If none are checked, the pipeline will run for ALL channels.</p>
+                    <div id="run-channels-checklist" style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding: 12px; background: rgba(0,0,0,0.15); border-radius: 6px; border: 1px solid var(--border-color);">
+                        <!-- Populated dynamically -->
+                        <div style="color: var(--text-muted); font-size: 12px; text-align: center;">Loading channels...</div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn" id="btn-trigger-run">Start Sync Pipeline</button>
+                    <button class="btn btn-secondary" id="btn-clear-console">Clear Screen</button>
+                </div>
+            </div>
+
+            <div class="console-container">
+                <div class="console-header">
+                    <div class="console-dot-group">
+                        <div class="console-dot"></div>
+                        <div class="console-dot"></div>
+                        <div class="console-dot"></div>
+                    </div>
+                    <div class="console-title" id="console-title-text">tubelm@localhost:~</div>
+                    <div></div>
+                </div>
+                <div class="console-screen" id="console-screen-area">
+                    <pre id="console-pre">Click 'Start Sync Pipeline' above to run program.</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Digests Tab -->
+        <div class="tab-content" id="digests">
+            <div class="header">
+                <h1>Digests Library</h1>
+                <p>Read historically generated intelligence briefings.</p>
+            </div>
+            
+            <div class="digest-split">
+                <div class="digest-sidebar">
+                    <ul class="digest-list" id="digest-list-element">
+                        <!-- Populated by JS -->
+                    </ul>
+                </div>
+                <div class="digest-viewer" id="digest-viewer-element">
+                    <div class="digest-empty">
+                        <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <span>Select a digest from the list to read</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Script Section -->
+    <script>
+        // ── Navigation tabs ──
+        const navItems = document.querySelectorAll('.nav-item');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        navItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const targetTab = item.getAttribute('data-tab');
+                
+                navItems.forEach(n => n.classList.remove('active'));
+                tabContents.forEach(c => c.classList.remove('active'));
+                
+                item.classList.add('active');
+                document.getElementById(targetTab).classList.add('active');
+
+                // Load contextual data on tab switch
+                if (targetTab === 'dashboard') loadStatus();
+                else if (targetTab === 'channels') loadChannels();
+                else if (targetTab === 'notebooks') loadRealNotebooks();
+                else if (targetTab === 'config') loadConfig();
+                else if (targetTab === 'prompts') loadPrompts();
+                else if (targetTab === 'run') loadRunChannels();
+                else if (targetTab === 'digests') loadDigests();
+            });
+        });
+
+        // ── API Fetch Calls ──
+        
+        // 1. Dashboard Status
+        window.notebooksMap = {};
+
+        function loadStatus() {
+            loadNotebookLinks();
+            
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('stat-channels').innerText = data.channel_count;
+                    
+                    const lastRun = data.last_run;
+                    document.getElementById('stat-lastrun').innerText = lastRun !== "Never" ? formatDate(lastRun) : "Never";
+                    
+                    const systemd = data.systemd;
+                    const sysEl = document.getElementById('stat-systemd');
+                    const nextEl = document.getElementById('stat-nextrun');
+                    const toggleBtn = document.getElementById('btn-toggle-systemd');
+                    
+                    if (systemd.installed) {
+                        sysEl.innerText = systemd.timer_active ? "Enabled" : "Disabled";
+                        sysEl.style.color = systemd.timer_active ? "var(--success)" : "var(--danger)";
+                        nextEl.innerText = "Next scheduled: " + systemd.next_run;
+                        toggleBtn.innerText = systemd.timer_active ? "Disable Automation" : "Enable Automation";
+                        toggleBtn.style.display = "inline-flex";
+                        document.getElementById('systemd-desc').innerText = "Toggles background schedules handled by systemd timer.";
+                    } else {
+                        sysEl.innerText = "Uninstalled";
+                        sysEl.style.color = "var(--text-muted)";
+                        nextEl.innerText = "systemd configuration files missing.";
+                        toggleBtn.style.display = "none";
+                        document.getElementById('systemd-desc').innerText = "Systemd timer service files not found. Setup timer daemon locally to use scheduler.";
+                    }
+                    
+                    // Update auth badge
+                    checkAuthStatus();
+                });
+        }
+
+        function loadNotebookLinks() {
+            fetch('/api/notebooks')
+                .then(r => r.json())
+                .then(notebooks => {
+                    window.notebooksMap = notebooks;
+                    const container = document.getElementById('notebook-links-list');
+                    if (!container) return;
+                    container.innerHTML = '';
+                    
+                    const entries = Object.entries(notebooks);
+                    if (entries.length === 0) {
+                        container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No NotebookLM workspaces detected. Run the sync pipeline first.</div>';
+                        return;
+                    }
+                    
+                    entries.forEach(([name, url]) => {
+                        const div = document.createElement('div');
+                        div.style.display = "flex";
+                        div.style.alignItems = "center";
+                        div.style.justifyContent = "space-between";
+                        div.style.padding = "10px 14px";
+                        div.style.background = "rgba(255,255,255,0.01)";
+                        div.style.border = "1px solid var(--border-color)";
+                        div.style.borderRadius = "8px";
+                        div.style.marginBottom = "8px";
+                        
+                        div.innerHTML = `
+                            <span style="font-weight: 500; font-size: 14px; color: var(--text-primary);">${name}</span>
+                            <a href="${url}" target="_blank" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; color: var(--accent-blue); border-color: rgba(0, 188, 212, 0.3);">Open Workspace</a>
+                        `;
+                        container.appendChild(div);
+                    });
+                });
+        }
+
+        // Check auth status
+        function checkAuthStatus() {
+            const dot = document.getElementById('auth-status-dot');
+            const text = document.getElementById('auth-status-text');
+            
+            fetch('/api/auth/status')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.authenticated) {
+                        dot.className = "status-dot active";
+                        text.innerText = "Session Active";
+                    } else {
+                        dot.className = "status-dot inactive";
+                        text.innerText = "Auth Required";
+                    }
+                })
+                .catch(() => {
+                    dot.className = "status-dot warning";
+                    text.innerText = "Auth Offline";
+                });
+        }
+
+        // Toggle systemd schedule
+        document.getElementById('btn-toggle-systemd').addEventListener('click', () => {
+            fetch('/api/systemd/toggle', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) loadStatus();
+                    else alert("Error toggling systemd timer: " + data.error);
+                });
+        });
+
+        // Verify session auth button
+        document.getElementById('btn-check-auth').addEventListener('click', () => {
+            const btn = document.getElementById('btn-check-auth');
+            btn.innerText = "Verifying...";
+            
+            fetch('/api/auth/status')
+                .then(r => r.json())
+                .then(data => {
+                    btn.innerText = "Verify Session Auth";
+                    alert(data.authenticated ? "NotebookLM Authentication Check Success!" : "Auth failed: " + data.output);
+                    loadStatus();
+                })
+                .catch(e => {
+                    btn.innerText = "Verify Session Auth";
+                    alert("Error: " + e.message);
+                });
+        });
+
+        // Refresh cookie cache button
+        document.getElementById('btn-login-cookies').addEventListener('click', () => {
+            const btn = document.getElementById('btn-login-cookies');
+            btn.innerText = "Refreshing...";
+            
+            fetch('/api/auth/login', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    btn.innerText = "Refresh Cookie Cache";
+                    alert(data.success ? "Successfully updated session credentials from Chrome!" : "Cookie refresh failed: " + data.output);
+                    loadStatus();
+                })
+                .catch(e => {
+                    btn.innerText = "Refresh Cookie Cache";
+                    alert("Error: " + e.message);
+                });
+        });
+
+        // 2. Channels Manager
+        function loadChannels() {
+            fetch('/api/notebooks')
+                .then(r => r.json())
+                .then(notebooks => {
+                    window.notebooksMap = notebooks;
+                    
+                    fetch('/api/channels')
+                        .then(r => r.json())
+                        .then(channels => {
+                            const tbody = document.getElementById('channels-table-body');
+                            tbody.innerHTML = '';
+                            
+                            if (channels.length === 0) {
+                                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No channels configured. Add one below!</td></tr>';
+                                return;
+                            }
+                            
+                            channels.forEach(ch => {
+                                const tr = document.createElement('tr');
+                                const url = window.notebooksMap[ch.name];
+                                const notebookLink = url 
+                                    ? `<a href="${url}" target="_blank" style="color: var(--accent-blue); text-decoration: none; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">📒 Open Notebook</a>`
+                                    : `<span style="color: var(--text-muted); font-size: 13px;">No notebook generated</span>`;
+                                    
+                                tr.innerHTML = `
+                                    <td><strong>${ch.name}</strong></td>
+                                    <td><code style="font-family: 'JetBrains Mono', monospace; font-size: 13px;">${ch.channel_id}</code></td>
+                                    <td>${notebookLink}</td>
+                                    <td><button class="btn btn-secondary btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteChannel('${ch.channel_id}')">Delete</button></td>
+                                `;
+                                tbody.appendChild(tr);
+                            });
+                        });
+                });
+        }
+
+        // Add channel form
+        document.getElementById('btn-extract-channel').addEventListener('click', () => {
+            const url = document.getElementById('extract-url').value.trim();
+            if (!url) {
+                alert("Please enter a YouTube Channel URL first.");
+                return;
+            }
+            const btn = document.getElementById('btn-extract-channel');
+            btn.innerText = "Extracting...";
+            btn.disabled = true;
+
+            fetch('/api/channels/extract', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            })
+            .then(r => r.json())
+            .then(data => {
+                btn.innerText = "Extract Info";
+                btn.disabled = false;
+                if (data.error) {
+                    alert("Extraction failed: " + data.error);
+                } else {
+                    document.getElementById('add-channel-name').value = data.name;
+                    document.getElementById('add-channel-id').value = data.channel_id;
+                    document.getElementById('extract-url').value = '';
+                }
+            })
+            .catch(err => {
+                btn.innerText = "Extract Info";
+                btn.disabled = false;
+                alert("Error extracting channel: " + err.message);
+            });
+        });
+
+        document.getElementById('form-add-channel').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const name = document.getElementById('add-channel-name').value;
+            const channel_id = document.getElementById('add-channel-id').value;
+            
+            fetch('/api/channels', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, channel_id })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) alert(data.error);
+                else {
+                    document.getElementById('add-channel-name').value = '';
+                    document.getElementById('add-channel-id').value = '';
+                    loadChannels();
+                }
+            });
+        });
+
+        // Delete channel helper
+        window.deleteChannel = function(channelId) {
+            if (!confirm("Are you sure you want to delete this channel?")) return;
+            
+            fetch(`/api/channels/${channelId}`, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) alert(data.error);
+                    else loadChannels();
+                });
+        };
+
+        // 3. Configuration Tab
+        function loadConfig() {
+            fetch('/api/config')
+                .then(r => r.json())
+                .then(config => {
+                    const form = document.getElementById('form-config');
+                    for (const [key, value] of Object.entries(config)) {
+                        const input = form.querySelector(`[name="${key}"]`);
+                        if (input) {
+                            if (key === 'SMTP_PASSWORD' && value === '********') {
+                                input.placeholder = 'Password stored. Enter to overwrite.';
+                                input.value = '';
+                            } else {
+                                input.value = value;
+                            }
+                        }
+                    }
+                });
+        }
+
+        document.getElementById('form-config').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const form = document.getElementById('form-config');
+            const data = {};
+            
+            const inputs = form.querySelectorAll('input');
+            inputs.forEach(input => {
+                const key = input.name;
+                const val = input.value.trim();
+                
+                // Do not update password if left blank
+                if (key === 'SMTP_PASSWORD' && val === '') return;
+                
+                data[key] = val;
+            });
+            
+            fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.success) alert("Configuration saved successfully!");
+                else alert("Error saving config: " + res.error);
+                loadConfig();
+            });
+        });
+
+        // 4. Prompts Tab
+        function loadPrompts() {
+            fetch('/api/prompts')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('prompt-summary').value = data.summary_prompt;
+                    document.getElementById('prompt-podcast').value = data.podcast_prompt;
+                });
+        }
+
+        document.getElementById('form-prompts').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const summary_prompt = document.getElementById('prompt-summary').value;
+            const podcast_prompt = document.getElementById('prompt-podcast').value;
+            
+            fetch('/api/prompts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ summary_prompt, podcast_prompt })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.success) alert("System prompts saved successfully!");
+                else alert("Error saving prompts: " + res.error);
+                loadPrompts();
+            });
+        });
+
+        // 5. Run sync tab & SSE logs
+        let logEventSource = null;
+
+        document.getElementById('btn-trigger-run').addEventListener('click', () => {
+            const btn = document.getElementById('btn-trigger-run');
+            const dry_run = document.getElementById('run-dry').checked;
+            const skip_email = document.getElementById('run-skip-email').checked;
+            
+            btn.disabled = true;
+            btn.innerText = "Running Pipeline...";
+            
+            const consolePre = document.getElementById('console-pre');
+            consolePre.textContent = "Connecting pipeline runner process...\n";
+            document.getElementById('console-title-text').innerText = "tubelm@localhost:~/main.py";
+
+            // Get selected channels for selective run
+            const checkedBoxes = document.querySelectorAll('.run-channel-checkbox:checked');
+            const selectedChannels = Array.from(checkedBoxes).map(box => box.value);
+
+            fetch('/api/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dry_run, skip_email, channels: selectedChannels })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    consolePre.textContent += `Error triggering run: ${data.error}\n`;
+                    btn.disabled = false;
+                    btn.innerText = "Start Sync Pipeline";
+                    document.getElementById('console-title-text').innerText = "tubelm@localhost:~";
+                    return;
+                }
+                
+                // Establish SSE listener
+                if (logEventSource) logEventSource.close();
+                
+                logEventSource = new EventSource('/api/run/stream');
+                
+                logEventSource.onmessage = (event) => {
+                    const line = event.data;
+                    consolePre.textContent += line + "\n";
+                    
+                    // Auto-scroll to bottom of console screen
+                    const screen = document.getElementById('console-screen-area');
+                    screen.scrollTop = screen.scrollHeight;
+                    
+                    // Check for end signal
+                    if (line.includes("--- Pipeline finished")) {
+                        logEventSource.close();
+                        btn.disabled = false;
+                        btn.innerText = "Start Sync Pipeline";
+                        document.getElementById('console-title-text').innerText = "tubelm@localhost:~";
+                    }
+                };
+                
+                logEventSource.onerror = () => {
+                    consolePre.textContent += "\n[Connection closed or timeout]\n";
+                    logEventSource.close();
+                    btn.disabled = false;
+                    btn.innerText = "Start Sync Pipeline";
+                    document.getElementById('console-title-text').innerText = "tubelm@localhost:~";
+                };
+            })
+            .catch(err => {
+                consolePre.textContent += `Network error triggering runner: ${err.message}\n`;
+                btn.disabled = false;
+                btn.innerText = "Start Sync Pipeline";
+                document.getElementById('console-title-text').innerText = "tubelm@localhost:~";
+            });
+        });
+
+        document.getElementById('btn-clear-console').addEventListener('click', () => {
+            document.getElementById('console-pre').textContent = '';
+        });
+
+        // 6. Digests Tab
+        function loadDigests() {
+            fetch('/api/digests')
+                .then(r => r.json())
+                .then(digests => {
+                    const listEl = document.getElementById('digest-list-element');
+                    listEl.innerHTML = '';
+                    
+                    if (digests.length === 0) {
+                        listEl.innerHTML = '<li style="color: var(--text-muted); font-size: 13px; text-align: center; margin-top: 20px;">No digests found.</li>';
+                        return;
+                    }
+                    
+                    digests.forEach(dg => {
+                        const li = document.createElement('li');
+                        li.className = "digest-list-item";
+                        li.innerHTML = `<button onclick="viewDigest('${dg.filename}', this)">📄 digest_${dg.date}.md</button>`;
+                        listEl.appendChild(li);
+                    });
+                });
+        }
+
+        window.viewDigest = function(filename, btnElement) {
+            // Manage active styles in sidebar
+            const items = document.querySelectorAll('.digest-list-item');
+            items.forEach(i => i.classList.remove('active'));
+            btnElement.parentElement.classList.add('active');
+            
+            const viewer = document.getElementById('digest-viewer-element');
+            viewer.innerHTML = '<div style="color: var(--text-secondary);">Loading digest...</div>';
+            
+            fetch(`/api/digests/${filename}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        viewer.innerHTML = `<div style="color: var(--danger);">Error: ${data.error}</div>`;
+                        return;
+                    }
+                    
+                    // Simple Markdown to HTML Parser
+                    const html = parseMarkdown(data.content);
+                    viewer.innerHTML = `<div class="digest-body">${html}</div>`;
+                })
+                .catch(err => {
+                    viewer.innerHTML = `<div style="color: var(--danger);">Error: ${err.message}</div>`;
+                });
+        };
+
+        // Simple custom Markdown rendering parser
+        function parseMarkdown(md) {
+            let html = md;
+            
+            // Headings
+            html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+            html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+            html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+            
+            // Image parsing (replace relative summaries/ paths with static /summaries/)
+            html = html.replace(/!\[(.*?)\]\((.*?)\)/gim, (match, alt, src) => {
+                let resolvedSrc = src;
+                if (src.startsWith('summaries/')) {
+                    resolvedSrc = '/' + src;
+                }
+                return `<img src="${resolvedSrc}" alt="${alt}">`;
+            });
+            
+            // Link parsing
+            html = html.replace(/\[(.*?)\]\((.*?)\)/gim, '<a href="$2" target="_blank">$1</a>');
+            
+            // Bold
+            html = html.replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>');
+            
+            // Horizontal rule
+            html = html.replace(/^---$/gim, '<hr>');
+            
+            // Blockquotes
+            html = html.replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>');
+            
+            // Linebreaks and paragraphs
+            const lines = html.split('\n');
+            let processedLines = [];
+            let inList = false;
+            
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i].trim();
+                
+                if (line.startsWith('- ')) {
+                    if (!inList) {
+                        processedLines.push('<ul>');
+                        inList = true;
+                    }
+                    processedLines.push(`<li>${line.substring(2)}</li>`);
+                } else {
+                    if (inList) {
+                        processedLines.push('</ul>');
+                        inList = false;
+                    }
+                    if (line && !line.startsWith('<h') && !line.startsWith('<hr') && !line.startsWith('<ul') && !line.startsWith('</ul') && !line.startsWith('<li') && !line.startsWith('<blockquote') && !line.startsWith('<img')) {
+                        processedLines.push(`<p>${line}</p>`);
+                    } else {
+                        processedLines.push(lines[i]);
+                    }
+                }
+            }
+            if (inList) processedLines.push('</ul>');
+            
+            return processedLines.join('\n');
+        }
+
+        // ── Real Notebooks Manager ──
+        function loadRealNotebooks(force = false) {
+            const container = document.getElementById('real-notebooks-container');
+            if (!force && container.getAttribute('data-loaded') === 'true') {
+                return;
+            }
+            
+            container.innerHTML = `
+                <div class="glass-card" style="text-align: center; padding: 40px;">
+                    <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">Contacting NotebookLM account...</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">This may take a few seconds as we list all active notebooks.</div>
+                </div>
+            `;
+            
+            // Hide bulk action buttons on load
+            const selectAllBtn = document.getElementById('btn-select-all-notebooks');
+            const deselectAllBtn = document.getElementById('btn-deselect-all-notebooks');
+            const deleteBtn = document.getElementById('btn-delete-selected-notebooks');
+            if (selectAllBtn) selectAllBtn.style.display = 'none';
+            if (deselectAllBtn) deselectAllBtn.style.display = 'none';
+            if (deleteBtn) deleteBtn.style.display = 'none';
+            
+            fetch('/api/channels')
+                .then(r => r.json())
+                .then(channels => {
+                    fetch('/api/notebooks/real')
+                        .then(r => r.json())
+                        .then(res => {
+                            if (!res.success) {
+                                container.innerHTML = `
+                                    <div class="glass-card" style="border-color: var(--danger); background: rgba(239, 68, 68, 0.05); padding: 20px;">
+                                        <h4 style="color: var(--danger); margin-bottom: 8px;">Error Fetching Notebooks</h4>
+                                        <p style="font-size: 13px; color: var(--text-secondary);">${res.error || "Unknown error"}</p>
+                                    </div>
+                                `;
+                                return;
+                            }
+                            
+                            container.setAttribute('data-loaded', 'true');
+                            const notebooks = res.notebooks;
+                            container.innerHTML = '';
+                            
+                            // Show/hide bulk selection buttons
+                            if (notebooks.length > 0) {
+                                if (selectAllBtn) selectAllBtn.style.display = 'inline-flex';
+                                if (deselectAllBtn) deselectAllBtn.style.display = 'inline-flex';
+                            }
+                            
+                            // Group notebooks by channel
+                            const grouped = {};
+                            channels.forEach(ch => {
+                                grouped[ch.name] = [];
+                            });
+                            const uncategorized = [];
+                            
+                            notebooks.forEach(nb => {
+                                let matched = false;
+                                for (const ch of channels) {
+                                    if (nb.title.startsWith(`${ch.name} Digest — `)) {
+                                        grouped[ch.name].push(nb);
+                                        matched = true;
+                                        break;
+                                    }
+                                }
+                                if (!matched) {
+                                    uncategorized.push(nb);
+                                }
+                            });
+                            
+                            // Render grouped notebooks
+                            channels.forEach(ch => {
+                                const list = grouped[ch.name];
+                                const card = document.createElement('div');
+                                card.className = 'glass-card';
+                                card.style.marginBottom = '20px';
+                                
+                                let nbsHTML = '';
+                                if (list.length === 0) {
+                                    nbsHTML = `<div style="color: var(--text-muted); font-size: 13px; padding: 10px 0;">No notebooks found for this channel.</div>`;
+                                } else {
+                                    list.forEach(nb => {
+                                        const dateStr = nb.created_at ? formatDate(nb.created_at) : "Unknown Date";
+                                        nbsHTML += `
+                                            <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.03); gap: 16px; flex-wrap: wrap;">
+                                                <div style="display: flex; align-items: center; gap: 12px;">
+                                                    <input type="checkbox" class="notebook-select-checkbox" data-channel="${ch.name.replace(/"/g, '&quot;')}" value="${nb.id}" onchange="updateSelectedNotebooksCount()" style="accent-color: var(--accent-red); width: 16px; height: 16px; cursor: pointer;">
+                                                    <div>
+                                                        <div style="font-weight: 500; font-size: 14px; color: var(--text-primary);">${nb.title}</div>
+                                                        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">Created: ${dateStr} · Sources: ${nb.sources_count}</div>
+                                                    </div>
+                                                </div>
+                                                <div style="display: flex; gap: 8px;">
+                                                    <a href="${nb.url}" target="_blank" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; color: var(--accent-blue); border-color: rgba(0, 188, 212, 0.3);">Open</a>
+                                                    <button class="btn btn-secondary btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteRealNotebook('${nb.id}', '${nb.title.replace(/'/g, "\\'")}')">Delete</button>
+                                                </div>
+                                            </div>
+                                        `;
+                                    });
+                                }
+                                
+                                card.innerHTML = `
+                                    <h3 style="margin-bottom: 12px; font-family: 'Outfit', sans-serif; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                        <span style="display: inline-flex; align-items: center; gap: 8px;">
+                                            ${list.length > 0 ? `<input type="checkbox" class="channel-group-checkbox" data-channel-group="${ch.name.replace(/"/g, '&quot;')}" onchange="toggleGroupNotebooks('${ch.name.replace(/'/g, "\\'")}', this.checked)" style="accent-color: var(--accent-red); width: 16px; height: 16px; cursor: pointer;">` : ''}
+                                            <span>📺 ${ch.name}</span>
+                                        </span>
+                                        <span class="status-badge" style="font-size: 10px; padding: 2px 6px;">${list.length} Notebook(s)</span>
+                                    </h3>
+                                    <div>${nbsHTML}</div>
+                                `;
+                                container.appendChild(card);
+                            });
+                            
+                            // Render uncategorized notebooks
+                            if (uncategorized.length > 0) {
+                                const card = document.createElement('div');
+                                card.className = 'glass-card';
+                                card.style.marginBottom = '20px';
+                                card.style.borderLeft = '3px solid var(--warning)';
+                                
+                                let nbsHTML = '';
+                                uncategorized.forEach(nb => {
+                                    const dateStr = nb.created_at ? formatDate(nb.created_at) : "Unknown Date";
+                                    nbsHTML += `
+                                        <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.03); gap: 16px; flex-wrap: wrap;">
+                                            <div style="display: flex; align-items: center; gap: 12px;">
+                                                <input type="checkbox" class="notebook-select-checkbox" data-channel="uncategorized" value="${nb.id}" onchange="updateSelectedNotebooksCount()" style="accent-color: var(--accent-red); width: 16px; height: 16px; cursor: pointer;">
+                                                <div>
+                                                    <div style="font-weight: 500; font-size: 14px; color: var(--text-primary);">${nb.title}</div>
+                                                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">Created: ${dateStr} · Sources: ${nb.sources_count}</div>
+                                                </div>
+                                            </div>
+                                            <div style="display: flex; gap: 8px;">
+                                                <a href="${nb.url}" target="_blank" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; color: var(--accent-blue); border-color: rgba(0, 188, 212, 0.3);">Open</a>
+                                                <button class="btn btn-secondary btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteRealNotebook('${nb.id}', '${nb.title.replace(/'/g, "\\'")}')">Delete</button>
+                                            </div>
+                                        </div>
+                                    `;
+                                    });
+                                
+                                card.innerHTML = `
+                                    <h3 style="margin-bottom: 12px; font-family: 'Outfit', sans-serif; color: var(--warning); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                        <span style="display: inline-flex; align-items: center; gap: 8px;">
+                                            <input type="checkbox" class="channel-group-checkbox" data-channel-group="uncategorized" onchange="toggleGroupNotebooks('uncategorized', this.checked)" style="accent-color: var(--accent-red); width: 16px; height: 16px; cursor: pointer;">
+                                            <span>📂 Uncategorized / Other Notebooks</span>
+                                        </span>
+                                        <span class="status-badge" style="font-size: 10px; padding: 2px 6px; background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.2); color: var(--warning);">${uncategorized.length} Notebook(s)</span>
+                                    </h3>
+                                    <div>${nbsHTML}</div>
+                                `;
+                                container.appendChild(card);
+                            }
+                        })
+                        .catch(err => {
+                            container.innerHTML = `<div class="glass-card" style="border-color: var(--danger); padding: 20px; color: var(--danger);">Network error listing notebooks: ${err.message}</div>`;
+                        });
+                });
+        }
+        
+        window.deleteRealNotebook = function(notebookId, title) {
+            if (!confirm(`Are you sure you want to delete the notebook "${title}"? This cannot be undone.`)) return;
+            
+            const container = document.getElementById('real-notebooks-container');
+            container.innerHTML = `
+                <div class="glass-card" style="text-align: center; padding: 40px;">
+                    <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">Deleting notebook "${title}"...</div>
+                </div>
+            `;
+            
+            fetch(`/api/notebooks/real/${notebookId}`, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.success) {
+                        alert("Notebook deleted successfully.");
+                        loadRealNotebooks(true);
+                    } else {
+                        alert("Error deleting notebook: " + res.error);
+                        loadRealNotebooks(true);
+                    }
+                })
+                .catch(err => {
+                    alert("Network error deleting notebook: " + err.message);
+                    loadRealNotebooks(true);
+                });
+        };
+
+        window.updateSelectedNotebooksCount = function() {
+            const checkedBoxes = document.querySelectorAll('.notebook-select-checkbox:checked');
+            const count = checkedBoxes.length;
+            
+            const deleteBtn = document.getElementById('btn-delete-selected-notebooks');
+            if (deleteBtn) {
+                if (count > 0) {
+                    deleteBtn.innerText = `Delete Selected (${count})`;
+                    deleteBtn.style.display = 'inline-flex';
+                } else {
+                    deleteBtn.style.display = 'none';
+                }
+            }
+            
+            // Sync group checkboxes status
+            syncGroupCheckboxes();
+        };
+
+        window.selectAllRealNotebooks = function(shouldCheck) {
+            const boxes = document.querySelectorAll('.notebook-select-checkbox');
+            boxes.forEach(box => box.checked = shouldCheck);
+            
+            const groupBoxes = document.querySelectorAll('.channel-group-checkbox');
+            groupBoxes.forEach(box => {
+                box.checked = shouldCheck;
+                box.indeterminate = false;
+            });
+            
+            updateSelectedNotebooksCount();
+        };
+
+        window.toggleGroupNotebooks = function(channelName, isChecked) {
+            const selector = `.notebook-select-checkbox[data-channel="${channelName.replace(/"/g, '\\"')}"]`;
+            const boxes = document.querySelectorAll(selector);
+            boxes.forEach(box => {
+                box.checked = isChecked;
+            });
+            updateSelectedNotebooksCount();
+        };
+
+        function syncGroupCheckboxes() {
+            const groupBoxes = document.querySelectorAll('.channel-group-checkbox');
+            groupBoxes.forEach(gBox => {
+                const groupName = gBox.getAttribute('data-channel-group');
+                const selector = `.notebook-select-checkbox[data-channel="${groupName.replace(/"/g, '\\"')}"]`;
+                const notebooksInGroup = document.querySelectorAll(selector);
+                const checkedInGroup = document.querySelectorAll(`${selector}:checked`);
+                
+                if (notebooksInGroup.length > 0 && notebooksInGroup.length === checkedInGroup.length) {
+                    gBox.checked = true;
+                    gBox.indeterminate = false;
+                } else if (checkedInGroup.length > 0) {
+                    gBox.checked = false;
+                    gBox.indeterminate = true;
+                } else {
+                    gBox.checked = false;
+                    gBox.indeterminate = false;
+                }
+            });
+        }
+
+        window.deleteSelectedRealNotebooks = function() {
+            const checkedBoxes = document.querySelectorAll('.notebook-select-checkbox:checked');
+            const count = checkedBoxes.length;
+            if (count === 0) return;
+            
+            if (!confirm(`Are you sure you want to delete all ${count} selected notebooks? This action cannot be undone.`)) {
+                return;
+            }
+            
+            const container = document.getElementById('real-notebooks-container');
+            container.innerHTML = `
+                <div class="glass-card" style="text-align: center; padding: 40px;">
+                    <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">Deleting ${count} notebooks...</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Please wait while deletions are processed in parallel.</div>
+                </div>
+            `;
+            
+            // Hide the bulk action buttons during deletion
+            document.getElementById('btn-delete-selected-notebooks').style.display = 'none';
+            document.getElementById('btn-select-all-notebooks').style.display = 'none';
+            document.getElementById('btn-deselect-all-notebooks').style.display = 'none';
+            
+            const promises = Array.from(checkedBoxes).map(box => {
+                const notebookId = box.value;
+                return fetch(`/api/notebooks/real/${notebookId}`, { method: 'DELETE' })
+                    .then(r => r.json())
+                    .catch(err => ({ success: false, error: err.message }));
+            });
+            
+            Promise.all(promises)
+                .then(results => {
+                    const successCount = results.filter(r => r.success).length;
+                    const failCount = results.length - successCount;
+                    
+                    if (failCount > 0) {
+                        alert(`Deletions completed with mixed results:\n- Successfully deleted: ${successCount}\n- Failed: ${failCount}`);
+                    } else {
+                        alert(`Successfully deleted all ${successCount} notebooks.`);
+                    }
+                    loadRealNotebooks(true);
+                })
+                .catch(err => {
+                    alert("Unexpected error during batch deletion: " + err.message);
+                    loadRealNotebooks(true);
+                });
+        };
+
+        // ── Selective Run Checklist ──
+        function loadRunChannels() {
+            Promise.all([
+                fetch('/api/channels').then(r => r.json()),
+                fetch('/api/state').then(r => r.json())
+            ])
+            .then(([channels, state]) => {
+                const checklist = document.getElementById('run-channels-checklist');
+                if (!checklist) return;
+                checklist.innerHTML = '';
+                
+                if (channels.length === 0) {
+                    checklist.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; text-align: center; width: 100%; padding: 20px;">No channels found. Add channels in the Monitored Channels tab.</div>';
+                    return;
+                }
+                
+                channels.forEach(ch => {
+                    const row = document.createElement('div');
+                    row.style.display = 'flex';
+                    row.style.alignItems = 'center';
+                    row.style.justifyContent = 'space-between';
+                    row.style.padding = '8px 12px';
+                    row.style.background = 'rgba(255,255,255,0.02)';
+                    row.style.borderRadius = '6px';
+                    row.style.border = '1px solid rgba(255,255,255,0.05)';
+                    row.style.gap = '12px';
+                    row.style.flexWrap = 'wrap';
+                    
+                    const chTime = state.channels ? state.channels[ch.channel_id] : null;
+                    let displayTime = "";
+                    let rawTime = "";
+                    
+                    if (chTime) {
+                        displayTime = `Last Run: ${formatDate(chTime)} (Custom)`;
+                        rawTime = chTime;
+                    } else if (state.last_run_time) {
+                        displayTime = `Last Run: ${formatDate(state.last_run_time)} (Global)`;
+                        rawTime = state.last_run_time;
+                    } else {
+                        displayTime = "Last Run: Default (14d lookback)";
+                        rawTime = "";
+                    }
+                    
+                    row.innerHTML = `
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary); cursor: pointer; padding: 4px; margin: 0; text-transform: none;">
+                            <input type="checkbox" class="run-channel-checkbox" value="${ch.channel_id}" style="accent-color: var(--accent-red); width: 14px; height: 14px;">
+                            <span style="font-weight: 500;">${ch.name}</span>
+                        </label>
+                        <div class="channel-timestamp-container" id="ts-container-${ch.channel_id}" style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+                            <span class="ts-display" style="color: var(--text-secondary);">${displayTime}</span>
+                            <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; margin: 0;" onclick="editChannelTimestamp('${ch.channel_id}', '${rawTime}')">Edit</button>
+                        </div>
+                    `;
+                    checklist.appendChild(row);
+                });
+            })
+            .catch(err => {
+                const checklist = document.getElementById('run-channels-checklist');
+                if (checklist) {
+                    checklist.innerHTML = `<div style="color: var(--danger); font-size: 12px; text-align: center; padding: 20px;">Error loading selective channels list: ${err.message}</div>`;
+                }
+            });
+        }
+
+        window.editChannelTimestamp = function(channelId, rawTime) {
+            const container = document.getElementById(`ts-container-${channelId}`);
+            if (!container) return;
+            
+            const pickerVal = formatForPicker(rawTime || new Date().toISOString());
+            
+            container.innerHTML = `
+                <input type="datetime-local" class="input-field" id="ts-input-${channelId}" value="${pickerVal}" style="padding: 4px 8px; font-size: 11px; width: 180px; margin: 0; background: rgba(0,0,0,0.3); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;">
+                <button type="button" class="btn" style="padding: 4px 8px; font-size: 11px; margin: 0; background: var(--accent-blue);" onclick="saveChannelTimestamp('${channelId}')">Save</button>
+                <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; margin: 0; color: var(--accent-red); border-color: rgba(239, 68, 68, 0.3);" onclick="clearChannelTimestamp('${channelId}')">Clear</button>
+                <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; margin: 0;" onclick="loadRunChannels()">Cancel</button>
+            `;
+        };
+
+        window.saveChannelTimestamp = function(channelId) {
+            const pickerVal = document.getElementById(`ts-input-${channelId}`).value;
+            let isoString = null;
+            if (pickerVal) {
+                const localDate = new Date(pickerVal);
+                if (!isNaN(localDate.getTime())) {
+                    isoString = localDate.toISOString();
+                } else {
+                    alert("Invalid date selection.");
+                    return;
+                }
+            }
+            
+            fetch('/api/state/channel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    channel_id: channelId,
+                    timestamp: isoString
+                })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.success) {
+                    loadRunChannels();
+                } else {
+                    alert("Error saving timestamp: " + res.error);
+                }
+            })
+            .catch(err => {
+                alert("Network error saving timestamp: " + err.message);
+            });
+        };
+
+        window.clearChannelTimestamp = function(channelId) {
+            if (!confirm("Clear this custom timestamp? The channel will revert to using the default lookback.")) return;
+            
+            fetch('/api/state/channel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    channel_id: channelId,
+                    timestamp: null
+                })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.success) {
+                    loadRunChannels();
+                } else {
+                    alert("Error clearing timestamp: " + res.error);
+                }
+            })
+            .catch(err => {
+                alert("Network error clearing timestamp: " + err.message);
+            });
+        };
+
+        function formatForPicker(isoString) {
+            if (!isoString) return "";
+            const date = new Date(isoString);
+            if (isNaN(date.getTime())) return "";
+            const pad = (num) => String(num).padStart(2, '0');
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+
+        document.getElementById('btn-select-all-channels').addEventListener('click', () => {
+            const boxes = document.querySelectorAll('.run-channel-checkbox');
+            boxes.forEach(box => box.checked = true);
+        });
+
+        document.getElementById('btn-deselect-all-channels').addEventListener('click', () => {
+            const boxes = document.querySelectorAll('.run-channel-checkbox');
+            boxes.forEach(box => box.checked = false);
+        });
+
+        // ── Helper Utility ──
+        function formatDate(isoString) {
+            try {
+                if (!isoString) return "Unknown Date";
+                const date = new Date(isoString);
+                if (isNaN(date.getTime())) return isoString;
+                return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                return isoString;
+            }
+        }
+
+        // Initial Load Status
+        loadStatus();
+    </script>
+</body>
+</html>

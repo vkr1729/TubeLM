@@ -14,7 +14,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
 from notebooklm import (
@@ -325,6 +325,63 @@ async def process_channel_videos(
                     "generate_audio() failed for channel %r — skipping audio.",
                     channel_name,
                 )
+
+            # ── Step 7: Enforce notebook retention limit ──────────────────────
+            retention_limit = getattr(cfg, "notebooks_retention_limit", 0)
+            if retention_limit > 0:
+                logger.info(
+                    "Checking notebook retention policy for %r (limit=%d)…",
+                    channel_name,
+                    retention_limit,
+                )
+                try:
+                    all_notebooks = await client.notebooks.list()
+                    prefix = f"{channel_name} Digest — "
+                    ch_notebooks = []
+                    for nb in all_notebooks:
+                        if nb.title.startswith(prefix):
+                            # Try parsing date from title if created_at is None
+                            created_dt = nb.created_at
+                            if not created_dt:
+                                date_str = nb.title[len(prefix):]
+                                try:
+                                    created_dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                                except Exception:
+                                    created_dt = datetime.fromtimestamp(0, tz=timezone.utc)
+                            ch_notebooks.append((nb, created_dt))
+                    
+                    # Sort descending by date/time (latest first)
+                    ch_notebooks.sort(key=lambda x: x[1], reverse=True)
+                    
+                    if len(ch_notebooks) > retention_limit:
+                        to_delete = ch_notebooks[retention_limit:]
+                        logger.info(
+                            "Found %d notebooks for %r. Retaining %d latest, deleting %d old notebooks…",
+                            len(ch_notebooks),
+                            channel_name,
+                            retention_limit,
+                            len(to_delete),
+                        )
+                        for nb_to_del, _ in to_delete:
+                            logger.info(
+                                "Deleting old notebook: %r (ID: %s)",
+                                nb_to_del.title,
+                                nb_to_del.id,
+                            )
+                            try:
+                                await client.notebooks.delete(nb_to_del.id)
+                                logger.info("Deleted notebook %s successfully.", nb_to_del.id)
+                            except Exception:
+                                logger.exception("Failed to delete notebook %s", nb_to_del.id)
+                    else:
+                        logger.info(
+                            "Found %d notebooks for %r, which is within the limit of %d. No deletion needed.",
+                            len(ch_notebooks),
+                            channel_name,
+                            retention_limit,
+                        )
+                except Exception:
+                    logger.exception("Error checking/deleting old notebooks for channel %r", channel_name)
 
     except NotebookLimitError:
         # Already logged as CRITICAL above; re-raise so main halts processing
