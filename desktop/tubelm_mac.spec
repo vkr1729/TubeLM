@@ -151,7 +151,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['../shared/assets/logo.png'],
+    icon=['../shared/assets/logo.icns'],
 )
 coll = COLLECT(
     exe,
@@ -165,7 +165,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='TubeLM.app',
-    icon='../shared/assets/logo.png',
+    icon='../shared/assets/logo.icns',
     bundle_identifier='org.tubelm.desktop',
     info_plist={
         'CFBundleShortVersionString': '1.0.0',

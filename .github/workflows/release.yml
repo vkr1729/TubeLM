@@ -33,9 +33,9 @@ jobs:
 
       - name: Compress App Bundle
         run: |
-          cd dist
-          zip -r ../TubeLM-macOS.zip TubeLM.app
-          cd ..
+          cd desktop/dist
+          zip -r ../../TubeLM-macOS.zip TubeLM.app
+          cd ../..
 
       - name: Upload macOS Asset
         uses: softprops/action-gh-release@v2
@@ -70,9 +70,9 @@ jobs:
 
       - name: Compress Windows Folder
         run: |
-          cd dist
-          Compress-Archive -Path TubeLM -DestinationPath ..\TubeLM-Windows.zip
-          cd ..
+          cd desktop/dist
+          Compress-Archive -Path TubeLM -DestinationPath ..\..\TubeLM-Windows.zip
+          cd ..\..
 
       - name: Upload Windows Asset
         uses: softprops/action-gh-release@v2
@@ -114,6 +114,6 @@ jobs:
       - name: Upload Linux Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/tubelm_1.0.0_amd64.deb
+          files: desktop/dist/tubelm_1.0.0_amd64.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
