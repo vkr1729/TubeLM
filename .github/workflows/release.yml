@@ -24,12 +24,12 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-gui.txt
+          pip install -r desktop/requirements.txt -r desktop/requirements-gui.txt
 
       - name: Build macOS App Bundle
         run: |
-          chmod +x scripts/build_mac_app.sh
-          ./scripts/build_mac_app.sh
+          chmod +x desktop/scripts/build_mac_app.sh
+          ./desktop/scripts/build_mac_app.sh
 
       - name: Compress App Bundle
         run: |
@@ -62,11 +62,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-gui.txt
+          pip install -r desktop/requirements.txt -r desktop/requirements-gui.txt
 
       - name: Build Windows Executable
         run: |
-          .\scripts\build_win_app.bat
+          .\desktop\scripts\build_win_app.bat
 
       - name: Compress Windows Folder
         run: |
@@ -99,7 +99,7 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-gui.txt
+          pip install -r desktop/requirements.txt -r desktop/requirements-gui.txt
 
       - name: Install packaging tools
         run: |
@@ -108,8 +108,8 @@ jobs:
 
       - name: Build Linux Debian Package
         run: |
-          chmod +x scripts/build_linux_deb.sh
-          ./scripts/build_linux_deb.sh
+          chmod +x desktop/scripts/build_linux_deb.sh
+          ./desktop/scripts/build_linux_deb.sh
 
       - name: Upload Linux Asset
         uses: softprops/action-gh-release@v2

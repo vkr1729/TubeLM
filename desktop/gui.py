@@ -22,6 +22,8 @@ from threading import Timer
 
 from flask import Flask, jsonify, request, Response, send_from_directory, render_template_string
 
+import paths
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
@@ -33,11 +35,15 @@ logger = logging.getLogger("TubeLM-GUI")
 app = Flask(__name__)
 
 # Base paths
-PROJECT_DIR = Path(__file__).parent.resolve()
-ENV_FILE = PROJECT_DIR / ".env"
-CHANNELS_FILE = PROJECT_DIR / "channels.json"
-STATE_FILE = PROJECT_DIR / "state.json"
-SUMMARIES_DIR = PROJECT_DIR / "summaries"
+PROJECT_DIR = paths.get_bundle_dir()
+ENV_FILE = paths.get_env_file()
+CHANNELS_FILE = paths.get_channels_file()
+STATE_FILE = paths.get_state_file()
+SUMMARIES_DIR = paths.get_summaries_dir()
+
+from dotenv import load_dotenv
+load_dotenv(ENV_FILE)
+
 
 # Global pipeline runner instance
 class PipelineRunner:
@@ -66,12 +72,16 @@ class PipelineRunner:
             return True, "Pipeline started."
 
     def _run(self, args_list):
-        # Locate python binary from current venv or fallback to sys.executable
-        venv_python = PROJECT_DIR / ".venv" / "bin" / "python"
-        python_bin = str(venv_python) if venv_python.exists() else sys.executable
-        main_script = str(PROJECT_DIR / "main.py")
-        
-        cmd = [python_bin, main_script] + args_list
+        if paths.is_frozen():
+            cmd = [sys.executable, "--sync"] + args_list
+        else:
+            # Locate python binary from current venv or fallback to sys.executable
+            venv_python = PROJECT_DIR.parent / ".venv" / "Scripts" / "python.exe"
+            if not venv_python.exists():
+                venv_python = PROJECT_DIR.parent / ".venv" / "bin" / "python"
+            python_bin = str(venv_python) if venv_python.exists() else sys.executable
+            main_script = str(PROJECT_DIR / "main.py")
+            cmd = [python_bin, main_script] + args_list
         logger.info("Starting sync subprocess: %s", " ".join(cmd))
         
         try:
@@ -137,11 +147,20 @@ def read_env_file():
 def write_env_file(updates):
     if not ENV_FILE.exists():
         # Create from example if possible
-        example = PROJECT_DIR / ".env.example"
+        if paths.is_frozen():
+            example = paths.get_bundle_dir() / ".env.example"
+        else:
+            example = paths.get_bundle_dir().parent / ".env.example"
         if example.exists():
             import shutil
             shutil.copy(example, ENV_FILE)
-            
+
+    # Final safety net: if ENV_FILE still doesn't exist (example was also missing),
+    # create an empty file so the open() below doesn't crash.
+    if not ENV_FILE.exists():
+        ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+        ENV_FILE.touch()
+
     with open(ENV_FILE, "r", encoding="utf-8") as f:
         existing_lines = f.readlines()
 
@@ -163,8 +182,309 @@ def write_env_file(updates):
         
     with open(ENV_FILE, "w", encoding="utf-8") as f:
         f.writelines(lines)
+        
+    from dotenv import load_dotenv
+    load_dotenv(ENV_FILE, override=True)
 
-# ── Systemd Helpers ───────────────────────────────────────────────────────────
+# ── Scheduler Helpers ─────────────────────────────────────────────────────────
+
+def get_windows_status():
+    status = {
+        "timer_active": False,
+        "timer_enabled": False,
+        "next_run": "Not Scheduled",
+        "service_running": False,
+        "service_status": "Unknown",
+        "installed": False,
+        "day_of_week": "Sat",
+        "time": "08:00",
+        "scheduler_type": "Windows Task Scheduler"
+    }
+    
+    try:
+        res = subprocess.run(
+            ["schtasks", "/query", "/tn", "TubeLM_Sync", "/fo", "list"],
+            capture_output=True, text=True, timeout=5
+        )
+        if res.returncode == 0:
+            status["installed"] = True
+            props = {}
+            for line in res.stdout.strip().split("\n"):
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    props[k.strip().lower()] = v.strip()
+            
+            task_status = props.get("status", "unknown").lower()
+            status["timer_active"] = "disabled" not in task_status
+            status["timer_enabled"] = status["timer_active"]
+            status["next_run"] = props.get("next run time", "Not Scheduled")
+            status["service_status"] = props.get("status", "Unknown")
+        else:
+            status["installed"] = False
+    except Exception:
+        pass
+        
+    config_path = paths.get_data_dir() / "scheduler_config.json"
+    if config_path.exists():
+        try:
+            s_conf = json.loads(config_path.read_text(encoding="utf-8"))
+            status["day_of_week"] = s_conf.get("day_of_week", "Sat")
+            status["time"] = s_conf.get("time", "08:00")
+        except Exception:
+            pass
+            
+    return status
+
+
+def setup_windows_scheduler(day, time_str):
+    script_path = paths.get_data_dir() / "run_weekly.bat"
+    log_dir = paths.get_data_dir() / "logs"
+    
+    if paths.is_frozen():
+        exec_cmd = f'"{sys.executable}" --sync'
+    else:
+        venv_python = PROJECT_DIR.parent / ".venv" / "Scripts" / "python.exe"
+        if not venv_python.exists():
+            venv_python = PROJECT_DIR.parent / ".venv" / "bin" / "python"
+        python_bin = str(venv_python) if venv_python.exists() else sys.executable
+        main_script = str(PROJECT_DIR / "main.py")
+        exec_cmd = f'"{python_bin}" "{main_script}"'
+
+    bat_content = f"""@echo off
+rem Auto-generated by TubeLM GUI. DO NOT EDIT MANUALLY.
+setlocal enabledelayedexpansion
+
+set "LOG_DIR={log_dir}"
+if not exist "!LOG_DIR!" mkdir "!LOG_DIR!"
+set "LOG_FILE=!LOG_DIR!\\weekly_run.log"
+
+echo === TubeLM Weekly Sync: %DATE% %TIME% === >> "!LOG_FILE!"
+
+rem Check network connectivity by pinging google.com
+echo Checking network connectivity... >> "!LOG_FILE!"
+for /L %%i in (1,1,12) do (
+    ping -n 1 -w 3000 google.com >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo Network available. >> "!LOG_FILE!"
+        goto :start_sync
+    )
+    echo Waiting for network... (%%i/12) >> "!LOG_FILE!"
+    timeout /t 5 >nul
+)
+
+:start_sync
+echo Starting sync pipeline... >> "!LOG_FILE!"
+cd /d "{PROJECT_DIR}"
+{exec_cmd} >> "!LOG_FILE!" 2>&1
+echo === Run complete: %DATE% %TIME% | Exit code: %ERRORLEVEL% === >> "!LOG_FILE!"
+exit /b %ERRORLEVEL%
+"""
+    script_path.write_text(bat_content, encoding="utf-8")
+    
+    day_map = {
+        "Mon": "MON",
+        "Tue": "TUE",
+        "Wed": "WED",
+        "Thu": "THU",
+        "Fri": "FRI",
+        "Sat": "SAT",
+        "Sun": "SUN"
+    }
+    win_day = day_map.get(day, "SAT")
+    
+    cmd = [
+        "schtasks", "/create", 
+        "/tn", "TubeLM_Sync", 
+        "/tr", f'"{script_path}"', 
+        "/sc", "weekly", 
+        "/d", win_day, 
+        "/st", time_str, 
+        "/f"
+    ]
+    subprocess.run(cmd, capture_output=True, check=True, text=True)
+    
+    config_path = paths.get_data_dir() / "scheduler_config.json"
+    config_path.write_text(json.dumps({"day_of_week": day, "time": time_str}), encoding="utf-8")
+
+
+def toggle_windows_scheduler():
+    status = get_windows_status()
+    if not status["installed"]:
+        raise ValueError("Task is not installed.")
+    action = "enable" if not status["timer_active"] else "disable"
+    cmd = ["schtasks", "/change", "/tn", "TubeLM_Sync", f"/{action}"]
+    subprocess.run(cmd, capture_output=True, check=True, text=True)
+    return not status["timer_active"]
+
+
+def get_macos_status():
+    status = {
+        "timer_active": False,
+        "timer_enabled": False,
+        "next_run": "Not Scheduled",
+        "service_running": False,
+        "service_status": "Unknown",
+        "installed": False,
+        "day_of_week": "Sat",
+        "time": "08:00",
+        "scheduler_type": "Launch Agent"
+    }
+    
+    plist_path = Path("~/Library/LaunchAgents/org.tubelm.sync.plist").expanduser()
+    if plist_path.exists():
+        status["installed"] = True
+        
+        config_path = paths.get_data_dir() / "scheduler_config.json"
+        if config_path.exists():
+            try:
+                s_conf = json.loads(config_path.read_text(encoding="utf-8"))
+                status["day_of_week"] = s_conf.get("day_of_week", "Sat")
+                status["time"] = s_conf.get("time", "08:00")
+            except Exception:
+                pass
+                
+        try:
+            res = subprocess.run(
+                ["launchctl", "list"],
+                capture_output=True, text=True, timeout=5
+            )
+            if "org.tubelm.sync" in res.stdout:
+                status["timer_active"] = True
+                status["timer_enabled"] = True
+                status["service_status"] = "Loaded"
+                status["next_run"] = f"Weekly on {status['day_of_week']} {status['time']}"
+            else:
+                status["service_status"] = "Unloaded"
+        except Exception:
+            pass
+            
+    return status
+
+
+def setup_macos_scheduler(day, time_str):
+    agents_dir = Path("~/Library/LaunchAgents").expanduser()
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    plist_path = agents_dir / "org.tubelm.sync.plist"
+    
+    script_path = paths.get_data_dir() / "run_weekly.sh"
+    
+    if paths.is_frozen():
+        exec_cmd = f'"{sys.executable}" --sync'
+    else:
+        venv_python = PROJECT_DIR.parent / ".venv" / "bin" / "python"
+        python_bin = str(venv_python) if venv_python.exists() else sys.executable
+        main_script = str(PROJECT_DIR / "main.py")
+        exec_cmd = f'"{python_bin}" "{main_script}"'
+        
+    script_content = f"""#!/usr/bin/env bash
+# Auto-generated by TubeLM GUI. DO NOT EDIT MANUALLY.
+set -euo pipefail
+
+LOG_DIR="{paths.get_data_dir()}/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/weekly_run_$(date +%Y-%m-%d_%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=== TubeLM Weekly Sync: $(date) ==="
+echo "Log file: $LOG_FILE"
+
+# Wait for network (max 60s)
+echo "Checking network connectivity..."
+for i in $(seq 1 12); do
+    if ping -c 1 -t 3 google.com &>/dev/null; then
+        echo "Network available."
+        break
+    fi
+    echo "Waiting for network... ($i/12)"
+    sleep 5
+done
+
+# Run sync pipeline
+echo "Starting sync pipeline..."
+{exec_cmd}
+EXIT_CODE=$?
+
+echo "=== Run complete: $(date) | Exit code: $EXIT_CODE ==="
+find "$LOG_DIR" -name "weekly_run_*.log" -mtime +84 -delete 2>/dev/null || true
+exit $EXIT_CODE
+"""
+    script_path.write_text(script_content, encoding="utf-8")
+    
+    try:
+        import os
+        os.chmod(str(script_path), 0o755)
+    except Exception:
+        pass
+        
+    mac_day_map = {
+        "Sun": 0,
+        "Mon": 1,
+        "Tue": 2,
+        "Wed": 3,
+        "Thu": 4,
+        "Fri": 5,
+        "Sat": 6
+    }
+    weekday = mac_day_map.get(day, 6)
+    
+    try:
+        hour, minute = map(int, time_str.split(":"))
+    except ValueError:
+        hour, minute = 8, 0
+        
+    plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>org.tubelm.sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>{script_path}</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>{weekday}</integer>
+        <key>Hour</key>
+        <integer>{hour}</integer>
+        <key>Minute</key>
+        <integer>{minute}</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>{paths.get_data_dir()}/logs/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>{paths.get_data_dir()}/logs/launchd_stderr.log</string>
+</dict>
+</plist>
+"""
+    plist_path.write_text(plist_content, encoding="utf-8")
+    
+    try:
+        subprocess.run(["launchctl", "unload", "-w", str(plist_path)], capture_output=True)
+    except Exception:
+        pass
+        
+    subprocess.run(["launchctl", "load", "-w", str(plist_path)], capture_output=True, check=True)
+    
+    config_path = paths.get_data_dir() / "scheduler_config.json"
+    config_path.write_text(json.dumps({"day_of_week": day, "time": time_str}), encoding="utf-8")
+
+
+def toggle_macos_scheduler():
+    status = get_macos_status()
+    if not status["installed"]:
+        raise ValueError("LaunchAgent plist is not installed.")
+        
+    plist_path = Path("~/Library/LaunchAgents/org.tubelm.sync.plist").expanduser()
+    if status["timer_active"]:
+        cmd = ["launchctl", "unload", "-w", str(plist_path)]
+    else:
+        cmd = ["launchctl", "load", "-w", str(plist_path)]
+    subprocess.run(cmd, capture_output=True, check=True, text=True)
+    return not status["timer_active"]
+
 
 def get_systemd_status():
     status = {
@@ -175,13 +495,16 @@ def get_systemd_status():
         "service_status": "Unknown",
         "installed": False,
         "day_of_week": "Sat",
-        "time": "08:00"
+        "time": "08:00",
+        "scheduler_type": "systemd timer"
     }
     
-    timer_path = Path("~/.config/systemd/user/youtube-digest.timer").expanduser()
-    service_path = Path("~/.config/systemd/user/youtube-digest.service").expanduser()
+    if sys.platform != "linux":
+        return status
+        
+    timer_path = Path("~/.config/systemd/user/tubelm-sync.timer").expanduser()
+    service_path = Path("~/.config/systemd/user/tubelm-sync.service").expanduser()
     
-    # Parse existing calendar schedule
     if timer_path.exists():
         try:
             content = timer_path.read_text(encoding="utf-8")
@@ -197,30 +520,27 @@ def get_systemd_status():
         
     status["installed"] = True
     
-    # Check timer active
     try:
         res = subprocess.run(
-            ["systemctl", "--user", "is-active", "youtube-digest.timer"],
+            ["systemctl", "--user", "is-active", "tubelm-sync.timer"],
             capture_output=True, text=True, timeout=5
         )
         status["timer_active"] = res.stdout.strip() == "active"
     except Exception:
         pass
 
-    # Check timer enabled
     try:
         res = subprocess.run(
-            ["systemctl", "--user", "is-enabled", "youtube-digest.timer"],
+            ["systemctl", "--user", "is-enabled", "tubelm-sync.timer"],
             capture_output=True, text=True, timeout=5
         )
         status["timer_enabled"] = res.stdout.strip() == "enabled"
     except Exception:
         pass
 
-    # Check next run
     try:
         res = subprocess.run(
-            ["systemctl", "--user", "list-timers", "youtube-digest.timer"],
+            ["systemctl", "--user", "list-timers", "tubelm-sync.timer"],
             capture_output=True, text=True, timeout=5
         )
         lines = res.stdout.strip().split("\n")
@@ -232,10 +552,9 @@ def get_systemd_status():
     except Exception:
         pass
 
-    # Check service status
     try:
         res = subprocess.run(
-            ["systemctl", "--user", "show", "youtube-digest.service", "--property=ActiveState,SubState"],
+            ["systemctl", "--user", "show", "tubelm-sync.service", "--property=ActiveState,SubState"],
             capture_output=True, text=True, timeout=5
         )
         props = {}
@@ -249,6 +568,15 @@ def get_systemd_status():
         pass
         
     return status
+
+
+def get_scheduler_status():
+    if sys.platform == "win32":
+        return get_windows_status()
+    elif sys.platform == "darwin":
+        return get_macos_status()
+    else:
+        return get_systemd_status()
 
 # ── API Endpoints ─────────────────────────────────────────────────────────────
 
@@ -267,7 +595,7 @@ def serve_summary_file(filename):
 
 @app.route("/assets/<path:filename>")
 def serve_asset_file(filename):
-    return send_from_directory(str(PROJECT_DIR / "assets"), filename)
+    return send_from_directory(str(paths.get_assets_dir()), filename)
 
 @app.route("/api/status")
 def api_status():
@@ -289,7 +617,7 @@ def api_status():
         except Exception:
             pass
 
-    systemd_info = get_systemd_status()
+    systemd_info = get_scheduler_status()
 
     return jsonify({
         "channel_count": channel_count,
@@ -521,8 +849,11 @@ def api_config():
 
 @app.route("/api/prompts", methods=["GET", "POST"])
 def api_prompts():
-    summary_path = PROJECT_DIR / "Summary_Prompt.md"
-    podcast_path = PROJECT_DIR / "Podcast_Prompt.md"
+    summary_user_path = paths.get_data_dir() / "Summary_Prompt.md"
+    podcast_user_path = paths.get_data_dir() / "Podcast_Prompt.md"
+    
+    summary_bundle_path = paths.get_prompts_dir() / "Summary_Prompt.md"
+    podcast_bundle_path = paths.get_prompts_dir() / "Podcast_Prompt.md"
     
     if request.method == "POST":
         data = request.json
@@ -530,56 +861,128 @@ def api_prompts():
         podcast_text = data.get("podcast_prompt", "").strip()
         
         try:
-            summary_path.write_text(summary_text, encoding="utf-8")
-            podcast_path.write_text(podcast_text, encoding="utf-8")
+            summary_user_path.write_text(summary_text, encoding="utf-8")
+            podcast_user_path.write_text(podcast_text, encoding="utf-8")
             return jsonify({"success": True})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     else:
-        summary_text = summary_path.read_text(encoding="utf-8").strip() if summary_path.exists() else ""
-        podcast_text = podcast_path.read_text(encoding="utf-8").strip() if podcast_path.exists() else ""
+        # Read from user path if exists, otherwise bundle
+        if summary_user_path.exists():
+            summary_text = summary_user_path.read_text(encoding="utf-8").strip()
+        elif summary_bundle_path.exists():
+            summary_text = summary_bundle_path.read_text(encoding="utf-8").strip()
+        else:
+            summary_text = ""
+            
+        if podcast_user_path.exists():
+            podcast_text = podcast_user_path.read_text(encoding="utf-8").strip()
+        elif podcast_bundle_path.exists():
+            podcast_text = podcast_bundle_path.read_text(encoding="utf-8").strip()
+        else:
+            podcast_text = ""
+            
         return jsonify({
             "summary_prompt": summary_text,
             "podcast_prompt": podcast_text
         })
 
+
+@app.route("/api/scheduler/toggle", methods=["POST"])
 @app.route("/api/systemd/toggle", methods=["POST"])
-def api_systemd_toggle():
-    status = get_systemd_status()
-    if not status["installed"]:
-        return jsonify({"error": "Systemd unit files are not installed."}), 400
-        
-    action = "disable" if status["timer_active"] else "enable"
-    cmd = ["systemctl", "--user", f"{action}", "--now", "youtube-digest.timer"]
-    
+def api_scheduler_toggle():
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if res.returncode == 0:
-            return jsonify({"success": True, "timer_active": not status["timer_active"]})
-        return jsonify({"error": res.stderr.strip()}), 500
+        if sys.platform == "win32":
+            active = toggle_windows_scheduler()
+            return jsonify({"success": True, "timer_active": active})
+        elif sys.platform == "darwin":
+            active = toggle_macos_scheduler()
+            return jsonify({"success": True, "timer_active": active})
+        else:
+            status = get_systemd_status()
+            if not status["installed"]:
+                return jsonify({"error": "Systemd unit files are not installed."}), 400
+                
+            action = "disable" if status["timer_active"] else "enable"
+            cmd = ["systemctl", "--user", f"{action}", "--now", "tubelm-sync.timer"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if res.returncode == 0:
+                return jsonify({"success": True, "timer_active": not status["timer_active"]})
+            return jsonify({"error": res.stderr.strip()}), 500
     except Exception as e:
+        logger.exception("Failed to toggle scheduler")
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/scheduler/setup", methods=["POST"])
 @app.route("/api/systemd/setup", methods=["POST"])
-def api_systemd_setup():
-    timer_dir = Path("~/.config/systemd/user").expanduser()
+def api_scheduler_setup():
+    day = "Sat"
+    time_str = "08:00"
+    if request.is_json:
+        req_data = request.json or {}
+        day = req_data.get("day_of_week", "Sat")
+        time_str = req_data.get("time", "08:00")
+        
     try:
-        timer_dir.mkdir(parents=True, exist_ok=True)
-        
-        service_path = timer_dir / "youtube-digest.service"
-        timer_path = timer_dir / "youtube-digest.timer"
-        
-        script_path = PROJECT_DIR / "scripts" / "run_weekly.sh"
-        
-        # Parse day of week and time from JSON request
-        day = "Sat"
-        time_str = "08:00"
-        if request.is_json:
-            req_data = request.json or {}
-            day = req_data.get("day_of_week", "Sat")
-            time_str = req_data.get("time", "08:00")
+        if sys.platform == "win32":
+            setup_windows_scheduler(day, time_str)
+            return jsonify({"success": True})
+        elif sys.platform == "darwin":
+            setup_macos_scheduler(day, time_str)
+            return jsonify({"success": True})
+        else:
+            timer_dir = Path("~/.config/systemd/user").expanduser()
+            timer_dir.mkdir(parents=True, exist_ok=True)
             
-        service_content = f"""[Unit]
+            service_path = timer_dir / "tubelm-sync.service"
+            timer_path = timer_dir / "tubelm-sync.timer"
+            
+            script_path = paths.get_data_dir() / "run_weekly.sh"
+            
+            if paths.is_frozen():
+                exec_cmd = f'"{sys.executable}" --sync'
+            else:
+                venv_python = PROJECT_DIR.parent / ".venv" / "bin" / "python"
+                python_bin = str(venv_python) if venv_python.exists() else sys.executable
+                main_script = str(PROJECT_DIR / "main.py")
+                exec_cmd = f'"{python_bin}" "{main_script}"'
+
+            script_content = f"""#!/usr/bin/env bash
+# Auto-generated by TubeLM GUI. DO NOT EDIT MANUALLY.
+set -euo pipefail
+
+LOG_DIR="{paths.get_data_dir()}/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/weekly_run_$(date +%Y-%m-%d_%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=== TubeLM Weekly Sync: $(date) ==="
+echo "Log file: $LOG_FILE"
+
+# Wait for network (max 60s)
+echo "Checking network connectivity..."
+for i in $(seq 1 12); do
+    if ping -c 1 -W 3 google.com &>/dev/null; then
+        echo "Network available."
+        break
+    fi
+    echo "Waiting for network... ($i/12)"
+    sleep 5
+done
+
+# Run sync pipeline
+echo "Starting sync pipeline..."
+{exec_cmd}
+EXIT_CODE=$?
+
+echo "=== Run complete: $(date) | Exit code: $EXIT_CODE ==="
+find "$LOG_DIR" -name "weekly_run_*.log" -mtime +84 -delete 2>/dev/null || true
+exit $EXIT_CODE
+"""
+            script_path.write_text(script_content, encoding="utf-8")
+            
+            service_content = f"""[Unit]
 Description=TubeLM Weekly Briefing Sync Service
 After=network-online.target
 
@@ -589,8 +992,8 @@ ExecStart={script_path}
 StandardOutput=journal
 StandardError=journal
 """
-        
-        timer_content = f"""[Unit]
+            
+            timer_content = f"""[Unit]
 Description=Run TubeLM Weekly Sync
 
 [Timer]
@@ -600,75 +1003,86 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 """
-        
-        service_path.write_text(service_content, encoding="utf-8")
-        timer_path.write_text(timer_content, encoding="utf-8")
-        
-        # Make script executable
-        try:
-            import os
-            os.chmod(str(script_path), 0o755)
-        except Exception:
-            pass
             
-        # Reload daemon and enable timer
-        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, check=True)
-        subprocess.run(["systemctl", "--user", "enable", "--now", "youtube-digest.timer"], capture_output=True, check=True)
-        
-        return jsonify({"success": True})
+            service_path.write_text(service_content, encoding="utf-8")
+            timer_path.write_text(timer_content, encoding="utf-8")
+            
+            try:
+                import os
+                os.chmod(str(script_path), 0o755)
+            except Exception:
+                pass
+                
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, check=True)
+            subprocess.run(["systemctl", "--user", "import-environment", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY"], capture_output=True)
+            try:
+                subprocess.run(["loginctl", "enable-linger"], capture_output=True)
+            except Exception as linger_err:
+                logger.warning("Could not enable loginctl user lingering: %s", linger_err)
+            subprocess.run(["systemctl", "--user", "enable", "--now", "tubelm-sync.timer"], capture_output=True, check=True)
+            
+            return jsonify({"success": True})
     except Exception as e:
-        logger.exception("Failed to setup systemd timer")
+        logger.exception("Failed to setup scheduler")
         return jsonify({"error": str(e)}), 500
 
 def get_notebooklm_bin():
-    exe_dir = os.path.dirname(sys.executable)
-    paths_to_check = []
-    if sys.platform == "win32":
-        paths_to_check.extend([
-            os.path.join(exe_dir, "notebooklm.exe"),
-            os.path.join(exe_dir, "notebooklm"),
-            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm.exe"),
-            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm"),
-            os.path.join(str(PROJECT_DIR), ".venv", "Scripts", "notebooklm.exe"),
-            os.path.join(str(PROJECT_DIR), ".venv", "Scripts", "notebooklm")
-        ])
-    else:
-        paths_to_check.extend([
-            os.path.join(exe_dir, "notebooklm"),
-            os.path.join(exe_dir, "_internal", "bin", "notebooklm"),
-            os.path.join(str(PROJECT_DIR), ".venv", "bin", "notebooklm")
-        ])
-    for p in paths_to_check:
-        if os.path.exists(p):
-            return p
-    return "notebooklm"
+    return paths.get_notebooklm_bin()
 
 @app.route("/api/auth/status")
 def api_auth_status():
-    notebooklm_bin = get_notebooklm_bin()
     try:
-        res = subprocess.run(
-            [notebooklm_bin, "auth", "check", "--test"],
-            capture_output=True, text=True, timeout=15
-        )
+        from notebooklm import NotebookLMClient
+        import asyncio
+
+        async def _check():
+            async with NotebookLMClient.from_storage(keepalive=15) as client:
+                await client.notebooks.list()
+            return True
+
+        loop = asyncio.new_event_loop()
+        try:
+            authenticated = loop.run_until_complete(_check())
+            output = "Authentication check passed. Session is active."
+        finally:
+            loop.close()
         return jsonify({
-            "authenticated": res.returncode == 0,
-            "output": res.stdout.strip() + "\n" + res.stderr.strip()
+            "authenticated": authenticated,
+            "output": output
         })
     except Exception as e:
-        return jsonify({"authenticated": False, "error": str(e)})
+        return jsonify({
+            "authenticated": False,
+            "output": f"Authentication check failed: {e}"
+        })
 
 @app.route("/api/auth/login", methods=["POST"])
 def api_auth_login():
-    notebooklm_bin = get_notebooklm_bin()
     try:
-        res = subprocess.run(
-            [notebooklm_bin, "login", "--browser-cookies", "chrome"],
-            capture_output=True, text=True, timeout=30
-        )
+        browser = os.getenv("NOTEBOOKLM_BROWSER", "chrome")
+        from notebooklm.paths import get_storage_path
+        from notebooklm.cli.services.login.refresh import _login_with_browser_cookies
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+
+        storage_path = get_storage_path()
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+
+        success = False
+        try:
+            with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+                _login_with_browser_cookies(storage_path, browser)
+            success = True
+        except SystemExit as e:
+            success = (e.code == 0 or e.code is None)
+        except Exception as e:
+            stderr_buf.write(f"\nException: {e}")
+
+        output = stdout_buf.getvalue() + "\n" + stderr_buf.getvalue()
         return jsonify({
-            "success": res.returncode == 0,
-            "output": res.stdout.strip() + "\n" + res.stderr.strip()
+            "success": success,
+            "output": output.strip()
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -709,8 +1123,7 @@ def api_notebooks_real():
         import asyncio
         
         async def fetch_real():
-            client = await NotebookLMClient.from_storage(keepalive=30)
-            async with client:
+            async with NotebookLMClient.from_storage(keepalive=30) as client:
                 return await client.notebooks.list()
                 
         loop = asyncio.new_event_loop()
@@ -743,8 +1156,7 @@ def api_delete_notebook(notebook_id):
         import asyncio
         
         async def do_delete():
-            client = await NotebookLMClient.from_storage(keepalive=30)
-            async with client:
+            async with NotebookLMClient.from_storage(keepalive=30) as client:
                 return await client.notebooks.delete(notebook_id)
                 
         loop = asyncio.new_event_loop()
@@ -773,7 +1185,7 @@ def api_digests():
     safe_to_real = {}
     for ch in channels:
         name = ch.get("name", "")
-        safe = re.sub(r'[^a-zA-Z0-9_\-]', '_', name)
+        safe = paths.safe_channel_name(name)
         safe_to_real[safe] = name
 
     artifacts = []
@@ -871,8 +1283,18 @@ def api_digests():
 
 @app.route("/api/digests/<filename>")
 def api_get_digest(filename):
-    filepath = SUMMARIES_DIR / filename
-    if not filepath.exists() or not filepath.is_relative_to(SUMMARIES_DIR):
+    try:
+        filepath = (SUMMARIES_DIR / filename).resolve()
+    except Exception:
+        return jsonify({"error": "Digest file not found"}), 404
+
+    try:
+        filepath.relative_to(SUMMARIES_DIR.resolve())
+        is_safe = True
+    except ValueError:
+        is_safe = False
+
+    if not filepath.is_file() or not is_safe:
         return jsonify({"error": "Digest file not found"}), 404
     try:
         content = filepath.read_text(encoding="utf-8")
@@ -907,6 +1329,134 @@ def api_stream_logs():
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
+def install_playwright_browsers_silently():
+    """Checks if Playwright's Chromium browser is installed, and installs it silently if missing."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            try:
+                browser = p.chromium.launch(headless=True)
+                browser.close()
+                logger.info("Playwright Chromium browser is already installed.")
+                return
+            except Exception:
+                logger.info("Playwright Chromium browser not found. Installing silently...")
+    except ImportError:
+        logger.warning("Playwright package is not installed.")
+        return
+
+    try:
+        import subprocess, sys
+        # Use the venv's playwright binary so the correct browser cache path is used
+        playwright_bin = str(Path(sys.executable).parent / "playwright")
+        cmd = [playwright_bin, "install", "chromium"]
+        logger.info("Running background playwright installation: %s", " ".join(cmd))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            logger.info("Playwright Chromium browser installed successfully.")
+        else:
+            logger.warning("Playwright install exited with code %d: %s", result.returncode, result.stderr[:500])
+    except Exception as e:
+        logger.warning("Could not automatically install Playwright Chromium: %s", e)
+
+
+@app.route('/api/system/requirements')
+def api_system_requirements():
+    """Check post-install runtime requirements and return status.
+
+    Returns a list of requirements with status so the frontend can
+    show a dismissible first-launch banner until all are met.
+
+    Requirements checked:
+      1. Playwright Chromium browser (headless, for NotebookLM automation)
+      2. Google Chrome or Chromium (for rookiepy cookie extraction)
+    """
+    import shutil as _shutil
+    import sys
+    requirements = []
+
+    # ── 1. Playwright Chromium browser (headless automation engine) ──────────
+    playwright_ok = False
+    playwright_detail = ""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            try:
+                browser = p.chromium.launch(headless=True)
+                browser.close()
+                playwright_ok = True
+                playwright_detail = "Headless Chromium is installed and working."
+            except Exception as e:
+                # Extract just the first line (the actual error), strip Playwright's box-art
+                raw = str(e)
+                first_line = raw.split("\n")[0].strip()
+                playwright_detail = first_line
+    except ImportError:
+        playwright_detail = (
+            "Playwright package is not installed. "
+            "This should not happen — please reinstall TubeLM."
+        )
+
+    playwright_bin = str(Path(sys.executable).parent / "playwright")
+    # Playwright Chromium is only needed for the interactive browser-login flow.
+    # TubeLM uses --browser-cookies (rookiepy) by default, so this is OPTIONAL.
+    # On Ubuntu 26.04 Playwright 1.60 cannot install; treat as optional/informational.
+    requirements.append({
+        "name": "Playwright Chromium  —  Optional (Alternative Login Only)",
+        "description": (
+            "This is NOT your regular Chrome browser. "
+            "Playwright Chromium is a separate headless engine used only for the "
+            "interactive browser-login flow. TubeLM uses your Chrome cookies instead "
+            "(rookiepy), so this dependency is OPTIONAL \u2014 you don\u2019t need it."
+        ),
+        "ok": True,  # Always treat as OK \u2014 TubeLM doesn't require this for normal operation
+        "detail": (
+            "Headless Chromium is installed and working." if playwright_ok
+            else (
+                f"Not installed ({playwright_detail}). "
+                "This is fine \u2014 TubeLM uses your Chrome browser cookies instead."
+            )
+        ),
+        "how_to_fix": (
+            "No action required. TubeLM works without this.\n\n"
+            "If you want it anyway (e.g., for interactive login):\n"
+            f"  {playwright_bin} install chromium"
+        ),
+    })
+
+    # ── 2. Google Chrome / Chromium (for rookiepy cookie extraction) ─────────
+    chrome_path = (
+        _shutil.which("google-chrome")
+        or _shutil.which("google-chrome-stable")
+        or _shutil.which("chromium-browser")
+        or _shutil.which("chromium")
+    )
+    chrome_ok = chrome_path is not None
+    requirements.append({
+        "name": "Google Chrome  —  Cookie Source Browser",
+        "description": (
+            "Your regular Chrome browser (the one you use to browse). "
+            "TubeLM reads your NotebookLM login cookies from it to authenticate — "
+            "no password is ever stored."
+        ),
+        "ok": chrome_ok,
+        "detail": (
+            f"Found at: {chrome_path}" if chrome_ok
+            else "Chrome not found in PATH. Make sure it is installed."
+        ),
+        "how_to_fix": (
+            "1. Install Google Chrome if you haven't already:\n"
+            "   sudo apt install google-chrome-stable\n\n"
+            "2. Open Chrome and sign in to notebooklm.google.com\n\n"
+            "3. Come back here and click 'Refresh Cookie Cache' on the Dashboard."
+        ),
+    })
+
+    all_ok = all(r["ok"] for r in requirements)
+    return jsonify({"all_ok": all_ok, "requirements": requirements})
+
+
+
 def find_available_port(start_port=5000, max_port=6000):
     """Dynamically scan for a free local TCP port."""
     for p in range(start_port, max_port):
@@ -923,20 +1473,9 @@ def run_gui(port=5000):
     # Ensure summaries dir exists
     SUMMARIES_DIR.mkdir(exist_ok=True)
     
-    # Check if the requested port is available. If not, dynamically find another one.
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind(("127.0.0.1", port))
-    except OSError:
-        logger.warning("Port %d is already in use. Searching for an available port...", port)
-        try:
-            port = find_available_port(start_port=port + 1)
-            logger.info("Selected available port: %d", port)
-        except Exception as e:
-            logger.critical("Could not find any available port: %s", e)
-            sys.exit(1)
-            
+    # Start silent background playwright installation
+    threading.Thread(target=install_playwright_browsers_silently, daemon=True).start()
+    
     # Auto-launch browser
     def open_browser():
         try:

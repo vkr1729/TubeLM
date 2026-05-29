@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -32,6 +33,7 @@ import requests
 
 from config import ConfigurationError, load_config
 from email_service import send_channel_email
+import paths
 from notebooklm_service import process_channel_videos, verify_notebooklm_auth
 from notebooklm.exceptions import NotebookLimitError
 
@@ -61,65 +63,37 @@ INTER_CHANNEL_COOLDOWN = 60
 # ── Cookie refresh ─────────────────────────────────────────────────────────────
 
 def _get_notebooklm_bin() -> str:
-    exe_dir = os.path.dirname(sys.executable)
-    proj_dir = os.path.dirname(os.path.abspath(__file__))
-    paths_to_check = []
-    if sys.platform == "win32":
-        paths_to_check.extend([
-            os.path.join(exe_dir, "notebooklm.exe"),
-            os.path.join(exe_dir, "notebooklm"),
-            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm.exe"),
-            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm"),
-            os.path.join(proj_dir, ".venv", "Scripts", "notebooklm.exe"),
-            os.path.join(proj_dir, ".venv", "Scripts", "notebooklm")
-        ])
-    else:
-        paths_to_check.extend([
-            os.path.join(exe_dir, "notebooklm"),
-            os.path.join(exe_dir, "_internal", "bin", "notebooklm"),
-            os.path.join(proj_dir, ".venv", "bin", "notebooklm")
-        ])
-    for p in paths_to_check:
-        if os.path.exists(p):
-            return p
-    return "notebooklm"
+    return paths.get_notebooklm_bin()
 
 
 def refresh_cookies() -> bool:
-    """Refresh NotebookLM cookies from Chrome before the run.
+    """Refresh NotebookLM cookies before the run.
 
-    Calls `notebooklm login --browser-cookies chrome` as a subprocess.
-    Returns True if successful, False otherwise (non-fatal — existing cookies
-    may still be valid).
+    Loads the custom browser setting and performs cookie extraction in-process.
+    Returns True if successful, False otherwise.
     """
-    notebooklm_bin = _get_notebooklm_bin()
-
-    logger.info("Refreshing NotebookLM cookies from Chrome…")
     try:
-        result = subprocess.run(
-            [notebooklm_bin, "login", "--browser-cookies", "chrome"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode == 0:
+        browser = os.getenv("NOTEBOOKLM_BROWSER", "chrome")
+        from notebooklm.paths import get_storage_path
+        from notebooklm.cli.services.login.refresh import _login_with_browser_cookies
+
+        storage_path = get_storage_path()
+        logger.info("Refreshing NotebookLM cookies from %s in-process...", browser)
+
+        try:
+            _login_with_browser_cookies(storage_path, browser)
             logger.info("Cookie refresh successful.")
             return True
-        logger.warning(
-            "Cookie refresh failed (exit %d): %s",
-            result.returncode,
-            (result.stdout + result.stderr).strip()[:200],
-        )
-        return False
-    except FileNotFoundError:
-        logger.warning(
-            "notebooklm binary not found at %s — skipping cookie refresh.",
-            notebooklm_bin,
-        )
-        return False
-    except subprocess.TimeoutExpired:
-        logger.warning("Cookie refresh timed out after 30 seconds.")
-        return False
+        except SystemExit as e:
+            success = (e.code == 0 or e.code is None)
+            if success:
+                logger.info("Cookie refresh successful.")
+            else:
+                logger.warning("Cookie refresh failed.")
+            return success
+        except Exception as e:
+            logger.warning("Cookie refresh failed: %s", e)
+            return False
     except Exception:
         logger.exception("Unexpected error during cookie refresh.")
         return False
@@ -244,7 +218,7 @@ def _extract_video_id(entry) -> str | None:
     return match.group(1) if match else None
 
 
-def fetch_channel_videos(channel_id: str, since_dt: datetime) -> list[dict]:
+def fetch_channel_videos(channel_id: str, since_dt: datetime) -> list[dict] | None:
     """Fetch new videos from a YouTube channel RSS feed.
 
     Args:
@@ -253,22 +227,64 @@ def fetch_channel_videos(channel_id: str, since_dt: datetime) -> list[dict]:
 
     Returns:
         List of dicts: {title, url, video_id, published, description}.
-        Returns [] on any error (non-fatal — logged at WARNING).
+        Returns None on transient error or outage (logged at WARNING).
     """
     url = YOUTUBE_RSS_URL.format(channel_id=channel_id)
-    try:
-        feed = feedparser.parse(url)
-    except Exception:
-        logger.warning("feedparser.parse() raised for channel %s.", channel_id, exc_info=True)
-        return []
+    max_attempts = 3
+    attempt = 0
+    feed = None
 
-    if feed.bozo and not feed.entries:
-        logger.warning(
-            "RSS feed for channel %s appears malformed (bozo=%s). Skipping.",
+    while attempt < max_attempts:
+        attempt += 1
+        try:
+            feed = feedparser.parse(url)
+            
+            # Check for hard HTTP status failures (403, 404) to exit immediately and avoid IP block
+            status_code = feed.get("status")
+            if status_code in (403, 404):
+                logger.error(
+                    "RSS feed for channel %s returned hard error HTTP %s. Skipping without retry.",
+                    channel_id,
+                    status_code,
+                )
+                break
+
+            # If the feed parsed successfully and contains entries (standard healthy case)
+            # OR if it parsed successfully without entries but isn't flagged as bozo (valid empty feed)
+            if not feed.bozo or feed.entries:
+                break
+
+            logger.warning(
+                "RSS feed for channel %s appears malformed/down (bozo=%s). Attempt %d/%d.",
+                channel_id,
+                feed.bozo_exception,
+                attempt,
+                max_attempts,
+            )
+        except Exception as exc:
+            logger.warning(
+                "feedparser.parse() raised exception for channel %s on attempt %d/%d: %s",
+                channel_id,
+                attempt,
+                max_attempts,
+                exc,
+                exc_info=True,
+            )
+
+        if attempt < max_attempts:
+            # Safer, wider backoff gaps (5s, 10s)
+            backoff_sec = 5 * attempt
+            logger.info("Retrying in %ds...", backoff_sec)
+            time.sleep(backoff_sec)
+
+    # After exhausting all attempts, check if we got a valid feed
+    if feed is None or (feed.bozo and not feed.entries):
+        logger.error(
+            "RSS feed for channel %s remains malformed/down after %d attempts. Skipping update of this channel.",
             channel_id,
-            feed.bozo_exception,
+            max_attempts,
         )
-        return []
+        return None
 
     videos = []
     for entry in feed.entries:
@@ -458,8 +474,8 @@ def write_markdown_digest(channels_data: list[dict], run_date: str) -> Path:
     Returns:
         Path to the written file.
     """
-    summaries_dir = Path("summaries")
-    summaries_dir.mkdir(exist_ok=True)
+    summaries_dir = paths.get_summaries_dir()
+    summaries_dir.mkdir(parents=True, exist_ok=True)
     out_path = summaries_dir / f"{run_date}_digest.md"
 
     total_videos = sum(len(ch.get("videos", [])) for ch in channels_data)
@@ -529,21 +545,27 @@ async def async_main(dry_run: bool, skip_email: bool, channels_filter: str | Non
             from email_service import verify_smtp_connection
             verify_smtp_connection(cfg)
         except Exception as exc:
-            logger.critical("SMTP validation failed: %s", exc)
-            sys.exit(1)
+            logger.warning(
+                "SMTP validation failed: %s. "
+                "Local digests will still be written, but email delivery will be skipped.",
+                exc,
+            )
+            skip_email = True
 
 
-    # ── Pre-run cookie refresh ─────────────────────────────────────────────
+    # ── Auth gate & Cookie refresh ─────────────────────────────────────────
     if not dry_run:
-        refresh_cookies()
-
-    # ── Auth gate ──────────────────────────────────────────────────────────
-    if not dry_run:
-        logger.info("Checking NotebookLM authentication…")
-        if not verify_notebooklm_auth():
-            print("AUTH_REQUIRED", flush=True)
-            sys.exit(2)
-        logger.info("Authentication verified.")
+        logger.info("Checking existing NotebookLM authentication…")
+        if await verify_notebooklm_auth():
+            logger.info("Authentication verified with existing cached session. Skipping cookie refresh.")
+        else:
+            logger.info("Existing auth invalid or expired. Attempting cookie refresh...")
+            refresh_cookies()
+            logger.info("Verifying authentication after cookie refresh…")
+            if not await verify_notebooklm_auth():
+                print("AUTH_REQUIRED", flush=True)
+                sys.exit(2)
+            logger.info("Authentication verified after cookie refresh.")
 
     # ── Load channels and state ────────────────────────────────────────────
     channels = load_channels(cfg.channels_file)
@@ -558,145 +580,204 @@ async def async_main(dry_run: bool, skip_email: bool, channels_filter: str | Non
 
     run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    # We will track which channels were successfully checked/processed
-    successful_channel_ids = []
+    # Define the run stages
+    # Stage 0: Initial run
+    # Stage 1: Retry after 1 hour (if failures exist)
+    # Stage 2: Retry after 2 more hours (if failures still exist)
+    retry_stages = [
+        {"name": "Initial Run", "delay_hours": 0},
+        {"name": "1-Hour Retry Run", "delay_hours": 1},
+        {"name": "3-Hour Retry Run", "delay_hours": 2},
+    ]
 
-    # ── Discover new videos per channel ───────────────────────────────────
-    channel_videos: list[tuple[dict, list[dict]]] = []
+    active_channels = list(channels)
 
-    for ch in channels:
-        name = ch["name"]
-        channel_id = ch["channel_id"]
-        since_dt = load_channel_state(cfg.state_file, channel_id)
-
-        logger.info("[%s] Discovering videos published after %s…", name, since_dt.isoformat())
-        raw_videos = fetch_channel_videos(channel_id, since_dt)
-        if not raw_videos:
-            logger.info("[%s] No new videos found.", name)
-            successful_channel_ids.append(channel_id)
-            continue
-
-        # Layer 1: Keyword filter (#shorts)
-        filtered = filter_shorts(raw_videos)
-        if not filtered:
-            logger.info("[%s] All %d video(s) were Shorts — skipping.", name, len(raw_videos))
-            successful_channel_ids.append(channel_id)
-            continue
-
-        # Layer 2: Title heuristic filter (hashtag-heavy)
-        filtered = filter_shorts_by_title_heuristics(filtered)
-        if not filtered:
-            logger.info("[%s] All videos filtered by title heuristic — skipping.", name)
-            successful_channel_ids.append(channel_id)
-            continue
-
-        # Layer 3: Duration filter via YouTube Data API (skipped if API key is not set)
-        if cfg.youtube_api_key:
-            filtered = fetch_durations_and_filter(filtered, cfg.youtube_api_key)
-            if not filtered:
-                logger.info("[%s] All videos filtered by duration — skipping.", name)
-                successful_channel_ids.append(channel_id)
-                continue
-        else:
-            logger.warning("[%s] YouTube API Key is not set. Skipping duration-based Shorts filtering layer.", name)
-
-        logger.info("[%s] %d new video(s) to process.", name, len(filtered))
-        channel_videos.append((ch, filtered))
-
-    # ── Dry-run: just print and exit ──────────────────────────────────────
-    if dry_run:
-        if not channel_videos:
-            print("\n[DRY-RUN] No new videos found across all channels.")
-            return
-        print(f"\n[DRY-RUN] Would process {len(channel_videos)} channel(s):\n")
-        for ch, videos in channel_videos:
-            print(f"  📺 {ch['name']}  ({len(videos)} video(s))")
-            for v in videos:
-                print(f"      • {v['title']}  ({v['published']})")
-                print(f"        {v['url']}")
-            print()
-        return
-
-    if not channel_videos:
-        logger.info("No channels have new videos. Updating state and exiting.")
-        if successful_channel_ids:
-            save_state(cfg.state_file, successful_channel_ids)
-        return
-
-    # ── Process each channel sequentially ─────────────────────────────────
-    results: list[dict] = []
-    quota_exceeded = False
-
-    for idx, (ch, videos) in enumerate(channel_videos):
-        if quota_exceeded:
-            logger.warning(
-                "Notebook quota was exceeded — skipping remaining channels."
-            )
+    for stage_idx, stage in enumerate(retry_stages):
+        if not active_channels:
             break
 
-        # Inter-channel cooldown (skip before first channel)
-        if idx > 0:
-            logger.info(
-                "Cooling down %ds before next channel…", INTER_CHANNEL_COOLDOWN
-            )
-            await asyncio.sleep(INTER_CHANNEL_COOLDOWN)
-
-        try:
-            result = await process_channel_videos(ch["name"], videos, cfg)
-            results.append(result)
-            if not result.get("error"):
-                successful_channel_ids.append(ch["channel_id"])
-        except NotebookLimitError:
-            quota_exceeded = True
-            logger.critical("Notebook quota exceeded — stopping channel processing.")
-
-    if not results:
-        logger.warning("No channels were successfully processed.")
-        if successful_channel_ids:
-            save_state(cfg.state_file, successful_channel_ids)
-        return
-
-    # ── Write Markdown digest ──────────────────────────────────────────────
-    md_path = write_markdown_digest(results, run_date)
-    logger.info("Markdown digest saved to %s", md_path)
-
-    # ── Write per-channel HTML digests locally ──────────────────────────────
-    from email_service import _render_channel_html
-    for ch_result in results:
-        try:
-            safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', ch_result.get("channel_name", "channel"))
-            html_body = _render_channel_html(ch_result, run_date, None)
-            html_path = Path("summaries") / f"{run_date}_{safe_name}_digest.html"
-            html_path.write_text(html_body, encoding="utf-8")
-            logger.info("Local HTML digest saved to %s", html_path)
-        except Exception:
-            logger.exception(
-                "Failed to write local HTML digest for channel %r.",
-                ch_result.get("channel_name", "unknown")
-            )
-
-    # ── Update state BEFORE sending email ─────────────────────────────────
-    if successful_channel_ids:
-        save_state(cfg.state_file, successful_channel_ids)
-
-    # ── Send per-channel email digests ─────────────────────────────────────
-    if skip_email:
-        logger.info("Email delivery skipped (--skip-email flag or missing SMTP credentials).")
-    else:
-        for ch_result in results:
-            try:
-                send_channel_email(ch_result, cfg)
-            except Exception:
-                logger.exception(
-                    "Failed to send email for channel %r. "
-                    "state.json was already updated; videos will not be reprocessed.",
-                    ch_result.get("channel_name", "unknown"),
+        # Apply sleep delay if this is a retry stage
+        if stage["delay_hours"] > 0:
+            delay_sec = stage["delay_hours"] * 3600
+            if dry_run:
+                logger.info(
+                    "[%s] DRY-RUN: Simulating sleep delay of %d hour(s) (%d seconds). Sleeping 1s for dry-run.",
+                    stage["name"],
+                    stage["delay_hours"],
+                    delay_sec,
                 )
+                await asyncio.sleep(1)
+            else:
+                logger.info(
+                    "[%s] Sleeping %d hour(s) before retry run...",
+                    stage["name"],
+                    stage["delay_hours"],
+                )
+                await asyncio.sleep(delay_sec)
 
-    logger.info("Weekly sync complete. Processed %d channel(s).", len(results))
+        logger.info("=== Starting Stage: %s ===", stage["name"])
+
+        # We will track which channels were successfully checked/processed in this stage
+        successful_channel_ids = []
+        # We will track which channels failed due to RSS outage in this stage
+        failed_channels = []
+
+        # ── Discover new videos per channel ───────────────────────────────────
+        stage_channel_videos: list[tuple[dict, list[dict]]] = []
+
+        for ch in active_channels:
+            name = ch["name"]
+            channel_id = ch["channel_id"]
+            since_dt = load_channel_state(cfg.state_file, channel_id)
+
+            logger.info("[%s] Discovering videos published after %s…", name, since_dt.isoformat())
+            raw_videos = fetch_channel_videos(channel_id, since_dt)
+            
+            if raw_videos is None:
+                logger.warning(
+                    "[%s] Skipping channel in this stage due to RSS feed outage.",
+                    name,
+                )
+                failed_channels.append(ch)
+                continue
+
+            if not raw_videos:
+                logger.info("[%s] No new videos found.", name)
+                successful_channel_ids.append(channel_id)
+                continue
+
+            # Layer 1: Keyword filter (#shorts)
+            filtered = filter_shorts(raw_videos)
+            if not filtered:
+                logger.info("[%s] All %d video(s) were Shorts — skipping.", name, len(raw_videos))
+                successful_channel_ids.append(channel_id)
+                continue
+
+            # Layer 2: Title heuristic filter (hashtag-heavy)
+            filtered = filter_shorts_by_title_heuristics(filtered)
+            if not filtered:
+                logger.info("[%s] All videos filtered by title heuristic — skipping.", name)
+                successful_channel_ids.append(channel_id)
+                continue
+
+            # Layer 3: Duration filter via YouTube Data API (skipped if API key is not set)
+            if cfg.youtube_api_key:
+                filtered = fetch_durations_and_filter(filtered, cfg.youtube_api_key)
+                if not filtered:
+                    logger.info("[%s] All videos filtered by duration — skipping.", name)
+                    successful_channel_ids.append(channel_id)
+                    continue
+            else:
+                logger.warning("[%s] YouTube API Key is not set. Skipping duration-based Shorts filtering layer.", name)
+
+            logger.info("[%s] %d new video(s) to process.", name, len(filtered))
+            stage_channel_videos.append((ch, filtered))
+
+        # Handle Dry-run: just print what would be processed in this stage
+        if dry_run:
+            if not stage_channel_videos:
+                logger.info("[%s] [DRY-RUN] No new videos found across channels.", stage["name"])
+            else:
+                logger.info("[%s] [DRY-RUN] Would process channels:", stage["name"])
+                for ch, videos in stage_channel_videos:
+                    logger.info("  📺 %s (%d video(s))", ch["name"], len(videos))
+                    for v in videos:
+                        logger.info("      • %s (%s)", v["title"], v["published"])
+                        logger.info("        %s", v["url"])
+            if successful_channel_ids:
+                logger.info("[%s] [DRY-RUN] Would mark %d channel(s) as successful.", stage["name"], len(successful_channel_ids))
+            # Carry forward failures for dry-run simulation
+            active_channels = failed_channels
+            continue
+
+        # ── Process the channels that have new videos in this stage ─────────
+        stage_results: list[dict] = []
+        quota_exceeded = False
+
+        if not stage_channel_videos:
+            logger.info("[%s] No channels have new videos in this stage.", stage["name"])
+            if successful_channel_ids:
+                save_state(cfg.state_file, successful_channel_ids)
+        else:
+            for idx, (ch, videos) in enumerate(stage_channel_videos):
+                if quota_exceeded:
+                    logger.warning(
+                        "Notebook quota was exceeded — skipping remaining channels."
+                    )
+                    break
+
+                # Inter-channel cooldown (skip before first channel)
+                if idx > 0:
+                    logger.info(
+                        "Cooling down %ds before next channel…", INTER_CHANNEL_COOLDOWN
+                    )
+                    await asyncio.sleep(INTER_CHANNEL_COOLDOWN)
+
+                try:
+                    result = await process_channel_videos(ch["name"], videos, cfg)
+                    stage_results.append(result)
+                    if not result.get("error"):
+                        successful_channel_ids.append(ch["channel_id"])
+                except NotebookLimitError:
+                    quota_exceeded = True
+                    logger.critical("Notebook quota exceeded — stopping channel processing.")
+
+            if not stage_results:
+                logger.warning("[%s] No channels were successfully processed in this stage.", stage["name"])
+                if successful_channel_ids:
+                    save_state(cfg.state_file, successful_channel_ids)
+            else:
+                # Write Markdown digest for this stage
+                md_path = write_markdown_digest(stage_results, f"{run_date}_stage_{stage_idx}")
+                logger.info("[%s] Markdown digest saved to %s", stage["name"], md_path)
+
+                # Write per-channel HTML digests locally
+                from email_service import _render_channel_html
+                for ch_result in stage_results:
+                    try:
+                        safe_name = paths.safe_channel_name(ch_result.get("channel_name", "channel"))
+                        html_body = _render_channel_html(ch_result, run_date, None, cfg.email_theme)
+                        html_path = paths.get_summaries_dir() / f"{run_date}_{safe_name}_digest.html"
+                        html_path.write_text(html_body, encoding="utf-8")
+                        logger.info("Local HTML digest saved to %s", html_path)
+                    except Exception:
+                        logger.exception(
+                            "Failed to write local HTML digest for channel %r.",
+                            ch_result.get("channel_name", "unknown")
+                        )
+
+                # Update state BEFORE sending email
+                if successful_channel_ids:
+                    save_state(cfg.state_file, successful_channel_ids)
+
+                # Send per-channel email digests
+                if skip_email:
+                    logger.info("Email delivery skipped (--skip-email flag or missing SMTP credentials).")
+                else:
+                    for ch_result in stage_results:
+                        try:
+                            send_channel_email(ch_result, cfg)
+                        except Exception:
+                            logger.exception(
+                                "Failed to send email for channel %r. "
+                                "state.json was already updated; videos will not be reprocessed.",
+                                ch_result.get("channel_name", "unknown"),
+                            )
+
+        # Prepare for the next stage (only retry the failed channels)
+        active_channels = failed_channels
+        logger.info(
+            "=== Finished Stage: %s. Succeeded/Skipped: %d, Failed (to be retried): %d ===",
+            stage["name"],
+            len(successful_channel_ids) + len(stage_channel_videos) - len(failed_channels),
+            len(failed_channels),
+        )
+
+    logger.info("Weekly sync complete. Processed all stages.")
 
 
 def main() -> None:
+    paths.ensure_data_dir()
     parser = argparse.ArgumentParser(
         description="TubeLM: Premium YouTube to NotebookLM Weekly Sync",
         formatter_class=argparse.RawDescriptionHelpFormatter,

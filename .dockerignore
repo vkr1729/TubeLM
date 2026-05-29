@@ -1,0 +1,13 @@
+.git
+.venv
+desktop/.venv
+dist
+build
+desktop/build
+desktop/dist
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ipynb_checkpoints

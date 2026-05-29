@@ -34,3 +34,15 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# Android Build & Output Artifacts
+*.apk
+*.aab
+local.properties
+.gradle/
+android/app/build/
+
+# Packaged Build Outputs
+dist/
+build/
+

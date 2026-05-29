@@ -17,9 +17,29 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.11'
+
+    - name: Install dependencies for import resolution
+      run: |
+        pip install --upgrade pip
+        pip install python-dotenv feedparser requests jinja2 markdown-it-py flask notebooklm-py rookiepy pystray pillow
 
     - name: Check Python Syntax & Compilation
       run: |
-        python -m py_compile main.py email_service.py config.py notebooklm_service.py
+        python -m py_compile \
+          desktop/main.py \
+          desktop/email_service.py \
+          desktop/config.py \
+          desktop/notebooklm_service.py \
+          desktop/gui.py \
+          desktop/paths.py \
+          desktop/linux_launcher.py \
+          desktop/win_launcher.py \
+          desktop/mac_launcher.py
         echo "All files compile successfully!"
+
+    - name: Validate PyInstaller spec syntax
+      run: |
+        python3 -c "import ast; ast.parse(open('desktop/tubelm.spec').read()); print('tubelm.spec: OK')"
+        python3 -c "import ast; ast.parse(open('desktop/tubelm_win.spec').read()); print('tubelm_win.spec: OK')"
+        python3 -c "import ast; ast.parse(open('desktop/tubelm_mac.spec').read()); print('tubelm_mac.spec: OK')"

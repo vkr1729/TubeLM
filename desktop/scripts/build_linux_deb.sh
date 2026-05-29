@@ -13,31 +13,24 @@ echo -e "${CYAN}                📺 TubeLM Debian/Ubuntu (.deb) Packager 📺  
 echo -e "${CYAN}=========================================================================${NC}"
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(dirname "$PROJECT_DIR")"
 cd "$PROJECT_DIR"
 
-# Ensure venv exists
-if [ ! -d ".venv" ]; then
-    echo -e "${BLUE}Creating Python virtual environment (.venv)...${NC}"
-    python3 -m venv .venv
+# Ensure venv exists at the repo root (not inside desktop/)
+if [ ! -d "$REPO_ROOT/.venv" ]; then
+    echo -e "${BLUE}Creating Python virtual environment ($REPO_ROOT/.venv)...${NC}"
+    python3 -m venv "$REPO_ROOT/.venv"
 fi
 
-# Activate environment and verify dependencies
-echo -e "${BLUE}Upgrading pip and installing GUI dependencies...${NC}"
-.venv/bin/pip install --upgrade pip
-.venv/bin/pip install -r requirements.txt -r requirements-gui.txt
+# Upgrade pip and install GUI dependencies into root venv
+echo -e "${BLUE}Upgrading pip and installing GUI dependencies into $REPO_ROOT/.venv...${NC}"
+"$REPO_ROOT/.venv/bin/pip" install --upgrade pip
+"$REPO_ROOT/.venv/bin/pip" install -r requirements.txt -r requirements-gui.txt
 
-# Run PyInstaller compilation
-echo -e "\n${BLUE}Compiling Linux application using PyInstaller...${NC}"
-.venv/bin/pyinstaller \
-    --noconsole \
-    --clean \
-    --name="tubelm" \
-    --icon="assets/logo.png" \
-    --add-data "templates:templates" \
-    --add-data "assets:assets" \
-    --add-data "Summary_Prompt.md:." \
-    --add-data "Podcast_Prompt.md:." \
-    linux_launcher.py
+# Run PyInstaller using the spec file (single source of truth for hiddenimports + datas)
+# -y: automatically remove existing dist output directory without prompting
+echo -e "\n${BLUE}Compiling Linux application using PyInstaller spec file (tubelm.spec)...${NC}"
+"$REPO_ROOT/.venv/bin/pyinstaller" --clean -y tubelm.spec
 
 # Create Debian directory structure
 echo -e "\n${BLUE}Creating Debian package structure...${NC}"
@@ -56,6 +49,7 @@ Version: 1.0.0
 Section: utils
 Priority: optional
 Architecture: amd64
+Depends: libgtk-3-0, libappindicator3-1 | libayatana-appindicator3-1, gir1.2-appindicator3-0.1 | gir1.2-ayatanaappindicator3-0.1, xdg-utils, curl, ca-certificates, libgbm1, libnss3, libnspr4, libasound2 | libasound2t64, libxkbcommon0, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libpango-1.0-0, libcairo2, libatk1.0-0, libatk-bridge2.0-0, libdrm2
 Maintainer: TubeLM Team <maintainer@tubelm.io>
 Description: Premium YouTube to NotebookLM Automation Pipeline & Email Digest
  Self-hosted automation pipeline that monitors YouTube feeds, synchronizes
@@ -87,7 +81,7 @@ Categories=Utility;Office;
 EOF
 
 # 5. Copy logo pixmap
-cp assets/logo.png "$DEB_ROOT/usr/share/pixmaps/tubelm.png"
+cp ../shared/assets/logo.png "$DEB_ROOT/usr/share/pixmaps/tubelm.png"
 
 # Fix permissions
 chmod 755 "$DEB_ROOT/DEBIAN"

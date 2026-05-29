@@ -24,11 +24,12 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markdown_it import MarkdownIt
 
 from config import Config
+import paths
 
 logger = logging.getLogger(__name__)
 
 # Path to the templates directory (same location as this file)
-_TEMPLATES_DIR = Path(__file__).parent / "templates"
+_TEMPLATES_DIR = paths.get_templates_dir()
 
 
 def _strip_citations(text: str) -> str:
@@ -84,13 +85,14 @@ def _split_markdown_summary_by_videos(summary_text: str, videos: list[dict], cha
     return video_summaries
 
 
-def _render_channel_html(channel_data: dict, run_date: str, infographic_cid: str | None) -> str:
+def _render_channel_html(channel_data: dict, run_date: str, infographic_cid: str | None, email_theme: str = "email_digest.html") -> str:
     """Render the Jinja2 email template for a single channel.
 
     Args:
         channel_data: Channel result dict from process_channel_videos().
         run_date: Human-readable date string (e.g. "2026-05-21").
         infographic_cid: Content-ID for the inline infographic, or None.
+        email_theme: Filename of the premium theme to render.
 
     Returns:
         Rendered HTML string.
@@ -102,7 +104,11 @@ def _render_channel_html(channel_data: dict, run_date: str, infographic_cid: str
         loader=FileSystemLoader(str(_TEMPLATES_DIR)),
         autoescape=select_autoescape(["html"]),
     )
-    template = env.get_template("email_digest.html")
+    try:
+        template = env.get_template(email_theme)
+    except Exception:
+        logger.warning("Configured email theme %r not found. Falling back to default 'email_digest.html'.", email_theme)
+        template = env.get_template("email_digest.html")
     
     summary_text = channel_data.get("summary_text", "")
     if summary_text:
@@ -155,7 +161,7 @@ def send_channel_email(channel_data: dict, cfg: Config) -> None:
     has_infographic = bool(infographic_path) and Path(infographic_path).exists()
     infographic_cid = "infographic_0" if has_infographic else None
 
-    html_body = _render_channel_html(channel_data, run_date, infographic_cid)
+    html_body = _render_channel_html(channel_data, run_date, infographic_cid, cfg.email_theme)
 
     # Build MIME message: "related" for inline images, "alternative" nested inside
     msg = MIMEMultipart("related")

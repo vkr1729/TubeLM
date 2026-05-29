@@ -4,3 +4,5 @@ requests
 jinja2
 python-dotenv
 rookiepy
+markdown-it-py
+

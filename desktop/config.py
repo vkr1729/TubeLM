@@ -12,7 +12,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+import paths
+
+paths.ensure_data_dir()
+load_dotenv(paths.get_env_file())
+
 
 
 class ConfigurationError(Exception):
@@ -30,16 +34,17 @@ def _get_required(key: str) -> str:
 
 
 def _get_optional(key: str, default: str = "") -> str:
-    return os.getenv(key, default).strip()
+    val = os.getenv(key, "").strip()
+    return val if val else default
 
 
 def _load_prompt_file(filename: str) -> str:
-    """Load a prompt template from a Markdown file in the project root.
+    """Load a prompt template from a Markdown file in the shared prompts directory.
 
     Returns the file content stripped of leading/trailing whitespace,
     or an empty string if the file is missing or empty.
     """
-    path = Path(filename)
+    path = paths.get_prompts_dir() / filename
     if path.exists():
         content = path.read_text(encoding="utf-8").strip()
         if content:
@@ -70,6 +75,12 @@ class Config:
 
     # Retention configuration
     notebooks_retention_limit: int
+
+    # Default browser for NotebookLM extraction (chrome, edge, safari, firefox, opera, etc.)
+    notebooklm_browser: str = "chrome"
+
+    # Premium email theme template name
+    email_theme: str = "email_digest.html"
 
     # Derived: use SSL (port 465) or STARTTLS (port 587)
     use_ssl: bool = field(init=False)
@@ -113,7 +124,9 @@ def load_config() -> Config:
         youtube_api_key=_get_optional("YOUTUBE_API_KEY"),
         summary_prompt=_load_prompt_file("Summary_Prompt.md"),
         podcast_prompt=_load_prompt_file("Podcast_Prompt.md"),
-        channels_file=Path(_get_optional("CHANNELS_FILE", "channels.json")),
-        state_file=Path(_get_optional("STATE_FILE", "state.json")),
+        channels_file=paths.get_channels_file(),
+        state_file=paths.get_state_file(),
         notebooks_retention_limit=notebooks_retention_limit,
+        notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
+        email_theme=_get_optional("EMAIL_THEME", "email_digest.html"),
     )

@@ -5,7 +5,9 @@
 # Handles: network wait, cookie refresh, pipeline execution, logging.
 set -euo pipefail
 
-PROJECT_DIR="/home/kedarnath-reddy-vallaboina/youtube-project-2"
+# Resolve directories dynamically
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 LOG_DIR="$PROJECT_DIR/logs"
 
@@ -45,7 +47,7 @@ sleep 5
 # ── Run the main pipeline ─────────────────────────────────────────────────────
 echo "Starting YouTube→NotebookLM pipeline…"
 cd "$PROJECT_DIR"
-"$VENV_DIR/bin/python" "$PROJECT_DIR/main.py" 2>&1
+"$VENV_DIR/bin/python" "$PROJECT_DIR/desktop/main.py" 2>&1
 EXIT_CODE=$?
 
 echo "=== Run complete: $(date) | Exit code: $EXIT_CODE ==="

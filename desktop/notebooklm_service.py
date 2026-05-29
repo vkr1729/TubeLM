@@ -12,10 +12,13 @@ Responsibilities:
 import asyncio
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
+
+import paths
 
 from notebooklm import (
     NotebookLMClient,
@@ -62,87 +65,45 @@ Discuss key insights, themes, and takeaways in a conversational tone.\
 
 
 def _get_notebooklm_bin() -> str:
-    exe_dir = os.path.dirname(sys.executable)
-    proj_dir = os.path.dirname(os.path.abspath(__file__))
-    paths_to_check = []
-    if sys.platform == "win32":
-        paths_to_check.extend([
-            os.path.join(exe_dir, "notebooklm.exe"),
-            os.path.join(exe_dir, "notebooklm"),
-            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm.exe"),
-            os.path.join(exe_dir, "_internal", "Scripts", "notebooklm"),
-            os.path.join(proj_dir, ".venv", "Scripts", "notebooklm.exe"),
-            os.path.join(proj_dir, ".venv", "Scripts", "notebooklm")
-        ])
-    else:
-        paths_to_check.extend([
-            os.path.join(exe_dir, "notebooklm"),
-            os.path.join(exe_dir, "_internal", "bin", "notebooklm"),
-            os.path.join(proj_dir, ".venv", "bin", "notebooklm")
-        ])
-    for p in paths_to_check:
-        if os.path.exists(p):
-            return p
-    return "notebooklm"
+    return paths.get_notebooklm_bin()
 
 
-def verify_notebooklm_auth() -> bool:
+async def verify_notebooklm_auth() -> bool:
     """Check whether NotebookLM authentication cookies are valid.
 
-    Runs `notebooklm auth check --test` as a subprocess.
-    Returns True if exit code is 0, False otherwise.
-
-    This function never raises — all subprocess errors are caught and
-    logged so the caller can decide how to handle the failure.
+    Loads NotebookLMClient from storage in-process and tests listing notebooks.
+    Must be awaited — it is async to avoid nested event loop errors when called
+    from within async_main() (asyncio.run() is already active on the thread).
+    Returns True if successful, False otherwise.
     """
-    notebooklm_bin = _get_notebooklm_bin()
-
     try:
-        result = subprocess.run(
-            [notebooklm_bin, "auth", "check", "--test"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode == 0:
-            logger.info("NotebookLM auth check passed.")
-            return True
-        logger.warning(
-            "NotebookLM auth check failed (exit %d): %s",
-            result.returncode,
-            (result.stdout + result.stderr).strip(),
-        )
-        return False
-    except FileNotFoundError:
-        logger.error(
-            "notebooklm binary not found at %s. "
-            "Run: pip install notebooklm-py[browser]",
-            notebooklm_bin,
-        )
-        return False
-    except subprocess.TimeoutExpired:
-        logger.error("notebooklm auth check timed out after 30 seconds.")
-        return False
-    except Exception:
-        logger.exception("Unexpected error running notebooklm auth check.")
+        async with NotebookLMClient.from_storage(keepalive=15) as client:
+            await client.notebooks.list()
+        return True
+    except Exception as e:
+        logger.warning("NotebookLM auth check failed: %s", e)
         return False
 
 
 def _refresh_cookies_for_retry() -> bool:
-    """Re-extract cookies from Chrome for mid-run auth recovery.
+    """Re-extract cookies from browser for mid-run auth recovery.
 
     Called when authentication expires during processing. Uses the same
     mechanism as the pre-run refresh in main.py.
     """
-    notebooklm_bin = _get_notebooklm_bin()
     try:
-        result = subprocess.run(
-            [notebooklm_bin, "login", "--browser-cookies", "chrome"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        return result.returncode == 0
+        browser = os.getenv("NOTEBOOKLM_BROWSER", "chrome")
+        from notebooklm.paths import get_storage_path
+        from notebooklm.cli.services.login.refresh import _login_with_browser_cookies
+
+        storage_path = get_storage_path()
+        try:
+            _login_with_browser_cookies(storage_path, browser)
+            return True
+        except SystemExit as e:
+            return e.code == 0 or e.code is None
+        except Exception:
+            return False
     except Exception:
         logger.exception("Cookie re-extraction failed during retry.")
         return False
@@ -193,8 +154,7 @@ async def process_channel_videos(
 
     try:
         # Use keepalive=600 to prevent cookies from going stale during long runs
-        client = await NotebookLMClient.from_storage(keepalive=600)
-        async with client:
+        async with NotebookLMClient.from_storage(keepalive=600) as client:
             # ── Step 1: Create notebook ───────────────────────────────────────
             logger.info("Creating notebook: %r", notebook_title)
             try:
@@ -296,13 +256,15 @@ async def process_channel_videos(
                 )
                 if infographic_status.task_id:
                     completed = await client.artifacts.wait_for_completion(
-                        notebook_id, infographic_status.task_id, timeout=300
+                        notebook_id, infographic_status.task_id, timeout=900
                     )
                     if completed.is_complete:
-                        safe_name = channel_name.replace(" ", "_").replace("/", "_")
-                        out_path = f"summaries/{today}_{safe_name}_infographic.png"
+                        safe_name = paths.safe_channel_name(channel_name)
+                        out_path = str(paths.get_summaries_dir() / f"{today}_{safe_name}_infographic.png")
                         await client.artifacts.download_infographic(
-                            notebook_id, out_path
+                            notebook_id,
+                            out_path,
+                            artifact_id=infographic_status.task_id,
                         )
                         result["infographic_path"] = out_path
                         logger.info("Infographic saved: %s", out_path)
@@ -340,6 +302,7 @@ async def process_channel_videos(
             try:
                 await client.artifacts.generate_audio(
                     notebook_id,
+                    source_ids=source_ids,
                     instructions=audio_instructions,
                 )
                 logger.info("Audio Overview triggered (fire-and-forget).")

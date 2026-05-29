@@ -588,6 +588,60 @@
             flex-direction: column;
             gap: 12px;
         }
+        /* ── Requirements Banner ── */
+        .req-banner {
+            display: none;
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-bottom: 28px;
+            animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .req-banner.visible { display: block; }
+        .req-banner-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            color: #f59e0b;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .req-item {
+            margin-bottom: 14px;
+            padding-left: 12px;
+            border-left: 2px solid rgba(245, 158, 11, 0.4);
+        }
+        .req-item-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 3px;
+        }
+        .req-item-desc {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 3px;
+        }
+        .req-item-detail {
+            font-size: 12px;
+            color: var(--warning);
+            margin-bottom: 6px;
+        }
+        .req-item-fix {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: #f59e0b;
+            background: rgba(245, 158, 11, 0.06);
+            border: 1px solid rgba(245, 158, 11, 0.15);
+            border-radius: 6px;
+            padding: 8px 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
@@ -636,6 +690,16 @@
         
         <!-- Dashboard Tab -->
         <div class="tab-content active" id="dashboard">
+
+            <!-- First-launch requirements banner — auto-hides when all deps are met -->
+            <div class="req-banner" id="req-banner">
+                <div class="req-banner-title">⚠️ Setup Required — Missing Runtime Dependencies</div>
+                <div id="req-list"></div>
+                <p style="font-size: 12px; color: var(--text-muted); margin-top: 14px;">
+                    This notice will disappear automatically once all requirements are satisfied. Re-checked every 30 seconds.
+                </p>
+            </div>
+
             <div class="header">
                 <h1>Overview</h1>
                 <p>Welcome to TubeLM pipeline control desk.</p>
@@ -858,7 +922,17 @@
                             <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Retains the N latest notebooks per channel and automatically deletes older ones after each run.</span>
                         </div>
                         <div class="form-group">
-                            <!-- empty spacer -->
+                            <label>NotebookLM Cookie Extraction Browser</label>
+                            <select name="NOTEBOOKLM_BROWSER" style="width: 100%; padding: 10px 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: var(--text-primary);">
+                                <option value="chrome">Google Chrome</option>
+                                <option value="firefox">Mozilla Firefox</option>
+                                <option value="edge">Microsoft Edge</option>
+                                <option value="safari">Apple Safari (macOS only)</option>
+                                <option value="opera">Opera</option>
+                                <option value="vivaldi">Vivaldi</option>
+                                <option value="chromium">Chromium</option>
+                            </select>
+                            <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Select the browser used to log into NotebookLM for decrypting session cookies.</span>
                         </div>
                     </div>
 
@@ -984,6 +1058,37 @@
 
     <!-- Script Section -->
     <script>
+        // ── Requirements Banner (first-launch setup check) ────────────────────────
+        function checkRequirements() {
+            fetch('/api/system/requirements')
+                .then(r => r.json())
+                .then(data => {
+                    const banner = document.getElementById('req-banner');
+                    const list   = document.getElementById('req-list');
+                    if (data.all_ok) {
+                        banner.classList.remove('visible');
+                        return;
+                    }
+                    // Render each unmet requirement
+                    list.innerHTML = data.requirements
+                        .filter(r => !r.ok)
+                        .map(r => `
+                            <div class="req-item">
+                                <div class="req-item-name">${r.name}</div>
+                                <div class="req-item-desc">${r.description}</div>
+                                <div class="req-item-detail">${r.detail}</div>
+                                <div class="req-item-fix">${r.how_to_fix}</div>
+                            </div>
+                        `).join('');
+                    banner.classList.add('visible');
+                })
+                .catch(err => console.warn('Could not check requirements:', err));
+        }
+
+        // Check on initial load and re-poll every 30 seconds
+        checkRequirements();
+        setInterval(checkRequirements, 30000);
+
         // ── Navigation tabs ──
         const navItems = document.querySelectorAll('.nav-item');
         const tabContents = document.querySelectorAll('.tab-content');
@@ -1032,6 +1137,7 @@
                     const setupBtn = document.getElementById('btn-setup-systemd');
                     const saveScheduleBtn = document.getElementById('btn-save-schedule');
                     
+                    const schedulerType = systemd.scheduler_type || "systemd timer";
                     if (systemd.installed) {
                         sysEl.innerText = systemd.timer_active ? "Enabled" : "Disabled";
                         sysEl.style.color = systemd.timer_active ? "var(--success)" : "var(--danger)";
@@ -1040,15 +1146,15 @@
                         toggleBtn.style.display = "inline-flex";
                         if (setupBtn) setupBtn.style.display = "none";
                         if (saveScheduleBtn) saveScheduleBtn.style.display = "block";
-                        document.getElementById('systemd-desc').innerText = "Toggles background schedules handled by systemd timer.";
+                        document.getElementById('systemd-desc').innerText = "Toggles background schedules handled by " + schedulerType + ".";
                     } else {
                         sysEl.innerText = "Uninstalled";
                         sysEl.style.color = "var(--text-muted)";
-                        nextEl.innerText = "systemd configuration files missing.";
+                        nextEl.innerText = schedulerType + " configuration missing.";
                         toggleBtn.style.display = "none";
                         if (setupBtn) setupBtn.style.display = "inline-flex";
                         if (saveScheduleBtn) saveScheduleBtn.style.display = "none";
-                        document.getElementById('systemd-desc').innerText = "Systemd timer service files not found. Setup timer daemon locally to use scheduler.";
+                        document.getElementById('systemd-desc').innerText = schedulerType + " not found/configured. Setup scheduler locally to use automation.";
                     }
                     
                     // Pre-fill schedule selectors
@@ -1121,17 +1227,17 @@
                 });
         }
 
-        // Toggle systemd schedule
+        // Toggle scheduler schedule
         document.getElementById('btn-toggle-systemd').addEventListener('click', () => {
-            fetch('/api/systemd/toggle', { method: 'POST' })
+            fetch('/api/scheduler/toggle', { method: 'POST' })
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) loadStatus();
-                    else alert("Error toggling systemd timer: " + data.error);
+                    else alert("Error toggling scheduler: " + data.error);
                 });
         });
 
-        // Setup systemd scheduler
+        // Setup scheduler
         const setupBtn = document.getElementById('btn-setup-systemd');
         if (setupBtn) {
             setupBtn.addEventListener('click', () => {
@@ -1141,7 +1247,7 @@
                     day_of_week: document.getElementById('schedule-day').value,
                     time: document.getElementById('schedule-time').value
                 };
-                fetch('/api/systemd/setup', {
+                fetch('/api/scheduler/setup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -1151,10 +1257,10 @@
                         setupBtn.innerText = "Setup Scheduler Daemon";
                         setupBtn.disabled = false;
                         if (data.success) {
-                            alert("Weekly systemd scheduler daemon successfully created, enabled, and started!");
+                            alert("Weekly scheduler automation successfully registered!");
                             loadStatus();
                         } else {
-                            alert("Error setting up scheduler daemon: " + data.error);
+                            alert("Error setting up scheduler: " + data.error);
                         }
                     })
                     .catch(err => {
@@ -1165,7 +1271,7 @@
             });
         }
 
-        // Save/Update systemd scheduler calendar
+        // Save/Update scheduler calendar
         const saveScheduleBtn = document.getElementById('btn-save-schedule');
         if (saveScheduleBtn) {
             saveScheduleBtn.addEventListener('click', () => {
@@ -1175,7 +1281,7 @@
                     day_of_week: document.getElementById('schedule-day').value,
                     time: document.getElementById('schedule-time').value
                 };
-                fetch('/api/systemd/setup', {
+                fetch('/api/scheduler/setup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -1185,7 +1291,7 @@
                         saveScheduleBtn.innerText = "Update Schedule Calendar";
                         saveScheduleBtn.disabled = false;
                         if (data.success) {
-                            alert("Weekly systemd scheduler calendar successfully updated!");
+                            alert("Weekly scheduler calendar successfully updated!");
                             loadStatus();
                         } else {
                             alert("Error updating scheduler calendar: " + data.error);
@@ -1365,7 +1471,7 @@
             const form = document.getElementById('form-config');
             const data = {};
             
-            const inputs = form.querySelectorAll('input');
+            const inputs = form.querySelectorAll('input, select');
             inputs.forEach(input => {
                 const key = input.name;
                 const val = input.value.trim();

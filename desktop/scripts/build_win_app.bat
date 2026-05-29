@@ -4,34 +4,25 @@ echo =========================================================================
 echo                   TubeLM Windows App Bundler Wizard
 echo =========================================================================
 
-REM Navigate to project root
+REM Navigate to desktop directory (where the spec file lives)
 cd /d "%~dp0\.."
+set "REPO_ROOT=%~dp0\..\.."
 
-REM Ensure venv exists
-if not exist .venv (
-    echo Creating Python virtual environment venv...
-    python -m venv .venv
+REM Ensure venv exists at repo root (not inside desktop\)
+if not exist "%REPO_ROOT%\.venv" (
+    echo Creating Python virtual environment at %REPO_ROOT%\.venv ...
+    python -m venv "%REPO_ROOT%\.venv"
 )
 
-REM Activate environment and verify dependencies
+REM Upgrade pip and install GUI dependencies into repo root venv
 echo Upgrading pip and installing GUI dependencies...
-call .venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-pip install -r requirements.txt -r requirements-gui.txt
+"%REPO_ROOT%\.venv\Scripts\pip.exe" install --upgrade pip
+"%REPO_ROOT%\.venv\Scripts\pip.exe" install -r requirements.txt -r requirements-gui.txt
 
-REM Run PyInstaller compilation
+REM Run PyInstaller using the Windows spec file (single source of truth)
 echo.
-echo Compiling TubeLM tray application using PyInstaller...
-pyinstaller ^
-    --noconsole ^
-    --clean ^
-    --name="TubeLM" ^
-    --icon="assets\logo.ico" ^
-    --add-data "templates;templates" ^
-    --add-data "assets;assets" ^
-    --add-data "Summary_Prompt.md;." ^
-    --add-data "Podcast_Prompt.md;." ^
-    win_launcher.py
+echo Compiling TubeLM tray application using PyInstaller spec (tubelm_win.spec)...
+"%REPO_ROOT%\.venv\Scripts\pyinstaller.exe" --clean tubelm_win.spec
 
 echo.
 echo =========================================================================
