@@ -3,6 +3,7 @@ GEMINI.md
 CLAUDE.md
 implementation_plan.md
 success_criteria.md
+walkthrough.md
 antigravity-init.sh
 
 # Sensitive Environment Configurations
@@ -18,6 +19,10 @@ summaries/
 scratch/
 *.log
 *.bak
+
+# Runtime Database & Dev Artifacts
+tubelm_database
+screen.png
 
 # Virtual Environment & Python Caches
 .venv/
@@ -35,14 +40,9 @@ __pycache__/
 .vscode/
 .idea/
 
-# Android Build & Output Artifacts
-*.apk
-*.aab
-local.properties
-.gradle/
-android/app/build/
-
 # Packaged Build Outputs
+desktop/dist/
+desktop/build/
 dist/
 build/
 

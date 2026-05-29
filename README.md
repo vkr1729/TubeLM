@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="TubeLM Logo" width="220px">
+  <img src="shared/assets/logo.png" alt="TubeLM Logo" width="220px">
 </p>
 
 # 🎬 TubeLM — Premium YouTube to NotebookLM Automation Pipeline & Email Digest
@@ -50,7 +50,7 @@ For non-technical users who want to run the TubeLM Web Dashboard **without** usi
 ### 🖥️ Local Web Dashboard GUI
 Experience a premium, glassmorphic dark-theme control panel to monitor active subscriptions, edit channel timestamps inline, manage Google session cookies, and batch-delete workspaces in parallel:
 
-![TubeLM Local Web Dashboard](assets/gui_dashboard.png)
+![TubeLM Local Web Dashboard](shared/assets/gui_dashboard.png)
 
 ---
 
@@ -59,7 +59,7 @@ Delivers a publication-grade, mobile-optimized HTML newsletter optimized for Gma
 
 | 1. Header & Infographic | 2. Video Card & Thesis | 3. Hard Data Points |
 | :---: | :---: | :---: |
-| ![Header & Infographic](assets/email_preview_header.jpg) | ![Video Card & Thesis](assets/email_preview_thesis.jpg) | ![Bullet Highlights](assets/email_preview_data.jpg) |
+| ![Header & Infographic](shared/assets/email_preview_header.jpg) | ![Video Card & Thesis](shared/assets/email_preview_thesis.jpg) | ![Bullet Highlights](shared/assets/email_preview_data.jpg) |
 
 ---
 
