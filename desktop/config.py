@@ -70,7 +70,7 @@ class Config:
     podcast_prompt: str   # Content of Podcast_Prompt.md (or empty → use default)
 
     # Local file paths
-    channels_file: Path
+    sources_file: Path
     state_file: Path
 
     # Retention configuration
@@ -124,7 +124,7 @@ def load_config() -> Config:
         youtube_api_key=_get_optional("YOUTUBE_API_KEY"),
         summary_prompt=_load_prompt_file("Summary_Prompt.md"),
         podcast_prompt=_load_prompt_file("Podcast_Prompt.md"),
-        channels_file=paths.get_channels_file(),
+        sources_file=paths.get_sources_file(),
         state_file=paths.get_state_file(),
         notebooks_retention_limit=notebooks_retention_limit,
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),

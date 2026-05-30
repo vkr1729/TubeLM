@@ -249,6 +249,13 @@
       margin-top: 20px;
       margin-bottom: 8px;
     }
+    .summary-html h4, .summary-html h5, .summary-html h6 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #0F172A;
+      margin-top: 16px;
+      margin-bottom: 8px;
+    }
     .summary-html p {
       font-size: 13px;
       color: #475569;
@@ -302,11 +309,41 @@
   </style>
 </head>
 <body>
+{% set source_type = channel.source_type | default('youtube') %}
+{% if source_type == 'youtube' %}
+  {% set type_icon = '📹' %}
+  {% set label_plural = 'New Videos' %}
+  {% set label_singular = 'Video' %}
+  {% set brand_prefix = 'YouTube' %}
+  {% set launch_label = 'Launch Video Stream' %}
+  {% set cta_label = 'Watch Now' %}
+{% elif source_type == 'rss' %}
+  {% set type_icon = '📰' %}
+  {% set label_plural = 'New Articles' %}
+  {% set label_singular = 'Article' %}
+  {% set brand_prefix = 'RSS Feed' %}
+  {% set launch_label = 'Open Notebook' %}
+  {% set cta_label = 'Read Article' %}
+{% elif source_type == 'webpage' %}
+  {% set type_icon = '🌐' %}
+  {% set label_plural = 'New Pages' %}
+  {% set label_singular = 'Page' %}
+  {% set brand_prefix = 'Webpage' %}
+  {% set launch_label = 'Open Notebook' %}
+  {% set cta_label = 'Open Page' %}
+{% else %}
+  {% set type_icon = '📑' %}
+  {% set label_plural = 'New Items' %}
+  {% set label_singular = 'Item' %}
+  {% set brand_prefix = 'Source' %}
+  {% set launch_label = 'Open Notebook' %}
+  {% set cta_label = 'View Item' %}
+{% endif %}
 <div class="email-wrapper">
 
   <!-- Header -->
   <div class="header">
-    <div class="header-badge">📹 Executive Digest</div>
+    <div class="header-badge">{{ type_icon }} Executive Digest</div>
     <h1>{{ channel.channel_name }}</h1>
     <p class="subtitle">Briefing for {{ run_date }} · Powered by NotebookLM</p>
   </div>
@@ -315,14 +352,14 @@
   <div class="stats-bar">
     <div class="stat">
       <span class="stat-number">{{ total_videos }}</span>
-      <span class="stat-label">New Videos</span>
+      <span class="stat-label">{{ label_plural }}</span>
     </div>
     <div class="stat">
       <span class="stat-number">{% if channel.notebook_url %}1{% else %}0{% endif %}</span>
       <span class="stat-label">Notebook</span>
     </div>
     <div class="stat">
-      <span class="stat-number">{% if infographic_cid %}📊{% else %}—{% endif %}</span>
+      <span class="stat-number">{% if infographic_src %}📊{% else %}—{% endif %}</span>
       <span class="stat-label">Infographic</span>
     </div>
   </div>
@@ -338,27 +375,28 @@
     {% if channel.notebook_url %}
     <div class="action-bar">
       <a class="notebook-btn" href="{{ channel.notebook_url }}" target="_blank">
-        Launch Video Stream
+        {{ launch_label }}
       </a>
     </div>
     {% endif %}
 
     <!-- Infographic Section -->
-    {% if infographic_cid %}
+    {% if infographic_src %}
     <div class="section-label">📊 Visual Infographic</div>
     <div class="infographic-section">
-      <img src="cid:{{ infographic_cid }}" alt="Channel Infographic" class="infographic-img" />
+      <img src="{{ infographic_src }}" alt="Channel Infographic" class="infographic-img" />
     </div>
     {% endif %}
 
     <!-- Videos Section -->
-    <div class="section-label">New Videos</div>
+    <div class="section-label">{{ label_plural }}</div>
     {% for v in channel.videos %}
       {% set is_even = loop.index0 % 2 == 0 %}
       <table cellpadding="0" cellspacing="0" border="0" width="100%" class="video-table" style="background-color: {% if is_even %}#F8FAFC{% else %}#FFFFFF{% endif %}; {% if not is_even %}border: 1px solid #E2E8F0;{% endif %}">
         <tr>
           {% if is_even %}
             <!-- Image Left, Content Right -->
+            {% if v.video_id %}
             <td width="260" valign="middle">
               <div class="thumbnail-container">
                 <a href="{{ v.url }}" target="_blank">
@@ -368,20 +406,22 @@
               </div>
             </td>
             <td width="32">&nbsp;</td>
-            <td width="260" valign="middle">
+            {% endif %}
+            <td {% if not v.video_id %}colspan="3"{% else %}width="260"{% endif %} valign="middle">
               <span class="row-tag">New Release</span>
               <h2 class="row-title"><a href="{{ v.url }}" target="_blank">{{ v.title }}</a></h2>
               <div class="row-date">Published on {{ v.published }}</div>
-              <a href="{{ v.url }}" target="_blank" class="row-cta">Watch Now</a>
+              <a href="{{ v.url }}" target="_blank" class="row-cta">{{ cta_label }}</a>
             </td>
           {% else %}
             <!-- Content Left, Image Right -->
-            <td width="260" valign="middle">
+            <td {% if not v.video_id %}colspan="3"{% else %}width="260"{% endif %} valign="middle">
               <span class="row-tag">New Release</span>
               <h2 class="row-title"><a href="{{ v.url }}" target="_blank">{{ v.title }}</a></h2>
               <div class="row-date">Published on {{ v.published }}</div>
-              <a href="{{ v.url }}" target="_blank" class="row-cta">Watch Now</a>
+              <a href="{{ v.url }}" target="_blank" class="row-cta">{{ cta_label }}</a>
             </td>
+            {% if v.video_id %}
             <td width="32">&nbsp;</td>
             <td width="260" valign="middle">
               <div class="thumbnail-container">
@@ -391,6 +431,7 @@
                 </a>
               </div>
             </td>
+            {% endif %}
           {% endif %}
         </tr>
       </table>
@@ -410,11 +451,12 @@
 
   <!-- Footer -->
   <div class="footer">
-    <p class="footer-brand">YouTube → NotebookLM Briefing Digest</p>
-    <p>Generated on {{ run_date }} · {{ total_videos }} video{{ 's' if total_videos != 1 else '' }} analyzed</p>
+    <p class="footer-brand">{{ brand_prefix }} → NotebookLM Briefing Digest</p>
+    <p>Generated on {{ run_date }} · {{ total_videos }} {{ label_singular.lower() }}{{ 's' if total_videos != 1 else '' }} analyzed</p>
     <p>Notebook includes Audio Overview — check NotebookLM Studio for playback.</p>
   </div>
 
 </div>
 </body>
 </html>
+

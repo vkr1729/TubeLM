@@ -658,7 +658,7 @@
                 <button>📊 Dashboard</button>
             </li>
             <li class="nav-item" data-tab="channels">
-                <button>📺 Channels</button>
+                <button>📺 Channels / Sources</button>
             </li>
             <li class="nav-item" data-tab="notebooks">
                 <button>📒 Notebooks</button>
@@ -707,9 +707,9 @@
             
             <div class="grid-3">
                 <div class="glass-card">
-                    <div class="stat-label">Monitored Channels</div>
+                    <div class="stat-label">Monitored Sources</div>
                     <div class="stat-value" id="stat-channels">0</div>
-                    <div style="font-size: 12px; color: var(--text-secondary);"> monitoed via channels.json </div>
+                    <div style="font-size: 12px; color: var(--text-secondary);"> configured in sources.json </div>
                 </div>
                 <div class="glass-card">
                     <div class="stat-label">Last Sync Execution</div>
@@ -779,48 +779,116 @@
             </div>
         </div>
 
-        <!-- Channels Tab -->
+        <!-- Sources Tab -->
         <div class="tab-content" id="channels">
             <div class="header">
-                <h1>Monitor Channels</h1>
-                <p>Add or delete YouTube channels to fetch latest feeds.</p>
+                <h1>Content Sources</h1>
+                <p>Add YouTube channels, RSS feeds, or web pages to monitor.</p>
             </div>
-            
+
             <div class="glass-card" style="margin-bottom: 32px;">
-                <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Add Channel</h3>
-                <form id="form-add-channel">
-                    <div class="form-group" style="margin-bottom: 24px;">
-                        <label>Auto-Extract from YouTube Channel URL / Handle</label>
-                        <div style="display: flex; gap: 12px;">
-                            <input type="text" id="extract-url" placeholder="e.g. https://www.youtube.com/@Physionic or https://www.youtube.com/channel/UCj3p_1jOCJXB_L_we-DjLbA" style="flex-grow: 1;">
-                            <button type="button" class="btn btn-secondary" id="btn-extract-channel" style="flex-shrink: 0; padding: 12px 20px;">Extract Info</button>
+                <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Add Source</h3>
+
+                <div style="display: flex; gap: 8px; margin-bottom: 20px;">
+                    <button type="button" class="btn source-type-btn active" data-type="youtube" onclick="switchSourceType('youtube')">YouTube</button>
+                    <button type="button" class="btn btn-secondary source-type-btn" data-type="rss" onclick="switchSourceType('rss')">RSS Feed</button>
+                    <button type="button" class="btn btn-secondary source-type-btn" data-type="webpage" onclick="switchSourceType('webpage')">Web Page</button>
+                </div>
+
+                <form id="form-add-source">
+                    <input type="hidden" id="add-source-type" value="youtube">
+
+                    <!-- YouTube fields -->
+                    <div id="fields-youtube">
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label>Auto-Extract from YouTube Channel URL / Handle</label>
+                            <div style="display: flex; gap: 12px;">
+                                <input type="text" id="extract-url" placeholder="e.g. https://www.youtube.com/@Physionic or /channel/UCj3p..." style="flex-grow: 1;">
+                                <button type="button" class="btn btn-secondary" id="btn-extract-channel" style="flex-shrink: 0; padding: 12px 20px;">Extract Info</button>
+                            </div>
+                            <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Paste any YouTube channel link and click Extract to auto-populate fields below.</span>
                         </div>
-                        <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Paste any YouTube channel link and click Extract to auto-populate fields below.</span>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Channel Name</label>
+                                <input type="text" id="add-channel-name" placeholder="e.g. Doctor Alex">
+                            </div>
+                            <div class="form-group">
+                                <label>Channel ID</label>
+                                <input type="text" id="add-channel-id" placeholder="e.g. UCj3p_1jOCJXB_L_we-DjLbA">
+                            </div>
+                        </div>
                     </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Channel Name</label>
-                            <input type="text" id="add-channel-name" placeholder="e.g. Doctor Alex" required>
+
+                    <!-- RSS fields -->
+                    <div id="fields-rss" style="display: none;">
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label>Feed URL</label>
+                            <div style="display: flex; gap: 12px;">
+                                <input type="text" id="add-rss-url" placeholder="e.g. https://simonwillison.net/atom/everything/" style="flex-grow: 1;">
+                                <button type="button" class="btn btn-secondary" id="btn-validate-rss" style="flex-shrink: 0; padding: 12px 20px;">Validate</button>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label>Channel ID</label>
-                            <input type="text" id="add-channel-id" placeholder="e.g. UCj3p_1jOCJXB_L_we-DjLbA" required>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Feed Name</label>
+                                <input type="text" id="add-rss-name" placeholder="e.g. Simon Willison's Blog">
+                            </div>
+                            <div class="form-group">
+                                <label>Max Items Per Run</label>
+                                <input type="number" id="add-rss-max-items" value="15" min="1" max="50">
+                            </div>
+                        </div>
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 16px; cursor: pointer;">
+                            <input type="checkbox" id="add-rss-force-text" style="accent-color: var(--accent-red);">
+                            Force local text extraction (for paywalled or JS-heavy sites)
+                        </label>
+                    </div>
+
+                    <!-- Webpage fields -->
+                    <div id="fields-webpage" style="display: none;">
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label>Page URL</label>
+                            <div style="display: flex; gap: 12px;">
+                                <input type="text" id="add-webpage-url" placeholder="e.g. https://paulgraham.com/articles.html" style="flex-grow: 1;">
+                                <button type="button" class="btn btn-secondary" id="btn-validate-webpage" style="flex-shrink: 0; padding: 12px 20px;">Validate</button>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Page Name</label>
+                                <input type="text" id="add-webpage-name" placeholder="e.g. Paul Graham Essays">
+                            </div>
+                            <div class="form-group">
+                                <label>Max Items Per Run</label>
+                                <input type="number" id="add-webpage-max-items" value="10" min="1" max="50">
+                            </div>
+                        </div>
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 12px; cursor: pointer;">
+                            <input type="checkbox" id="add-webpage-is-index" style="accent-color: var(--accent-red);">
+                            This is an index page (extract sub-links)
+                        </label>
+                        <div class="form-group" id="webpage-selector-group" style="display: none;">
+                            <label>Link CSS Selector (optional)</label>
+                            <input type="text" id="add-webpage-selector" placeholder='e.g. td a[href] or article a'>
                         </div>
                     </div>
-                    <button type="submit" class="btn">Add Channel</button>
+
+                    <button type="submit" class="btn">Add Source</button>
                 </form>
             </div>
 
             <div class="glass-card">
-                <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Active Subscription List</h3>
+                <h3 style="margin-bottom: 16px; font-family: 'Outfit', sans-serif;">Active Source List</h3>
                 <div style="overflow-x: auto;">
                     <table>
                         <thead>
                             <tr>
-                                <th>Channel Name</th>
-                                <th>Channel ID</th>
-                                <th>NotebookLM Workspace</th>
-                                <th style="width: 100px;">Actions</th>
+                                <th style="width: 40px;">Type</th>
+                                <th>Name</th>
+                                <th>Details</th>
+                                <th>NotebookLM</th>
+                                <th style="width: 80px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="channels-table-body">
@@ -906,7 +974,7 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Channels Configuration File</label>
+                            <label>Sources Configuration File</label>
                             <input type="text" name="CHANNELS_FILE">
                         </div>
                         <div class="form-group">
@@ -988,13 +1056,13 @@
                 
                 <div style="margin-bottom: 24px; border-top: 1px solid var(--border-color); padding-top: 16px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
-                        <h4 style="font-family: 'Outfit', sans-serif; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary);">Selective Channel Execution</h4>
+                        <h4 style="font-family: 'Outfit', sans-serif; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary);">Selective Source Execution</h4>
                         <div style="display: flex; gap: 8px;">
                             <button type="button" class="btn btn-secondary" id="btn-select-all-channels" style="padding: 4px 8px; font-size: 11px;">Select All</button>
                             <button type="button" class="btn btn-secondary" id="btn-deselect-all-channels" style="padding: 4px 8px; font-size: 11px;">Deselect All</button>
                         </div>
                     </div>
-                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Select specific channels to run. If none are checked, the pipeline will run for ALL channels.</p>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Select specific sources to run. If none are checked, the pipeline will run for ALL sources.</p>
                     <div id="run-channels-checklist" style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding: 12px; background: rgba(0,0,0,0.15); border-radius: 6px; border: 1px solid var(--border-color);">
                         <!-- Populated dynamically -->
                         <div style="color: var(--text-muted); font-size: 12px; text-align: center;">Loading channels...</div>
@@ -1032,7 +1100,7 @@
             
             <div class="digest-split">
                 <div class="digest-sidebar">
-                    <div class="digest-sidebar-header">📺 Channels</div>
+                    <div class="digest-sidebar-header">📺 Sources</div>
                     <ul class="digest-list" id="digest-channels-list">
                         <!-- Populated by JS -->
                     </ul>
@@ -1342,35 +1410,62 @@
         });
 
         // 2. Channels Manager
+        function switchSourceType(type) {
+            document.getElementById('add-source-type').value = type;
+            document.querySelectorAll('.source-type-btn').forEach(btn => {
+                if (btn.dataset.type === type) {
+                    btn.className = 'btn source-type-btn active';
+                } else {
+                    btn.className = 'btn btn-secondary source-type-btn';
+                }
+            });
+            document.getElementById('fields-youtube').style.display = type === 'youtube' ? '' : 'none';
+            document.getElementById('fields-rss').style.display = type === 'rss' ? '' : 'none';
+            document.getElementById('fields-webpage').style.display = type === 'webpage' ? '' : 'none';
+        }
+
+        document.getElementById('add-webpage-is-index').addEventListener('change', (e) => {
+            document.getElementById('webpage-selector-group').style.display = e.target.checked ? '' : 'none';
+        });
+
         function loadChannels() {
             fetch('/api/notebooks')
                 .then(r => r.json())
                 .then(notebooks => {
                     window.notebooksMap = notebooks;
-                    
-                    fetch('/api/channels')
+
+                    fetch('/api/sources')
                         .then(r => r.json())
-                        .then(channels => {
+                        .then(sources => {
                             const tbody = document.getElementById('channels-table-body');
                             tbody.innerHTML = '';
-                            
-                            if (channels.length === 0) {
-                                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No channels configured. Add one below!</td></tr>';
+
+                            if (sources.length === 0) {
+                                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No sources configured. Add one above!</td></tr>';
                                 return;
                             }
-                            
-                            channels.forEach(ch => {
+
+                            sources.forEach(src => {
                                 const tr = document.createElement('tr');
-                                const url = window.notebooksMap[ch.name];
-                                const notebookLink = url 
-                                    ? `<a href="${url}" target="_blank" style="color: var(--accent-blue); text-decoration: none; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">📒 Open Notebook</a>`
-                                    : `<span style="color: var(--text-muted); font-size: 13px;">No notebook generated</span>`;
-                                    
+                                const srcType = src.type || 'youtube';
+                                const typeIcon = srcType === 'youtube' ? '▶️' : srcType === 'rss' ? '📡' : '🌐';
+                                const identifier = src.channel_id || src.url || '';
+                                const detail = srcType === 'youtube'
+                                    ? `<code style="font-family: 'JetBrains Mono', monospace; font-size: 12px;">${src.channel_id || ''}</code>`
+                                    : `<code style="font-family: 'JetBrains Mono', monospace; font-size: 12px; word-break: break-all;">${src.url || ''}</code>`;
+
+                                const nbUrl = window.notebooksMap[src.name];
+                                const notebookLink = nbUrl
+                                    ? `<a href="${nbUrl}" target="_blank" style="color: var(--accent-blue); text-decoration: none; font-size: 12px;">📒 Open</a>`
+                                    : `<span style="color: var(--text-muted); font-size: 12px;">—</span>`;
+
+                                const deleteId = encodeURIComponent(identifier);
                                 tr.innerHTML = `
-                                    <td><strong>${ch.name}</strong></td>
-                                    <td><code style="font-family: 'JetBrains Mono', monospace; font-size: 13px;">${ch.channel_id}</code></td>
+                                    <td style="text-align: center; font-size: 16px;" title="${srcType}">${typeIcon}</td>
+                                    <td><strong>${src.name}</strong></td>
+                                    <td>${detail}</td>
                                     <td>${notebookLink}</td>
-                                    <td><button class="btn btn-secondary btn-danger" style="padding: 6px 12px; font-size: 12px;" onclick="deleteChannel('${ch.channel_id}')">Delete</button></td>
+                                    <td><button class="btn btn-secondary btn-danger" style="padding: 4px 10px; font-size: 11px;" onclick="deleteSource('${deleteId}')">Delete</button></td>
                                 `;
                                 tbody.appendChild(tr);
                             });
@@ -1378,7 +1473,111 @@
                 });
         }
 
-        // Add channel form
+        window.deleteSource = function(encodedIdentifier) {
+            const identifier = decodeURIComponent(encodedIdentifier);
+            if (!confirm("Delete this source?")) return;
+            fetch('/api/sources/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ identifier: identifier })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) alert(data.error);
+                    else loadChannels();
+                });
+        };
+        window.deleteChannel = window.deleteSource;
+
+        // Add source form
+        document.getElementById('form-add-source').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const type = document.getElementById('add-source-type').value;
+            let payload = { type };
+
+            if (type === 'youtube') {
+                payload.name = document.getElementById('add-channel-name').value.trim();
+                payload.channel_id = document.getElementById('add-channel-id').value.trim();
+                if (!payload.name || !payload.channel_id) { alert('Name and Channel ID are required.'); return; }
+            } else if (type === 'rss') {
+                payload.name = document.getElementById('add-rss-name').value.trim();
+                payload.url = document.getElementById('add-rss-url').value.trim();
+                payload.max_items = parseInt(document.getElementById('add-rss-max-items').value) || 15;
+                payload.force_text_extraction = document.getElementById('add-rss-force-text').checked;
+                if (!payload.name || !payload.url) { alert('Name and Feed URL are required.'); return; }
+            } else if (type === 'webpage') {
+                payload.name = document.getElementById('add-webpage-name').value.trim();
+                payload.url = document.getElementById('add-webpage-url').value.trim();
+                payload.max_items = parseInt(document.getElementById('add-webpage-max-items').value) || 10;
+                payload.is_index_page = document.getElementById('add-webpage-is-index').checked;
+                payload.link_selector = document.getElementById('add-webpage-selector').value.trim();
+                if (!payload.name || !payload.url) { alert('Name and URL are required.'); return; }
+            }
+
+            fetch('/api/sources', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) { alert(data.error); return; }
+                // Clear form
+                if (type === 'youtube') {
+                    document.getElementById('add-channel-name').value = '';
+                    document.getElementById('add-channel-id').value = '';
+                } else if (type === 'rss') {
+                    document.getElementById('add-rss-name').value = '';
+                    document.getElementById('add-rss-url').value = '';
+                } else if (type === 'webpage') {
+                    document.getElementById('add-webpage-name').value = '';
+                    document.getElementById('add-webpage-url').value = '';
+                    document.getElementById('add-webpage-selector').value = '';
+                }
+                loadChannels();
+            });
+        });
+
+        // Validate buttons
+        document.getElementById('btn-validate-rss').addEventListener('click', () => {
+            const url = document.getElementById('add-rss-url').value.trim();
+            if (!url) { alert('Enter a feed URL first.'); return; }
+            const btn = document.getElementById('btn-validate-rss');
+            btn.innerText = "Validating..."; btn.disabled = true;
+            fetch('/api/sources/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
+                .then(r => r.json())
+                .then(data => {
+                    btn.innerText = "Validate"; btn.disabled = false;
+                    if (data.error) { alert("Validation failed: " + data.error); return; }
+                    if (data.type === 'rss') {
+                        if (data.name) document.getElementById('add-rss-name').value = data.name;
+                        alert(`Valid RSS feed detected! ${data.entry_count || 0} entries found.`);
+                    } else {
+                        alert(`This URL was detected as type "${data.type}", not RSS. Switch to the correct tab.`);
+                    }
+                })
+                .catch(() => { btn.innerText = "Validate"; btn.disabled = false; alert("Validation request failed."); });
+        });
+
+        document.getElementById('btn-validate-webpage').addEventListener('click', () => {
+            const url = document.getElementById('add-webpage-url').value.trim();
+            if (!url) { alert('Enter a page URL first.'); return; }
+            const btn = document.getElementById('btn-validate-webpage');
+            btn.innerText = "Validating..."; btn.disabled = true;
+            fetch('/api/sources/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
+                .then(r => r.json())
+                .then(data => {
+                    btn.innerText = "Validate"; btn.disabled = false;
+                    if (data.error) { alert("Validation failed: " + data.error); return; }
+                    if (data.name) document.getElementById('add-webpage-name').value = data.name;
+                    alert(`Page validated. Detected type: ${data.type}. ${data.name ? 'Name: ' + data.name : ''}`);
+                })
+                .catch(() => { btn.innerText = "Validate"; btn.disabled = false; alert("Validation request failed."); });
+        });
+
+        // YouTube extract button
         document.getElementById('btn-extract-channel').addEventListener('click', () => {
             const url = document.getElementById('extract-url').value.trim();
             if (!url) {
@@ -1413,38 +1612,7 @@
             });
         });
 
-        document.getElementById('form-add-channel').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const name = document.getElementById('add-channel-name').value;
-            const channel_id = document.getElementById('add-channel-id').value;
-            
-            fetch('/api/channels', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, channel_id })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.error) alert(data.error);
-                else {
-                    document.getElementById('add-channel-name').value = '';
-                    document.getElementById('add-channel-id').value = '';
-                    loadChannels();
-                }
-            });
-        });
-
-        // Delete channel helper
-        window.deleteChannel = function(channelId) {
-            if (!confirm("Are you sure you want to delete this channel?")) return;
-            
-            fetch(`/api/channels/${channelId}`, { method: 'DELETE' })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.error) alert(data.error);
-                    else loadChannels();
-                });
-        };
+        // (Legacy form-add-channel handler removed — now handled by form-add-source above)
 
         // 3. Configuration Tab
         function loadConfig() {
@@ -2118,54 +2286,59 @@
         // ── Selective Run Checklist ──
         function loadRunChannels() {
             Promise.all([
-                fetch('/api/channels').then(r => r.json()),
+                fetch('/api/sources').then(r => r.json()),
                 fetch('/api/state').then(r => r.json())
             ])
-            .then(([channels, state]) => {
+            .then(([sources, state]) => {
                 const checklist = document.getElementById('run-channels-checklist');
                 if (!checklist) return;
                 checklist.innerHTML = '';
-                
-                if (channels.length === 0) {
-                    checklist.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; text-align: center; width: 100%; padding: 20px;">No channels found. Add channels in the Monitored Channels tab.</div>';
+
+                if (sources.length === 0) {
+                    checklist.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; text-align: center; width: 100%; padding: 20px;">No sources found. Add sources in the Content Sources tab.</div>';
                     return;
                 }
-                
-                channels.forEach(ch => {
+
+                sources.forEach(src => {
                     const row = document.createElement('div');
-                    row.style.display = 'flex';
-                    row.style.alignItems = 'center';
-                    row.style.justifyContent = 'space-between';
-                    row.style.padding = '8px 12px';
-                    row.style.background = 'rgba(255,255,255,0.02)';
-                    row.style.borderRadius = '6px';
-                    row.style.border = '1px solid rgba(255,255,255,0.05)';
-                    row.style.gap = '12px';
-                    row.style.flexWrap = 'wrap';
-                    
-                    const chTime = state.channels ? state.channels[ch.channel_id] : null;
+                    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:6px;border:1px solid rgba(255,255,255,0.05);gap:12px;flex-wrap:wrap;';
+
+                    const srcType = src.type || 'youtube';
+                    const typeIcon = srcType === 'youtube' ? '▶️' : srcType === 'rss' ? '📡' : '🌐';
+                    const checkboxValue = src.channel_id || src.name;
+                    const stateKey = src.state_key;
+
+                    let chTime = null;
+                    if (stateKey && state.sources) {
+                        chTime = state.sources[stateKey];
+                    }
+                    if (!chTime && srcType === 'youtube' && src.channel_id && state.channels) {
+                        chTime = state.channels[src.channel_id];
+                    }
+
                     let displayTime = "";
                     let rawTime = "";
-                    
+
                     if (chTime) {
-                        displayTime = `Last Run: ${formatDate(chTime)} (Custom)`;
+                        displayTime = `Last Run: ${formatDate(chTime)}`;
                         rawTime = chTime;
                     } else if (state.last_run_time) {
                         displayTime = `Last Run: ${formatDate(state.last_run_time)} (Global)`;
-                        rawTime = state.last_run_time;
+                        rawTime = "";
                     } else {
-                        displayTime = "Last Run: Default (14d lookback)";
+                        displayTime = "Last Run: Default lookback";
                         rawTime = "";
                     }
-                    
+
                     row.innerHTML = `
                         <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary); cursor: pointer; padding: 4px; margin: 0; text-transform: none;">
-                            <input type="checkbox" class="run-channel-checkbox" value="${ch.channel_id}" style="accent-color: var(--accent-red); width: 14px; height: 14px;">
-                            <span style="font-weight: 500;">${ch.name}</span>
+                            <input type="checkbox" class="run-channel-checkbox" value="${checkboxValue}" style="accent-color: var(--accent-red); width: 14px; height: 14px;">
+                            <span style="margin-right: 4px;">${typeIcon}</span>
+                            <span style="font-weight: 500;">${src.name}</span>
                         </label>
-                        <div class="channel-timestamp-container" id="ts-container-${ch.channel_id}" style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
-                            <span class="ts-display" style="color: var(--text-secondary);">${displayTime}</span>
-                            <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; margin: 0;" onclick="editChannelTimestamp('${ch.channel_id}', '${rawTime}')">Edit</button>
+                        <div id="ts-container-${stateKey}" style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary);">
+                            <span>${displayTime}</span>
+                            <button type="button" class="btn btn-secondary" style="padding: 2px 6px; font-size: 10px; margin: 0;" onclick="editChannelTimestamp('${stateKey}', '${rawTime}')">Edit</button>
                         </div>
                     `;
                     checklist.appendChild(row);
@@ -2174,27 +2347,27 @@
             .catch(err => {
                 const checklist = document.getElementById('run-channels-checklist');
                 if (checklist) {
-                    checklist.innerHTML = `<div style="color: var(--danger); font-size: 12px; text-align: center; padding: 20px;">Error loading selective channels list: ${err.message}</div>`;
+                    checklist.innerHTML = `<div style="color: var(--danger); font-size: 12px; text-align: center; padding: 20px;">Error loading selective sources list: ${err.message}</div>`;
                 }
             });
         }
 
-        window.editChannelTimestamp = function(channelId, rawTime) {
-            const container = document.getElementById(`ts-container-${channelId}`);
+        window.editChannelTimestamp = function(stateKey, rawTime) {
+            const container = document.getElementById(`ts-container-${stateKey}`);
             if (!container) return;
             
             const pickerVal = formatForPicker(rawTime || new Date().toISOString());
             
             container.innerHTML = `
-                <input type="datetime-local" class="input-field" id="ts-input-${channelId}" value="${pickerVal}" style="padding: 4px 8px; font-size: 11px; width: 180px; margin: 0; background: rgba(0,0,0,0.3); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;">
-                <button type="button" class="btn" style="padding: 4px 8px; font-size: 11px; margin: 0; background: var(--accent-blue);" onclick="saveChannelTimestamp('${channelId}')">Save</button>
-                <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; margin: 0; color: var(--accent-red); border-color: rgba(239, 68, 68, 0.3);" onclick="clearChannelTimestamp('${channelId}')">Clear</button>
+                <input type="datetime-local" class="input-field" id="ts-input-${stateKey}" value="${pickerVal}" style="padding: 4px 8px; font-size: 11px; width: 180px; margin: 0; background: rgba(0,0,0,0.3); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;">
+                <button type="button" class="btn" style="padding: 4px 8px; font-size: 11px; margin: 0; background: var(--accent-blue);" onclick="saveChannelTimestamp('${stateKey}')">Save</button>
+                <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; margin: 0; color: var(--accent-red); border-color: rgba(239, 68, 68, 0.3);" onclick="clearChannelTimestamp('${stateKey}')">Clear</button>
                 <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; margin: 0;" onclick="loadRunChannels()">Cancel</button>
             `;
         };
 
-        window.saveChannelTimestamp = function(channelId) {
-            const pickerVal = document.getElementById(`ts-input-${channelId}`).value;
+        window.saveChannelTimestamp = function(stateKey) {
+            const pickerVal = document.getElementById(`ts-input-${stateKey}`).value;
             let isoString = null;
             if (pickerVal) {
                 const localDate = new Date(pickerVal);
@@ -2212,7 +2385,7 @@
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    channel_id: channelId,
+                    state_key: stateKey,
                     timestamp: isoString
                 })
             })
@@ -2229,8 +2402,8 @@
             });
         };
 
-        window.clearChannelTimestamp = function(channelId) {
-            if (!confirm("Clear this custom timestamp? The channel will revert to using the default lookback.")) return;
+        window.clearChannelTimestamp = function(stateKey) {
+            if (!confirm("Clear this custom timestamp? The source will revert to using the default lookback.")) return;
             
             fetch('/api/state/channel', {
                 method: 'POST',
@@ -2238,7 +2411,7 @@
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    channel_id: channelId,
+                    state_key: stateKey,
                     timestamp: null
                 })
             })

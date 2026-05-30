@@ -89,7 +89,7 @@ def _render_channel_html(channel_data: dict, run_date: str, infographic_cid: str
     """Render the Jinja2 email template for a single channel.
 
     Args:
-        channel_data: Channel result dict from process_channel_videos().
+        channel_data: Channel result dict from process_source_items().
         run_date: Human-readable date string (e.g. "2026-05-21").
         infographic_cid: Content-ID for the inline infographic, or None.
         email_theme: Filename of the premium theme to render.
@@ -128,12 +128,25 @@ def _render_channel_html(channel_data: dict, run_date: str, infographic_cid: str
         v_summary_md = video_summaries.get(v_url, "")
         v["summary_html"] = md.render(v_summary_md) if v_summary_md else ""
         
+    infographic_src = None
+    if infographic_cid:
+        infographic_src = f"cid:{infographic_cid}"
+    else:
+        info_path = channel_data.get("infographic_path")
+        if info_path and Path(info_path).exists():
+            infographic_src = Path(info_path).name
+
+    global_summary_html = md.render(summary_text) if summary_text else ""
+
     return template.render(
         channel=channel_data,
         run_date=run_date,
         total_videos=len(videos),
         infographic_cid=infographic_cid,
+        infographic_src=infographic_src,
+        summary_html=global_summary_html,
     )
+
 
 
 def send_channel_email(channel_data: dict, cfg: Config) -> None:
@@ -176,8 +189,10 @@ def send_channel_email(channel_data: dict, cfg: Config) -> None:
     # Attach infographic as inline image
     if has_infographic:
         try:
+            suffix = Path(infographic_path).suffix.lower()
+            subtype = "jpeg" if suffix in (".jpg", ".jpeg") else "png"
             with open(infographic_path, "rb") as f:
-                img = MIMEImage(f.read(), _subtype="png")
+                img = MIMEImage(f.read(), _subtype=subtype)
                 img.add_header("Content-ID", f"<{infographic_cid}>")
                 img.add_header(
                     "Content-Disposition",

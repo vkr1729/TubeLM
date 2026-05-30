@@ -46,3 +46,17 @@ desktop/build/
 dist/
 build/
 
+AGENTS.md
+
+# Local sources config (contains personal RSS/channels)
+sources.json
+
+# Local scripts/scratch
+launch_claude.sh
+
+# Local Marketing materials
+marketing_strategy.md
+reddit_*.md
+
+# Local dev/commandcode configs
+.commandcode/

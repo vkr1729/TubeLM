@@ -67,6 +67,26 @@ def get_channels_file() -> Path:
             return local_ch
     return get_data_dir() / "channels.json"
 
+
+def get_sources_file() -> Path:
+    """Returns the path to the user's sources.json file.
+    Falls back to channels.json if sources.json does not exist (backward compat).
+    """
+    if not is_frozen():
+        local_src = get_bundle_dir().parent / "sources.json"
+        if local_src.exists():
+            return local_src
+        local_ch = get_bundle_dir().parent / "channels.json"
+        if local_ch.exists():
+            return local_ch
+    sources_path = get_data_dir() / "sources.json"
+    if sources_path.exists():
+        return sources_path
+    channels_path = get_data_dir() / "channels.json"
+    if channels_path.exists():
+        return channels_path
+    return get_data_dir() / "sources.json"
+
 def get_state_file() -> Path:
     """Returns the path to the user's state.json file."""
     return get_data_dir() / "state.json"
@@ -83,23 +103,42 @@ def ensure_data_dir() -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     get_summaries_dir().mkdir(exist_ok=True)
 
-    # Resolve example file paths
-    # In frozen mode, they are collected in the bundle root.
-    # In dev mode, they are in the workspace root.
+    # 1. Auto-migrate channels.json -> sources.json if sources.json doesn't exist
+    if not is_frozen():
+        local_ch = get_bundle_dir().parent / "channels.json"
+        local_src = get_bundle_dir().parent / "sources.json"
+        if local_ch.exists() and not local_src.exists():
+            try:
+                local_ch.rename(local_src)
+                print(f"Auto-migrated: Renamed local {local_ch} to {local_src}")
+            except Exception as e:
+                import sys
+                print(f"Error migrating channels.json to sources.json: {e}", file=sys.stderr)
+    
+    user_ch = get_data_dir() / "channels.json"
+    user_src = get_data_dir() / "sources.json"
+    if user_ch.exists() and not user_src.exists():
+        try:
+            user_ch.rename(user_src)
+            print(f"Auto-migrated: Renamed user {user_ch} to {user_src}")
+        except Exception as e:
+            import sys
+            print(f"Error migrating ~/.tubelm/channels.json to ~/.tubelm/sources.json: {e}", file=sys.stderr)
+
     if is_frozen():
         src_env = get_bundle_dir() / ".env.example"
-        src_channels = get_bundle_dir() / "channels.json.example"
+        src_sources = get_bundle_dir() / "sources.json.example"
     else:
         src_env = get_bundle_dir().parent / ".env.example"
-        src_channels = get_bundle_dir().parent / "channels.json.example"
+        src_sources = get_bundle_dir().parent / "sources.json.example"
 
     dest_env = get_env_file()
     if not dest_env.exists() and src_env.exists():
         shutil.copy(src_env, dest_env)
 
-    dest_channels = get_channels_file()
-    if not dest_channels.exists() and src_channels.exists():
-        shutil.copy(src_channels, dest_channels)
+    dest_sources = get_sources_file()
+    if not dest_sources.exists() and src_sources.exists():
+        shutil.copy(src_sources, dest_sources)
 
 def get_notebooklm_bin() -> str:
     """Resolve the location of the bundled or environment-installed notebooklm CLI."""

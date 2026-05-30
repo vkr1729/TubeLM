@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>TechBlog</title>
+    <link>https://techblog.example.com</link>
+    <description>A blog about technology</description>
+    <item>
+      <title>Understanding Async Programming in Python</title>
+      <link>https://techblog.example.com/async-python</link>
+      <pubDate>Thu, 22 May 2025 10:00:00 GMT</pubDate>
+      <description>An in-depth look at async programming in Python.</description>
+    </item>
+    <item>
+      <title>Docker Best Practices for 2025</title>
+      <link>https://techblog.example.com/docker-2025</link>
+      <pubDate>Wed, 21 May 2025 14:00:00 GMT</pubDate>
+      <description>Updated best practices for Docker in 2025.</description>
+    </item>
+    <item>
+      <title>Machine Learning with Rust</title>
+      <link>https://techblog.example.com/ml-rust</link>
+      <pubDate>Sat, 17 May 2025 09:00:00 GMT</pubDate>
+      <description>Exploring ML frameworks in Rust.</description>
+    </item>
+    <item>
+      <title>Kubernetes at Scale</title>
+      <link>https://techblog.example.com/k8s-scale</link>
+      <pubDate>Mon, 12 May 2025 16:00:00 GMT</pubDate>
+      <description>Lessons learned running K8s at scale.</description>
+    </item>
+    <item>
+      <title>TypeScript 6.0 Features</title>
+      <link>https://techblog.example.com/ts6</link>
+      <pubDate>Fri, 09 May 2025 11:00:00 GMT</pubDate>
+      <description>What's new in TypeScript 6.0.</description>
+    </item>
+  </channel>
+</rss>

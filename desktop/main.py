@@ -21,21 +21,19 @@ import asyncio
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-import feedparser
-import requests
 
 from config import ConfigurationError, load_config
 from email_service import send_channel_email
 import paths
-from notebooklm_service import process_channel_videos, verify_notebooklm_auth
+from notebooklm_service import process_source_items, verify_notebooklm_auth
 from notebooklm.exceptions import NotebookLimitError
+from sources_loader import load_sources
+from source_handlers.factory import create_handler
+from source_handlers import SourceItem
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
 
@@ -49,12 +47,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-YOUTUBE_RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/videos"
-YOUTUBE_WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
 DEFAULT_LOOKBACK_DAYS = 7
-MIN_VIDEO_DURATION_SECONDS = 180  # 3 minutes
-SHORTS_KEYWORDS = re.compile(r"#shorts?", re.IGNORECASE)
 
 # Inter-channel cooldown to avoid NotebookLM rate-limiting (seconds)
 INTER_CHANNEL_COOLDOWN = 60
@@ -101,10 +94,14 @@ def refresh_cookies() -> bool:
 
 # ── State management ───────────────────────────────────────────────────────────
 
-def load_channel_state(state_file: Path, channel_id: str) -> datetime:
-    """Return the last-run datetime for a specific channel (UTC, timezone-aware).
+def load_source_state(state_file: Path, state_key: str) -> datetime:
+    """Return the last-run datetime for a specific source (UTC, timezone-aware).
 
-    Falls back to global last_run_time or DEFAULT_LOOKBACK_DAYS ago if not found.
+    Lookup priority:
+      1. state["sources"][state_key] (new format)
+      2. state["channels"][channel_id] (legacy YouTube backward compat)
+      3. state["last_run_time"] (global fallback)
+      4. DEFAULT_LOOKBACK_DAYS ago (hard fallback)
     """
     default = datetime.now(timezone.utc) - timedelta(days=DEFAULT_LOOKBACK_DAYS)
     try:
@@ -112,30 +109,55 @@ def load_channel_state(state_file: Path, channel_id: str) -> datetime:
             return default
         text = state_file.read_text(encoding="utf-8")
         data = json.loads(text)
-        
-        # Check channel-specific timestamp
+
+        # 1. Check new sources format
+        sources_state = data.get("sources", {})
+        if isinstance(sources_state, dict):
+            ts = sources_state.get(state_key)
+            if ts:
+                dt = datetime.fromisoformat(ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+
+        # 2. Legacy channels format (YouTube backward compat)
         channels_state = data.get("channels", {})
-        ts = channels_state.get(channel_id) if isinstance(channels_state, dict) else None
-        
-        # Fallback to global last_run_time
-        if not ts:
-            ts = data.get("last_run_time")
-            
-        if not ts:
-            return default
-            
-        dt = datetime.fromisoformat(ts)
-        # Ensure timezone-aware
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+        if isinstance(channels_state, dict):
+            ts = channels_state.get(state_key)
+            # If not found by full key, strip "youtube:" prefix for bare channel_id lookup
+            if not ts and state_key.startswith("youtube:"):
+                channel_id = state_key[len("youtube:"):]
+                ts = channels_state.get(channel_id)
+            if ts:
+                dt = datetime.fromisoformat(ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+
+        # 3. Fallback to global last_run_time
+        ts = data.get("last_run_time")
+        if ts:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+
+        return default
     except Exception as exc:
-        logger.warning("Could not parse state for channel %s (%s) — using %d-day lookback.", channel_id, exc, DEFAULT_LOOKBACK_DAYS)
+        logger.warning("Could not parse state for %s (%s) — using %d-day lookback.", state_key, exc, DEFAULT_LOOKBACK_DAYS)
         return default
 
 
-def save_state(state_file: Path, processed_channels: list[str]) -> None:
-    """Update state.json with the current UTC timestamp for processed channels."""
+# Backward-compat alias
+load_channel_state = load_source_state
+
+
+def save_state(state_file: Path, processed_keys: list[str]) -> None:
+    """Update state.json with the current UTC timestamp for processed source keys.
+
+    Writes to both 'sources' (new format) and 'channels' (legacy backward compat
+    for YouTube channels where the key is bare channel_id without prefix).
+    """
     now = datetime.now(timezone.utc).isoformat()
     data = {}
     try:
@@ -143,332 +165,62 @@ def save_state(state_file: Path, processed_channels: list[str]) -> None:
             data = json.loads(state_file.read_text(encoding="utf-8"))
     except Exception:
         pass
-    
+
     if "channels" not in data or not isinstance(data["channels"], dict):
         data["channels"] = {}
-        
-    for ch_id in processed_channels:
-        data["channels"][ch_id] = now
-        
-    data["last_run_time"] = now  # update global last_run_time as well
+
+    if "sources" not in data or not isinstance(data["sources"], dict):
+        data["sources"] = {}
+
+    for key in processed_keys:
+        data["sources"][key] = now
+        # YouTube backward compat: strip "youtube:" prefix
+        if key.startswith("youtube:"):
+            channel_id = key[len("youtube:"):]
+            data["channels"][channel_id] = now
+
+    data["last_run_time"] = now
     state_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    logger.info("state.json updated for channels: %s", ", ".join(processed_channels))
+    logger.info("state.json updated for keys: %s", ", ".join(processed_keys))
 
 
-# ── Channel list loader ────────────────────────────────────────────────────────
-
-def load_channels(channels_file: Path) -> list[dict]:
-    """Load channel list from JSON. Each entry must have 'name' and 'channel_id'.
-
-    Raises:
-        SystemExit: If the file is missing, malformed, or has invalid entries.
-    """
+def load_seen_urls(state_file: Path, state_key: str) -> set[str]:
+    """Load previously seen URLs for a source key from state.json."""
     try:
-        data = json.loads(channels_file.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        logger.critical("channels.json not found at %s. Exiting.", channels_file)
-        sys.exit(1)
-    except json.JSONDecodeError as exc:
-        logger.critical("channels.json is not valid JSON: %s. Exiting.", exc)
-        sys.exit(1)
-
-    valid = []
-    for i, entry in enumerate(data):
-        if not isinstance(entry, dict) or not entry.get("name") or not entry.get("channel_id"):
-            logger.warning("channels.json entry %d missing 'name' or 'channel_id' — skipping.", i)
-            continue
-        valid.append(entry)
-
-    if not valid:
-        logger.critical("No valid channels found in channels.json. Exiting.")
-        sys.exit(1)
-
-    logger.info("Loaded %d channel(s) from %s.", len(valid), channels_file)
-    return valid
-
-
-# ── RSS feed fetching ──────────────────────────────────────────────────────────
-
-def _parse_rss_datetime(entry) -> datetime:
-    """Extract published datetime from a feedparser entry.
-
-    Returns a timezone-aware UTC datetime.
-    Falls back to epoch (1970-01-01) if unparseable so the video is
-    excluded from the new-video window rather than crashing.
-    """
-    try:
-        if hasattr(entry, "published_parsed") and entry.published_parsed:
-            import calendar
-            ts = calendar.timegm(entry.published_parsed)
-            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        if not state_file.exists():
+            return set()
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        seen = data.get("seen_urls", {})
+        if isinstance(seen, dict):
+            return set(seen.get(state_key, []))
     except Exception:
-        logger.debug("Could not parse published_parsed for entry; defaulting to epoch.", exc_info=True)
-    return datetime.fromtimestamp(0, tz=timezone.utc)
+        pass
+    return set()
 
 
-def _extract_video_id(entry) -> str | None:
-    """Extract YouTube video ID from a feedparser entry."""
-    # yt:videoId tag is the most reliable source
-    vid_id = getattr(entry, "yt_videoid", None)
-    if vid_id:
-        return vid_id
-    # Fallback: parse from the entry link
-    link = getattr(entry, "link", "")
-    match = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", link)
-    return match.group(1) if match else None
-
-
-def fetch_channel_videos(channel_id: str, since_dt: datetime) -> list[dict] | None:
-    """Fetch new videos from a YouTube channel RSS feed.
-
-    Args:
-        channel_id: YouTube channel ID.
-        since_dt: Only return videos published after this datetime (UTC-aware).
-
-    Returns:
-        List of dicts: {title, url, video_id, published, description}.
-        Returns None on transient error or outage (logged at WARNING).
-    """
-    url = YOUTUBE_RSS_URL.format(channel_id=channel_id)
-    max_attempts = 3
-    attempt = 0
-    feed = None
-
-    while attempt < max_attempts:
-        attempt += 1
-        try:
-            feed = feedparser.parse(url)
-            
-            # Check for hard HTTP status failures (403, 404) to exit immediately and avoid IP block
-            status_code = feed.get("status")
-            if status_code in (403, 404):
-                logger.error(
-                    "RSS feed for channel %s returned hard error HTTP %s. Skipping without retry.",
-                    channel_id,
-                    status_code,
-                )
-                break
-
-            # If the feed parsed successfully and contains entries (standard healthy case)
-            # OR if it parsed successfully without entries but isn't flagged as bozo (valid empty feed)
-            if not feed.bozo or feed.entries:
-                break
-
-            logger.warning(
-                "RSS feed for channel %s appears malformed/down (bozo=%s). Attempt %d/%d.",
-                channel_id,
-                feed.bozo_exception,
-                attempt,
-                max_attempts,
-            )
-        except Exception as exc:
-            logger.warning(
-                "feedparser.parse() raised exception for channel %s on attempt %d/%d: %s",
-                channel_id,
-                attempt,
-                max_attempts,
-                exc,
-                exc_info=True,
-            )
-
-        if attempt < max_attempts:
-            # Safer, wider backoff gaps (5s, 10s)
-            backoff_sec = 5 * attempt
-            logger.info("Retrying in %ds...", backoff_sec)
-            time.sleep(backoff_sec)
-
-    # After exhausting all attempts, check if we got a valid feed
-    if feed is None or (feed.bozo and not feed.entries):
-        logger.error(
-            "RSS feed for channel %s remains malformed/down after %d attempts. Skipping update of this channel.",
-            channel_id,
-            max_attempts,
-        )
-        return None
-
-    videos = []
-    for entry in feed.entries:
-        pub_dt = _parse_rss_datetime(entry)
-        if pub_dt <= since_dt:
-            continue  # Older than the lookback window
-
-        video_id = _extract_video_id(entry)
-        if not video_id:
-            logger.warning("Could not extract video ID for entry: %s", getattr(entry, "link", "?"))
-            continue
-
-        title = getattr(entry, "title", "")
-        description = ""
-        if hasattr(entry, "summary"):
-            description = entry.summary
-        elif hasattr(entry, "description"):
-            description = entry.description
-
-        videos.append({
-            "title": title,
-            "url": YOUTUBE_WATCH_URL.format(video_id=video_id),
-            "video_id": video_id,
-            "published": pub_dt.strftime("%Y-%m-%d"),
-            "description": description,
-        })
-
-    return videos
-
-
-# ── Shorts filtering (3 layers) ───────────────────────────────────────────────
-
-def filter_shorts(videos: list[dict]) -> list[dict]:
-    """Layer 1: Remove videos whose title or description contains #shorts.
-
-    Args:
-        videos: List of video dicts from fetch_channel_videos().
-
-    Returns:
-        Filtered list (Shorts excluded).
-    """
-    filtered = []
-    for v in videos:
-        if SHORTS_KEYWORDS.search(v["title"]) or SHORTS_KEYWORDS.search(v.get("description", "")):
-            logger.debug("Filtered #shorts: %s", v["title"])
-            continue
-        filtered.append(v)
-    removed = len(videos) - len(filtered)
-    if removed:
-        logger.info("Filtered %d Shorts video(s) by keyword.", removed)
-    return filtered
-
-
-def filter_shorts_by_title_heuristics(videos: list[dict]) -> list[dict]:
-    """Layer 2: Filter likely Shorts by title pattern analysis.
-
-    Flags videos whose titles are primarily hashtags (≥3 hashtags AND
-    hashtag characters make up >50% of the title length). These are
-    almost always short-form content.
-
-    Args:
-        videos: List of video dicts.
-
-    Returns:
-        Filtered list with hashtag-heavy titles removed.
-    """
-    filtered = []
-    for v in videos:
-        title = v["title"]
-        hashtags = re.findall(r"#\w+", title)
-        hashtag_count = len(hashtags)
-        hashtag_chars = sum(len(h) for h in hashtags)
-        title_len = max(len(title), 1)
-
-        if hashtag_count >= 3 and hashtag_chars / title_len > 0.5:
-            logger.debug("Filtered by title heuristic (hashtag-heavy): %s", title)
-            continue
-        filtered.append(v)
-
-    removed = len(videos) - len(filtered)
-    if removed:
-        logger.info("Filtered %d video(s) by title heuristic (hashtag-heavy).", removed)
-    return filtered
-
-
-# ── ISO 8601 duration parser (no external dependency) ─────────────────────────
-
-def _parse_iso8601_duration(duration: str) -> int:
-    """Parse ISO 8601 duration string to total seconds.
-
-    Examples: "PT3M30S" → 210, "PT1H" → 3600, "P1DT2H" → 93600
-
-    Returns 0 on parse failure (treated as "short", so filtered out —
-    conservative approach to avoid processing non-video content).
-    """
-    pattern = re.compile(
-        r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", re.IGNORECASE
-    )
-    match = pattern.match(duration or "")
-    if not match:
-        return 0
-    days = int(match.group(1) or 0)
-    hours = int(match.group(2) or 0)
-    minutes = int(match.group(3) or 0)
-    seconds = int(match.group(4) or 0)
-    return days * 86400 + hours * 3600 + minutes * 60 + seconds
-
-
-def fetch_durations_and_filter(videos: list[dict], api_key: str) -> list[dict]:
-    """Layer 3: Filter videos under MIN_VIDEO_DURATION_SECONDS using YouTube Data API.
-
-    Fetches durations in batches of 50 to conserve API quota.
-    Videos that fail duration lookup are kept (conservative — better to
-    include an uncertain video than silently drop it).
-
-    Args:
-        videos: List of video dicts (must have 'video_id').
-        api_key: YouTube Data API v3 key.
-
-    Returns:
-        Filtered list with only videos >= MIN_VIDEO_DURATION_SECONDS.
-    """
-    if not videos:
-        return videos
-
-    # Build {video_id: video_dict} map
-    video_map = {v["video_id"]: v for v in videos}
-    all_ids = list(video_map.keys())
-    short_ids: set[str] = set()
-
-    batch_size = 50
-    for i in range(0, len(all_ids), batch_size):
-        batch = all_ids[i : i + batch_size]
-        try:
-            resp = requests.get(
-                YOUTUBE_API_URL,
-                params={
-                    "id": ",".join(batch),
-                    "part": "contentDetails",
-                    "key": api_key,
-                },
-                timeout=15,
-            )
-            resp.raise_for_status()
-            items = resp.json().get("items", [])
-        except Exception:
-            logger.warning(
-                "YouTube API duration fetch failed for batch %d-%d — keeping those videos.",
-                i,
-                i + len(batch),
-                exc_info=True,
-            )
-            continue  # Keep videos in this batch
-
-        for item in items:
-            vid_id = item.get("id", "")
-            duration_str = item.get("contentDetails", {}).get("duration", "")
-            secs = _parse_iso8601_duration(duration_str)
-            if secs < MIN_VIDEO_DURATION_SECONDS:
-                short_ids.add(vid_id)
-                logger.debug(
-                    "Filtered short video (%ds < %ds): %s",
-                    secs,
-                    MIN_VIDEO_DURATION_SECONDS,
-                    vid_id,
-                )
-
-    filtered = [v for v in videos if v["video_id"] not in short_ids]
-    if short_ids:
-        logger.info(
-            "Filtered %d video(s) under %ds by YouTube API duration.",
-            len(short_ids),
-            MIN_VIDEO_DURATION_SECONDS,
-        )
-    return filtered
+def save_seen_urls(state_file: Path, state_key: str, urls: set[str]) -> None:
+    """Save seen URLs for a source key to state.json."""
+    data = {}
+    try:
+        if state_file.exists():
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    if "seen_urls" not in data or not isinstance(data["seen_urls"], dict):
+        data["seen_urls"] = {}
+    existing = set(data["seen_urls"].get(state_key, []))
+    existing.update(urls)
+    data["seen_urls"][state_key] = sorted(existing)
+    state_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 # ── Markdown digest writer ─────────────────────────────────────────────────────
 
-def write_markdown_digest(channels_data: list[dict], run_date: str) -> Path:
+def write_markdown_digest(sources_data: list[dict], run_date: str) -> Path:
     """Write a Markdown digest file to summaries/{date}_digest.md.
 
     Args:
-        channels_data: List of channel result dicts.
+        sources_data: List of source result dicts.
         run_date: Date string for the filename (YYYY-MM-DD).
 
     Returns:
@@ -478,17 +230,17 @@ def write_markdown_digest(channels_data: list[dict], run_date: str) -> Path:
     summaries_dir.mkdir(parents=True, exist_ok=True)
     out_path = summaries_dir / f"{run_date}_digest.md"
 
-    total_videos = sum(len(ch.get("videos", [])) for ch in channels_data)
+    total_items = sum(len(ch.get("videos", [])) for ch in sources_data)
     lines = [
-        f"# YouTube Digest — {run_date}",
+        f"# TubeLM Digest — {run_date}",
         "",
-        f"**{len(channels_data)} channel(s) · {total_videos} new video(s)**",
+        f"**{len(sources_data)} source(s) · {total_items} new item(s)**",
         "",
         "---",
         "",
     ]
 
-    for ch in channels_data:
+    for ch in sources_data:
         lines.append(f"## {ch['channel_name']}")
         lines.append("")
         if ch.get("notebook_url"):
@@ -497,10 +249,14 @@ def write_markdown_digest(channels_data: list[dict], run_date: str) -> Path:
         if ch.get("error"):
             lines.append(f"> ⚠️ **Error:** {ch['error']}")
             lines.append("")
-        lines.append(f"### New Videos ({len(ch['videos'])})")
+        items_list = ch.get("videos", ch.get("items", []))
+        lines.append(f"### New Items ({len(items_list)})")
         lines.append("")
-        for v in ch["videos"]:
-            lines.append(f"- [{v['title']}]({v['url']}) — {v['published']}")
+        for item in items_list:
+            if item.get("url"):
+                lines.append(f"- [{item['title']}]({item['url']}) — {item['published']}")
+            else:
+                lines.append(f"- {item['title']} — {item['published']}")
         lines.append("")
         if ch.get("summary_text"):
             lines.append("### AI Summary")
@@ -567,190 +323,152 @@ async def async_main(dry_run: bool, skip_email: bool, channels_filter: str | Non
                 sys.exit(2)
             logger.info("Authentication verified after cookie refresh.")
 
-    # ── Load channels and state ────────────────────────────────────────────
-    channels = load_channels(cfg.channels_file)
+    # ── Load sources and state ────────────────────────────────────────────
+    sources = load_sources(cfg.sources_file)
+    handlers = [create_handler(src, cfg) for src in sources]
+
     if channels_filter:
-        selected_ids = {cid.strip() for cid in channels_filter.split(",") if cid.strip()}
-        channels = [ch for ch in channels if ch["channel_id"] in selected_ids]
+        selected = {s.strip() for s in channels_filter.split(",") if s.strip()}
+        filtered_handlers = []
+        for h in handlers:
+            match = h.state_key() in selected or h.name in selected
+            if not match and hasattr(h, 'channel_id'):
+                match = h.channel_id in selected
+            if match:
+                filtered_handlers.append(h)
+        handlers = filtered_handlers
         logger.info(
-            "Running selectively for %d channel(s): %s",
-            len(channels),
-            ", ".join(ch["name"] for ch in channels),
+            "Running selectively for %d source(s): %s",
+            len(handlers),
+            ", ".join(h.name for h in handlers),
         )
 
     run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    # Define the run stages
-    # Stage 0: Initial run
-    # Stage 1: Retry after 1 hour (if failures exist)
-    # Stage 2: Retry after 2 more hours (if failures still exist)
     retry_stages = [
         {"name": "Initial Run", "delay_hours": 0},
         {"name": "1-Hour Retry Run", "delay_hours": 1},
         {"name": "3-Hour Retry Run", "delay_hours": 2},
     ]
 
-    active_channels = list(channels)
+    active_handlers = list(handlers)
 
     for stage_idx, stage in enumerate(retry_stages):
-        if not active_channels:
+        if not active_handlers:
             break
 
-        # Apply sleep delay if this is a retry stage
         if stage["delay_hours"] > 0:
             delay_sec = stage["delay_hours"] * 3600
             if dry_run:
                 logger.info(
                     "[%s] DRY-RUN: Simulating sleep delay of %d hour(s) (%d seconds). Sleeping 1s for dry-run.",
-                    stage["name"],
-                    stage["delay_hours"],
-                    delay_sec,
+                    stage["name"], stage["delay_hours"], delay_sec,
                 )
                 await asyncio.sleep(1)
             else:
                 logger.info(
                     "[%s] Sleeping %d hour(s) before retry run...",
-                    stage["name"],
-                    stage["delay_hours"],
+                    stage["name"], stage["delay_hours"],
                 )
                 await asyncio.sleep(delay_sec)
 
         logger.info("=== Starting Stage: %s ===", stage["name"])
 
-        # We will track which channels were successfully checked/processed in this stage
-        successful_channel_ids = []
-        # We will track which channels failed due to RSS outage in this stage
-        failed_channels = []
+        successful_keys = []
+        failed_handlers = []
+        stage_handler_items: list[tuple] = []
 
-        # ── Discover new videos per channel ───────────────────────────────────
-        stage_channel_videos: list[tuple[dict, list[dict]]] = []
+        for handler in active_handlers:
+            state_key = handler.state_key()
+            since_dt = load_source_state(cfg.state_file, state_key)
+            seen_urls = load_seen_urls(cfg.state_file, state_key) if handler.source_type == "webpage" else None
 
-        for ch in active_channels:
-            name = ch["name"]
-            channel_id = ch["channel_id"]
-            since_dt = load_channel_state(cfg.state_file, channel_id)
+            logger.info("[%s] Discovering content published after %s…", handler.name, since_dt.isoformat())
+            items = handler.discover(since_dt, seen_urls=seen_urls)
 
-            logger.info("[%s] Discovering videos published after %s…", name, since_dt.isoformat())
-            raw_videos = fetch_channel_videos(channel_id, since_dt)
-            
-            if raw_videos is None:
-                logger.warning(
-                    "[%s] Skipping channel in this stage due to RSS feed outage.",
-                    name,
-                )
-                failed_channels.append(ch)
+            if items is None:
+                logger.warning("[%s] Skipping source in this stage due to transient failure.", handler.name)
+                failed_handlers.append(handler)
                 continue
 
-            if not raw_videos:
-                logger.info("[%s] No new videos found.", name)
-                successful_channel_ids.append(channel_id)
+            if not items:
+                logger.info("[%s] No new content found.", handler.name)
+                successful_keys.append(state_key)
                 continue
 
-            # Layer 1: Keyword filter (#shorts)
-            filtered = filter_shorts(raw_videos)
-            if not filtered:
-                logger.info("[%s] All %d video(s) were Shorts — skipping.", name, len(raw_videos))
-                successful_channel_ids.append(channel_id)
-                continue
+            logger.info("[%s] %d new item(s) to process.", handler.name, len(items))
+            stage_handler_items.append((handler, items))
 
-            # Layer 2: Title heuristic filter (hashtag-heavy)
-            filtered = filter_shorts_by_title_heuristics(filtered)
-            if not filtered:
-                logger.info("[%s] All videos filtered by title heuristic — skipping.", name)
-                successful_channel_ids.append(channel_id)
-                continue
-
-            # Layer 3: Duration filter via YouTube Data API (skipped if API key is not set)
-            if cfg.youtube_api_key:
-                filtered = fetch_durations_and_filter(filtered, cfg.youtube_api_key)
-                if not filtered:
-                    logger.info("[%s] All videos filtered by duration — skipping.", name)
-                    successful_channel_ids.append(channel_id)
-                    continue
-            else:
-                logger.warning("[%s] YouTube API Key is not set. Skipping duration-based Shorts filtering layer.", name)
-
-            logger.info("[%s] %d new video(s) to process.", name, len(filtered))
-            stage_channel_videos.append((ch, filtered))
-
-        # Handle Dry-run: just print what would be processed in this stage
         if dry_run:
-            if not stage_channel_videos:
-                logger.info("[%s] [DRY-RUN] No new videos found across channels.", stage["name"])
+            if not stage_handler_items:
+                logger.info("[%s] [DRY-RUN] No new content found across sources.", stage["name"])
             else:
-                logger.info("[%s] [DRY-RUN] Would process channels:", stage["name"])
-                for ch, videos in stage_channel_videos:
-                    logger.info("  📺 %s (%d video(s))", ch["name"], len(videos))
-                    for v in videos:
-                        logger.info("      • %s (%s)", v["title"], v["published"])
-                        logger.info("        %s", v["url"])
-            if successful_channel_ids:
-                logger.info("[%s] [DRY-RUN] Would mark %d channel(s) as successful.", stage["name"], len(successful_channel_ids))
-            # Carry forward failures for dry-run simulation
-            active_channels = failed_channels
+                logger.info("[%s] [DRY-RUN] Would process sources:", stage["name"])
+                for handler, items in stage_handler_items:
+                    logger.info("  📂 [%s] %s (%d item(s))", handler.source_type, handler.name, len(items))
+                    for item in items:
+                        logger.info("      • %s (%s)", item.title, item.published)
+                        logger.info("        %s", item.url)
+            if successful_keys:
+                logger.info("[%s] [DRY-RUN] Would mark %d source(s) as successful.", stage["name"], len(successful_keys))
+            active_handlers = failed_handlers
             continue
 
-        # ── Process the channels that have new videos in this stage ─────────
         stage_results: list[dict] = []
         quota_exceeded = False
 
-        if not stage_channel_videos:
-            logger.info("[%s] No channels have new videos in this stage.", stage["name"])
-            if successful_channel_ids:
-                save_state(cfg.state_file, successful_channel_ids)
+        if not stage_handler_items:
+            logger.info("[%s] No sources have new content in this stage.", stage["name"])
+            if successful_keys:
+                save_state(cfg.state_file, successful_keys)
         else:
-            for idx, (ch, videos) in enumerate(stage_channel_videos):
+            for idx, (handler, items) in enumerate(stage_handler_items):
                 if quota_exceeded:
-                    logger.warning(
-                        "Notebook quota was exceeded — skipping remaining channels."
-                    )
+                    logger.warning("Notebook quota was exceeded — skipping remaining sources.")
                     break
 
-                # Inter-channel cooldown (skip before first channel)
                 if idx > 0:
-                    logger.info(
-                        "Cooling down %ds before next channel…", INTER_CHANNEL_COOLDOWN
-                    )
+                    logger.info("Cooling down %ds before next source…", INTER_CHANNEL_COOLDOWN)
                     await asyncio.sleep(INTER_CHANNEL_COOLDOWN)
 
                 try:
-                    result = await process_channel_videos(ch["name"], videos, cfg)
+                    result = await process_source_items(handler, items, cfg)
                     stage_results.append(result)
                     if not result.get("error"):
-                        successful_channel_ids.append(ch["channel_id"])
+                        successful_keys.append(handler.state_key())
                 except NotebookLimitError:
                     quota_exceeded = True
-                    logger.critical("Notebook quota exceeded — stopping channel processing.")
+                    logger.critical("Notebook quota exceeded — stopping source processing.")
+
+            # Save seen URLs for successfully processed webpage handlers
+            for handler, items in stage_handler_items:
+                if handler.source_type == "webpage" and handler.state_key() in successful_keys:
+                    urls = {item.url for item in items}
+                    if urls:
+                        save_seen_urls(cfg.state_file, handler.state_key(), urls)
 
             if not stage_results:
-                logger.warning("[%s] No channels were successfully processed in this stage.", stage["name"])
-                if successful_channel_ids:
-                    save_state(cfg.state_file, successful_channel_ids)
+                logger.warning("[%s] No sources were successfully processed in this stage.", stage["name"])
+                if successful_keys:
+                    save_state(cfg.state_file, successful_keys)
             else:
-                # Write Markdown digest for this stage
                 md_path = write_markdown_digest(stage_results, f"{run_date}_stage_{stage_idx}")
                 logger.info("[%s] Markdown digest saved to %s", stage["name"], md_path)
 
-                # Write per-channel HTML digests locally
                 from email_service import _render_channel_html
                 for ch_result in stage_results:
                     try:
-                        safe_name = paths.safe_channel_name(ch_result.get("channel_name", "channel"))
+                        safe_name = paths.safe_channel_name(ch_result.get("channel_name", "source"))
                         html_body = _render_channel_html(ch_result, run_date, None, cfg.email_theme)
                         html_path = paths.get_summaries_dir() / f"{run_date}_{safe_name}_digest.html"
                         html_path.write_text(html_body, encoding="utf-8")
                         logger.info("Local HTML digest saved to %s", html_path)
                     except Exception:
-                        logger.exception(
-                            "Failed to write local HTML digest for channel %r.",
-                            ch_result.get("channel_name", "unknown")
-                        )
+                        logger.exception("Failed to write local HTML digest for %r.", ch_result.get("channel_name", "unknown"))
 
-                # Update state BEFORE sending email
-                if successful_channel_ids:
-                    save_state(cfg.state_file, successful_channel_ids)
+                if successful_keys:
+                    save_state(cfg.state_file, successful_keys)
 
-                # Send per-channel email digests
                 if skip_email:
                     logger.info("Email delivery skipped (--skip-email flag or missing SMTP credentials).")
                 else:
@@ -759,18 +477,16 @@ async def async_main(dry_run: bool, skip_email: bool, channels_filter: str | Non
                             send_channel_email(ch_result, cfg)
                         except Exception:
                             logger.exception(
-                                "Failed to send email for channel %r. "
-                                "state.json was already updated; videos will not be reprocessed.",
+                                "Failed to send email for %r. state.json was already updated.",
                                 ch_result.get("channel_name", "unknown"),
                             )
 
-        # Prepare for the next stage (only retry the failed channels)
-        active_channels = failed_channels
+        active_handlers = failed_handlers
         logger.info(
             "=== Finished Stage: %s. Succeeded/Skipped: %d, Failed (to be retried): %d ===",
             stage["name"],
-            len(successful_channel_ids) + len(stage_channel_videos) - len(failed_channels),
-            len(failed_channels),
+            len(successful_keys) + len(stage_handler_items) - len(failed_handlers),
+            len(failed_handlers),
         )
 
     logger.info("Weekly sync complete. Processed all stages.")
@@ -814,7 +530,14 @@ def main() -> None:
         type=str,
         help="Comma-separated list of YouTube Channel IDs to run selectively.",
     )
+    parser.add_argument(
+        "--sources",
+        type=str,
+        help="Comma-separated list of source state keys or names to run selectively.",
+    )
     args = parser.parse_args()
+
+    sources_filter = args.sources or args.channels
 
     if args.gui:
         try:
@@ -835,7 +558,7 @@ def main() -> None:
             sys.exit(1)
         sys.exit(0)
 
-    asyncio.run(async_main(dry_run=args.dry_run, skip_email=args.skip_email, channels_filter=args.channels))
+    asyncio.run(async_main(dry_run=args.dry_run, skip_email=args.skip_email, channels_filter=sources_filter))
 
 
 if __name__ == "__main__":

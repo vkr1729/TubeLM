@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Dr Brad Stanfield",
+    "type": "youtube",
+    "channel_id": "UCpcvPcHJVOkO9Qp79BOagTg"
+  },
+  {
+    "name": "Simon Willison's Blog",
+    "type": "rss",
+    "url": "https://simonwillison.net/atom/everything/",
+    "force_text_extraction": false,
+    "max_items": 10
+  },
+  {
+    "name": "Paul Graham Essays",
+    "type": "webpage",
+    "url": "https://paulgraham.com/articles.html",
+    "is_index_page": true,
+    "link_selector": "td a[href]",
+    "max_items": 5
+  }
+]

@@ -234,6 +234,14 @@
       margin-top: 24px;
       margin-bottom: 8px;
     }
+    .summary-html h4, .summary-html h5, .summary-html h6 {
+      font-family: 'Georgia', Georgia, serif;
+      font-size: 15px;
+      font-weight: 700;
+      color: #1A1A1A;
+      margin-top: 18px;
+      margin-bottom: 8px;
+    }
     .summary-html p {
       font-size: 14px;
       color: #4A4A4A;
@@ -289,11 +297,33 @@
   </style>
 </head>
 <body>
+{% set source_type = channel.source_type | default('youtube') %}
+{% if source_type == 'youtube' %}
+  {% set type_icon = '📹' %}
+  {% set label_plural = 'New Videos' %}
+  {% set label_singular = 'Video' %}
+  {% set brand_prefix = 'YouTube' %}
+{% elif source_type == 'rss' %}
+  {% set type_icon = '📰' %}
+  {% set label_plural = 'New Articles' %}
+  {% set label_singular = 'Article' %}
+  {% set brand_prefix = 'RSS Feed' %}
+{% elif source_type == 'webpage' %}
+  {% set type_icon = '🌐' %}
+  {% set label_plural = 'New Pages' %}
+  {% set label_singular = 'Page' %}
+  {% set brand_prefix = 'Webpage' %}
+{% else %}
+  {% set type_icon = '📑' %}
+  {% set label_plural = 'New Items' %}
+  {% set label_singular = 'Item' %}
+  {% set brand_prefix = 'Source' %}
+{% endif %}
 <div class="email-wrapper">
 
   <!-- Header -->
   <div class="header">
-    <div class="header-badge">📹 Executive Digest</div>
+    <div class="header-badge">{{ type_icon }} Executive Digest</div>
     <h1>{{ channel.channel_name }}</h1>
     <p class="subtitle">Briefing for {{ run_date }} · Powered by NotebookLM</p>
   </div>
@@ -302,14 +332,14 @@
   <div class="stats-bar">
     <div class="stat">
       <span class="stat-number">{{ total_videos }}</span>
-      <span class="stat-label">New Videos</span>
+      <span class="stat-label">{{ label_plural }}</span>
     </div>
     <div class="stat">
       <span class="stat-number">{% if channel.notebook_url %}1{% else %}0{% endif %}</span>
       <span class="stat-label">Notebook</span>
     </div>
     <div class="stat">
-      <span class="stat-number">{% if infographic_cid %}📊{% else %}—{% endif %}</span>
+      <span class="stat-number">{% if infographic_src %}📊{% else %}—{% endif %}</span>
       <span class="stat-label">Infographic</span>
     </div>
   </div>
@@ -331,24 +361,26 @@
     {% endif %}
 
     <!-- Infographic Section -->
-    {% if infographic_cid %}
+    {% if infographic_src %}
     <div class="section-label">📊 Visual Infographic</div>
     <div class="infographic-section">
-      <img src="cid:{{ infographic_cid }}" alt="Channel Infographic" class="infographic-img" />
+      <img src="{{ infographic_src }}" alt="Channel Infographic" class="infographic-img" />
     </div>
     {% endif %}
 
     <!-- Videos Section -->
-    <div class="section-label">New Videos</div>
+    <div class="section-label">{{ label_plural }}</div>
     {% for v in channel.videos %}
     <div class="video-card">
+      {% if v.video_id %}
       <div class="video-thumbnail-container">
         <a href="{{ v.url }}" target="_blank">
           <div class="video-thumbnail-bg" style="background-image: url('https://img.youtube.com/vi/{{ v.video_id }}/hqdefault.jpg');"></div>
-          <div class="play-button-overlay">▶ PLAY VIDEO</div>
+          <div class="play-button-overlay">▶ PLAY {{ label_singular.upper() }}</div>
         </a>
       </div>
-      <div class="video-meta">Video Entry</div>
+      {% endif %}
+      <div class="video-meta">{{ label_singular }} Entry</div>
       <h2 class="video-title"><a href="{{ v.url }}" target="_blank">{{ v.title }}</a></h2>
       <div class="video-date">Published on {{ v.published }}</div>
     </div>
@@ -368,11 +400,12 @@
 
   <!-- Footer -->
   <div class="footer">
-    <p class="footer-brand">YouTube → NotebookLM Briefing Digest</p>
-    <p>Generated on {{ run_date }} · {{ total_videos }} video{{ 's' if total_videos != 1 else '' }} analyzed</p>
+    <p class="footer-brand">{{ brand_prefix }} → NotebookLM Briefing Digest</p>
+    <p>Generated on {{ run_date }} · {{ total_videos }} {{ label_singular.lower() }}{{ 's' if total_videos != 1 else '' }} analyzed</p>
     <p>Notebook includes Audio Overview — check NotebookLM Studio for playback.</p>
   </div>
 
 </div>
 </body>
 </html>
+

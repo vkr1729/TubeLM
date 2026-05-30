@@ -2,7 +2,7 @@
   <img src="shared/assets/logo.png" alt="TubeLM Logo" width="220px">
 </p>
 
-# 🎬 TubeLM — Premium YouTube to NotebookLM Automation Pipeline & Email Digest
+# 🎬 TubeLM — Premium Multi-Source (YouTube, RSS, Webpages) to NotebookLM Automation Pipeline & Email Digest
 
 [![GitHub Stars](https://img.shields.io/github/stars/vkr1729/TubeLM?style=social)](https://github.com/vkr1729/TubeLM/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -10,9 +10,9 @@
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey)](https://www.kernel.org/)
 [![Built with NotebookLM-py](https://img.shields.io/badge/built%20with-notebooklm--py-blueviolet)](https://github.com/leptonai/notebooklm-py)
 
-**TubeLM** is a production-grade, self-hosted automation pipeline that monitors your favorite YouTube channels, fetches new uploads, and programmatically uploads them to Google's **NotebookLM**. It orchestrates NotebookLM to extract high-yield, citation-clean intelligence summaries, generate custom infographics, trigger podcast Audio Overviews, and deliver a **stunning, dark-mode cinematic HTML newsletter** straight to your inbox.
+**TubeLM** is a production-grade, self-hosted automation pipeline that monitors your favorite YouTube channels, generic RSS feeds, and websites/webpages, programmatically uploading new content to Google's **NotebookLM**. It orchestrates NotebookLM to extract high-yield, citation-clean intelligence summaries, generate custom infographics, trigger podcast Audio Overviews, and deliver a **stunning, dark-mode cinematic HTML newsletter** straight to your inbox.
 
-Designed for busy executives, researchers, developers, and creators who need maximum intelligence from video uploads without spending hours watching streams or dealing with noisy subscription feeds.
+Designed for busy executives, researchers, developers, and creators who need maximum intelligence from multiple media channels without spending hours reading feeds or dealing with noisy subscription feeds.
 
 ---
 
@@ -100,20 +100,24 @@ This launches a local web server at `http://localhost:5000` (which dynamically f
 
 ## 🚀 Key Features
 
-*   **📰 Automated RSS Channel Monitoring:** Regularly polls YouTube RSS feeds for new uploads based on custom lookback schedules.
-*   **🛡️ Short-form & Spam Filters:** Aggressively filters out TikTok-style Shorts and hashtag spam using multi-layer heuristics (video length verify checks via YouTube API, `#shorts` tag filters, and title structure analysis).
+*   **📰 Multi-Source Monitoring & Discovery:**
+    *   **YouTube Channels:** Polls YouTube feeds for uploads and filters them.
+    *   **Generic RSS/Atom Feeds:** Periodically checks blog or newsletter feeds for new article entries.
+    *   **Websites & Webpages:** Tracks individual articles, or scrapes and index-pages complete websites (extracting links dynamically using customizable CSS selector heuristics to process and backfill new articles).
+*   **🛡️ Short-form & Spam Filters:** Aggressively filters out TikTok-style Shorts and hashtag spam for YouTube sources using multi-layer heuristics (video length checks via YouTube API, `#shorts` tag filters, and title structure analysis).
 *   **🧠 Programmatic NotebookLM Orchestration:**
-    *   Creates isolated, dedicated notebooks for each monitored YouTube channel.
-    *   Uploads video URLs asynchronously as grounded sources.
+    *   Creates isolated, dedicated notebooks for each monitored channel/source.
+    *   Uploads URLs or clean extracted webpage text asynchronously as grounded sources.
     *   Instructs NotebookLM to synthesize cross-source insights using custom research prompts.
     *   Generates and downloads structural visual infographics.
     *   Triggers background generation of audio podcasts (NotebookLM Audio Overviews).
+*   **🖼️ High-Performance Infographic Compression:** Converts large generated PNG infographics (~5MB) to optimized RGB JPEGs (~400KB - 800KB) at 80% quality, dramatically lowering email dispatch latency and disk footprint.
 *   **✉️ Cinema-Style HTML Digests:**
-    *   Delivers responsive dark-mode emails featuring native `<img>` thumbnails (mobile-safe layout verified in Gmail & Apple Mail).
-    *   Displays video summaries directly below each individual video card for quick scannability.
-    *   Zero-dependency markdown parser formats headers, bullet points, and key metrics.
-    *   Cleans and strips AI citation numbers (e.g. `[12-15]`) for peak text scannability.
-*   **⏰ Saturday Boot & Automation Daemon:** Sets up a persistent local background daemon via systemd user timers. If your machine is off during the scheduled Saturday run, the timer triggers **immediately upon boot** once network connectivity is verified.
+    *   Delivers responsive dark-mode emails with dynamic terminology and icons matching the source type (e.g., "New Articles" for RSS, "New Videos" for YouTube, "New Pages" for Webpages).
+    *   Features clean heading styling to prevent black/invisible heading text in restrictive mobile email clients.
+    *   Supports offline viewing by rendering local HTML copies with relative file paths rather than email `cid:` attachments.
+    *   Strips distracting AI citation brackets (e.g. `[12-15]`) for pristine reading flow.
+*   **⏰ Saturday Boot & Automation Daemon:** Sets up a persistent local background daemon via systemd user timers. If your machine is off during the scheduled weekly run, the timer triggers **immediately upon boot** once network connectivity is verified.
 
 ---
 
@@ -163,17 +167,34 @@ During installation, you can choose between:
    nano .env
    ```
 
-2. **Channel Config (`channels.json`):**
-   Define the channels you want to monitor (we recommend keeping your personal channel list private and adding `channels.json` to `.gitignore`):
+2. **Sources Config (`sources.json`):**
+   Define the YouTube channels, RSS feeds, or webpage scraping configs you want to monitor (legacy `channels.json` formats are automatically migrated to `sources.json` on startup):
    ```bash
-   cp channels.json.example channels.json
-   nano channels.json
+   cp sources.json.example sources.json
+   nano sources.json
    ```
 
    ```json
    [
-     { "name": "Physionic", "channel_id": "UCj3p_1jOCJXB_L_we-DjLbA" },
-     { "name": "Doctor Brad Stanfield", "channel_id": "UCZ0zZ_A30TDFn9-K_n-mP2g" }
+     {
+       "name": "Dr Brad Stanfield",
+       "type": "youtube",
+       "channel_id": "UCpcvPcHJVOkO9Qp79BOagTg"
+     },
+     {
+       "name": "Simon Willison's Blog",
+       "type": "rss",
+       "url": "https://simonwillison.net/atom/everything/",
+       "max_items": 10
+     },
+     {
+       "name": "Paul Graham Essays",
+       "type": "webpage",
+       "url": "https://paulgraham.com/articles.html",
+       "is_index_page": true,
+       "link_selector": "td a[href]",
+       "max_items": 5
+     }
    ]
    ```
 
@@ -243,16 +264,16 @@ To schedule the runs manually:
 For headless or keyboard-driven workflows, you can run the pipeline directly from the command line:
 
 ```bash
-# Run the full pipeline for all channels
+# Run the full pipeline for all sources (YouTube, RSS, Webpages)
 .venv/bin/python main.py
 
-# Run for a specific subset of YouTube channel IDs
-.venv/bin/python main.py --channels "UCj3p_1jOCJXB_L_we-DjLbA,UCZ0zZ_A30TDFn9-K_n-mP2g"
+# Run for a specific subset of sources by channel ID, URL, or name
+.venv/bin/python main.py --channels "UCj3p_1jOCJXB_L_we-DjLbA,https://simonwillison.net/atom/everything/,Paul Graham Essays"
 
-# Run the pipeline but skip email delivery (saves summaries locally)
+# Run the pipeline but skip email delivery (saves HTML digests locally under /summaries)
 .venv/bin/python main.py --skip-email
 
-# Dry-run: discover videos only, skip all AI calls and uploads
+# Dry-run: discover new items only, skipping all uploads and AI generations
 .venv/bin/python main.py --dry-run
 ```
 
@@ -264,24 +285,21 @@ For headless or keyboard-driven workflows, you can run the pipeline directly fro
 graph TD
     A[Start: Schedule Trigger / Manual Run] --> B[Wait for Wi-Fi Connectivity]
     B --> C[Extract Chrome Session Cookies using rookiepy]
-    C --> D[Fetch YouTube RSS Feeds]
-    D --> E[Filter out Shorts & Hashtag Spams]
-    E --> F{YOUTUBE_API_KEY set?}
-    F -- Yes --> G[Verify Video Length via YouTube API]
-    F -- No --> H[Skip Duration Checks Heuristics Only]
-    G --> I[Initialize NotebookLM Client]
-    H --> I
-    I --> J[For each channel: Create Notebook & Upload Sources]
-    J --> K[Query Chat for Structured Briefing]
-    K --> L[Generate & Download Infographic PNG]
-    L --> M[Trigger Podcast Audio Overview]
-    M --> N[Format Summaries & Strip Citations]
-    N --> O[Write Local Markdown & Cinematic HTML digests to /summaries]
-    O --> P{SMTP Settings Configured?}
-    P -- Yes --> Q[SMTP SSL/STARTTLS Email Delivery]
-    P -- No --> R[Skip Email Delivery, Log Warning]
-    Q --> S[Update state.json]
-    R --> S[Update state.json]
+    C --> D[Fetch Monitored Sources: YouTube, RSS, Webpages]
+    D --> E[Filter out Shorts & Hashtag Spams for YouTube]
+    E --> F[Initialize NotebookLM Client]
+    F --> G[For each source: Create Notebook & Upload/Ingest Content]
+    G --> H[Query Chat for Structured Briefing]
+    H --> I[Generate & Download Infographic PNG]
+    I --> J[Compress Infographic PNG to JPEG]
+    J --> K[Trigger Podcast Audio Overview]
+    K --> L[Format Summaries & Strip Citations]
+    L --> M[Write Local Markdown & Cinematic HTML digests to /summaries]
+    M --> N{SMTP Settings Configured?}
+    N -- Yes --> O[SMTP SSL/STARTTLS Email Delivery]
+    N -- No --> P[Skip Email Delivery, Log Warning]
+    O --> Q[Update state.json]
+    P --> Q[Update state.json]
 ```
 
 ---

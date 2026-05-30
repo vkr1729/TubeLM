@@ -1,0 +1,2 @@
+This is not valid XML at all <unclosed></unclosed>
+Just raw garbage text that should cause parsing errors

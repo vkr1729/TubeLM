@@ -15,7 +15,10 @@ import logging
 import threading
 import subprocess
 import webbrowser
+import feedparser
 import requests
+import hashlib
+import copy
 from datetime import datetime
 from pathlib import Path
 from threading import Timer
@@ -23,6 +26,7 @@ from threading import Timer
 from flask import Flask, jsonify, request, Response, send_from_directory, render_template_string
 
 import paths
+from sources_loader import load_sources
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,6 +42,7 @@ app = Flask(__name__)
 PROJECT_DIR = paths.get_bundle_dir()
 ENV_FILE = paths.get_env_file()
 CHANNELS_FILE = paths.get_channels_file()
+SOURCES_FILE = paths.get_sources_file()
 STATE_FILE = paths.get_state_file()
 SUMMARIES_DIR = paths.get_summaries_dir()
 
@@ -599,16 +604,17 @@ def serve_asset_file(filename):
 
 @app.route("/api/status")
 def api_status():
-    # Monitored channels count
-    channel_count = 0
-    if CHANNELS_FILE.exists():
-        try:
-            channels = json.loads(CHANNELS_FILE.read_text(encoding="utf-8"))
-            channel_count = len(channels)
-        except Exception:
-            pass
+    source_count = 0
+    source_types = {}
+    sources_data = _load_existing_sources()
+    source_count = len(sources_data)
+    for s in sources_data:
+        st = s.get("type", "youtube")
+        source_types[st] = source_types.get(st, 0) + 1
 
-    # Last run time
+    # Legacy channel count fallback
+    channel_count = source_count
+
     last_run = "Never"
     if STATE_FILE.exists():
         try:
@@ -620,10 +626,12 @@ def api_status():
     systemd_info = get_scheduler_status()
 
     return jsonify({
+        "source_count": source_count,
+        "source_types": source_types,
         "channel_count": channel_count,
         "last_run": last_run,
         "systemd": systemd_info,
-        "pipeline_running": runner.is_running
+        "pipeline_running": runner.is_running,
     })
 
 # ── YouTube Channel Details Extractor Helper ──────────────────────────────────
@@ -732,56 +740,222 @@ def api_extract_channel():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-@app.route("/api/channels", methods=["GET", "POST"])
-def api_channels():
-    if request.method == "POST":
-        data = request.json
-        name = data.get("name", "").strip()
-        channel_id = data.get("channel_id", "").strip()
-        
-        if not name or not channel_id:
-            return jsonify({"error": "Missing name or channel_id"}), 400
-
-        channels = []
-        if CHANNELS_FILE.exists():
-            try:
-                channels = json.loads(CHANNELS_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        
-        # Check if ID already exists
-        if any(c.get("channel_id") == channel_id for c in channels):
-            return jsonify({"error": "Channel ID already exists"}), 400
-
-        channels.append({"name": name, "channel_id": channel_id})
-        CHANNELS_FILE.write_text(json.dumps(channels, indent=2), encoding="utf-8")
-        return jsonify({"success": True, "channels": channels})
-
-    else:
-        channels = []
-        if CHANNELS_FILE.exists():
-            try:
-                channels = json.loads(CHANNELS_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        return jsonify(channels)
-
 @app.route("/api/channels/<channel_id>", methods=["DELETE"])
-def api_delete_channel(channel_id):
-    if not CHANNELS_FILE.exists():
-        return jsonify({"error": "No channels file"}), 404
-        
-    try:
-        channels = json.loads(CHANNELS_FILE.read_text(encoding="utf-8"))
-        updated = [c for c in channels if c.get("channel_id") != channel_id]
-        if len(updated) == len(channels):
-            return jsonify({"error": "Channel not found"}), 404
-            
-        CHANNELS_FILE.write_text(json.dumps(updated, indent=2), encoding="utf-8")
-        return jsonify({"success": True, "channels": updated})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+def api_delete_channel_legacy(channel_id):
+    return api_delete_source(channel_id)
 
+
+def _get_sources_path():
+    """Return the canonical sources file path for both reads and writes.
+
+    In dev mode, prefers the project-root sources.json (creating it if only
+    channels.json exists). In frozen/data-dir mode, uses ~/.tubelm/sources.json.
+    """
+    return paths.get_sources_file()
+
+
+def _load_existing_sources():
+    src_file = _get_sources_path()
+    return load_sources(src_file)
+
+
+def _write_sources(sources):
+    dest = _get_sources_path()
+    dest.write_text(json.dumps(sources, indent=2), encoding="utf-8")
+
+
+def compute_state_key(source):
+    stype = source.get("type", "youtube")
+    if stype == "youtube":
+        cid = source.get("channel_id")
+        if not cid:
+            name = source.get("name", "")
+            hash_digest = hashlib.sha256(name.encode()).hexdigest()[:12]
+            return f"youtube:unknown-{hash_digest}"
+        return f"youtube:{cid}"
+    elif stype in ("rss", "webpage"):
+        url = source.get("url", "")
+        if not url:
+            name = source.get("name", "")
+            hash_digest = hashlib.sha256(name.encode()).hexdigest()[:12]
+            return f"{stype}:unknown-{hash_digest}"
+        hash_digest = hashlib.sha256(url.encode()).hexdigest()[:12]
+        return f"{stype}:{hash_digest}"
+    
+    name = source.get("name", "") or str(source)
+    hash_digest = hashlib.sha256(name.encode()).hexdigest()[:12]
+    return f"unknown:{hash_digest}"
+
+
+def _enrich_sources_with_state_keys(sources):
+    enriched = []
+    for s in sources:
+        item = copy.deepcopy(s)
+        item["state_key"] = compute_state_key(item)
+        enriched.append(item)
+    return enriched
+
+
+@app.route("/api/sources", methods=["GET", "POST"])
+@app.route("/api/channels", methods=["GET", "POST"])
+def api_sources():
+    if request.method == "POST":
+        data = request.json or {}
+        source_type = data.get("type", "youtube")
+        name = data.get("name", "").strip()
+
+        if not name:
+            return jsonify({"error": "Missing name"}), 400
+
+        if source_type == "youtube":
+            channel_id = data.get("channel_id", "").strip()
+            if not channel_id:
+                return jsonify({"error": "Missing channel_id"}), 400
+            entry = {"name": name, "type": "youtube", "channel_id": channel_id}
+        elif source_type == "rss":
+            url = data.get("url", "").strip()
+            if not url:
+                return jsonify({"error": "Missing url"}), 400
+            entry = {
+                "name": name, "type": "rss", "url": url,
+                "force_text_extraction": data.get("force_text_extraction", False),
+                "max_items": data.get("max_items", 15),
+            }
+        elif source_type == "webpage":
+            url = data.get("url", "").strip()
+            if not url:
+                return jsonify({"error": "Missing url"}), 400
+            entry = {
+                "name": name, "type": "webpage", "url": url,
+                "is_index_page": data.get("is_index_page", False),
+                "link_selector": data.get("link_selector", ""),
+                "max_items": data.get("max_items", 10),
+            }
+        else:
+            return jsonify({"error": f"Unknown source type: {source_type}"}), 400
+
+        sources = _load_existing_sources()
+
+        # Duplicate check
+        if source_type == "youtube":
+            if any(s.get("channel_id") == channel_id for s in sources):
+                return jsonify({"error": "Channel ID already exists"}), 400
+        else:
+            source_url = entry.get("url", "")
+            if any(s.get("url") == source_url for s in sources):
+                return jsonify({"error": "URL already exists"}), 400
+
+        sources.append(entry)
+        _write_sources(sources)
+        return jsonify({"success": True, "sources": _enrich_sources_with_state_keys(sources)})
+    else:
+        sources = _load_existing_sources()
+        return jsonify(_enrich_sources_with_state_keys(sources))
+
+
+def _find_and_remove_source(sources, identifier):
+    """Find and remove a source by channel_id, url, or index.
+
+    Returns:
+        (found, updated_sources_list)
+    """
+    updated = []
+    found = False
+    for s in sources:
+        if s.get("channel_id") == identifier or s.get("url") == identifier:
+            found = True
+        else:
+            updated.append(s)
+
+    if not found:
+        try:
+            idx = int(identifier)
+            if 0 <= idx < len(sources):
+                updated = [s for j, s in enumerate(sources) if j != idx]
+                found = True
+        except ValueError:
+            pass
+
+    return found, updated
+
+
+@app.route("/api/sources/<identifier>", methods=["DELETE"])
+@app.route("/api/channels/<identifier>", methods=["DELETE"])
+def api_delete_source(identifier):
+    sources = _load_existing_sources()
+    if not sources:
+        return jsonify({"error": "No sources found"}), 404
+
+    found, updated = _find_and_remove_source(sources, identifier)
+    if not found:
+        return jsonify({"error": "Source not found"}), 404
+    _write_sources(updated)
+    return jsonify({"success": True, "sources": updated})
+
+
+@app.route("/api/sources/delete", methods=["POST"])
+@app.route("/api/channels/delete", methods=["POST"])
+def api_delete_source_post():
+    data = request.json or {}
+    identifier = data.get("identifier")
+    if not identifier:
+        return jsonify({"error": "Missing identifier"}), 400
+
+    sources = _load_existing_sources()
+    if not sources:
+        return jsonify({"error": "No sources found"}), 404
+
+    found, updated = _find_and_remove_source(sources, identifier)
+    if not found:
+        return jsonify({"error": "Source not found"}), 404
+    _write_sources(updated)
+    return jsonify({"success": True, "sources": updated})
+
+
+@app.route("/api/sources/validate", methods=["POST"])
+def api_validate_source():
+    data = request.json or {}
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "Missing url"}), 400
+
+    # Check for YouTube
+    if "youtube.com" in url or "youtu.be" in url:
+        try:
+            info = extract_youtube_channel_info(url)
+            return jsonify({"type": "youtube", "name": info["name"], "channel_id": info["channel_id"]})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    # Try feedparser for RSS
+    try:
+        feed = feedparser.parse(url)
+        if feed.entries and not (feed.bozo and not feed.entries):
+            return jsonify({
+                "type": "rss",
+                "name": getattr(feed.feed, "title", ""),
+                "entry_count": len(feed.entries),
+            })
+    except Exception:
+        pass
+
+    # Try trafilatura for webpage
+    try:
+        from source_handlers.extractor import extract_metadata
+        meta = extract_metadata(url)
+        if meta.get("title"):
+            return jsonify({
+                "type": "webpage",
+                "name": meta["title"],
+                "author": meta.get("author", ""),
+            })
+    except Exception:
+        pass
+
+    return jsonify({"type": "webpage", "name": ""})
+
+
+# Legacy channel endpoint alias
 @app.route("/api/state")
 def api_get_state():
     state = {"last_run_time": None, "channels": {}}
@@ -794,25 +968,40 @@ def api_get_state():
 
 @app.route("/api/state/channel", methods=["POST"])
 def api_update_channel_state():
-    data = request.json
+    data = request.json or {}
+    state_key = data.get("state_key")
     channel_id = data.get("channel_id")
     timestamp = data.get("timestamp")  # ISO format UTC string or None/"Never"
-    
-    state = {"last_run_time": None, "channels": {}}
+
+    if not state_key and channel_id:
+        if ":" in channel_id:
+            state_key = channel_id
+        else:
+            state_key = f"youtube:{channel_id}"
+
+    if not state_key:
+        return jsonify({"error": "Missing state_key or channel_id"}), 400
+
+    state = {"last_run_time": None, "channels": {}, "sources": {}}
     if STATE_FILE.exists():
         try:
             state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
-            
+
+    if "sources" not in state or not isinstance(state["sources"], dict):
+        state["sources"] = {}
     if "channels" not in state or not isinstance(state["channels"], dict):
         state["channels"] = {}
-        
-    if not channel_id:
-        return jsonify({"error": "Missing channel_id"}), 400
-        
+
     if timestamp == "Never" or not timestamp:
-        if channel_id in state["channels"]:
+        if state_key in state["sources"]:
+            del state["sources"][state_key]
+        if state_key.startswith("youtube:"):
+            bare_id = state_key[len("youtube:"):]
+            if bare_id in state["channels"]:
+                del state["channels"][bare_id]
+        elif channel_id and channel_id in state["channels"]:
             del state["channels"][channel_id]
     else:
         # Validate timestamp format
@@ -820,10 +1009,15 @@ def api_update_channel_state():
             from datetime import datetime
             ts_to_parse = timestamp.replace("Z", "+00:00")
             datetime.fromisoformat(ts_to_parse)
-            state["channels"][channel_id] = timestamp
+            state["sources"][state_key] = timestamp
+
+            # Backward compatibility: write YouTube channels to legacy channels dict
+            if state_key.startswith("youtube:"):
+                bare_id = state_key[len("youtube:"):]
+                state["channels"][bare_id] = timestamp
         except ValueError:
             return jsonify({"error": "Invalid timestamp format. Must be ISO8601."}), 400
-            
+
     try:
         STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
         return jsonify({"success": True, "state": state})
@@ -1174,12 +1368,7 @@ def api_delete_notebook(notebook_id):
 @app.route("/api/digests")
 def api_digests():
     # 1. Load channels to get name -> safe_name mapping
-    channels = []
-    if CHANNELS_FILE.exists():
-        try:
-            channels = json.loads(CHANNELS_FILE.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.error("Error reading channels.json: %s", e)
+    channels = _load_existing_sources()
 
     # Build safe_name to real_name mapping
     safe_to_real = {}
