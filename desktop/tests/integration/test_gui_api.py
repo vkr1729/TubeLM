@@ -9,10 +9,9 @@ def flask_client(tmp_path, monkeypatch):
     import gui
     import paths
     sources_file = tmp_path / "sources.json"
-    channels_file = tmp_path / "channels.json"
     monkeypatch.setattr(paths, "get_sources_file", lambda: sources_file)
     monkeypatch.setattr(paths, "get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(gui, "CHANNELS_FILE", channels_file)
+    monkeypatch.setattr(gui, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setattr(gui, "STATE_FILE", tmp_path / "state.json")
     monkeypatch.setattr(gui, "SUMMARIES_DIR", tmp_path / "summaries")
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -22,6 +21,33 @@ def flask_client(tmp_path, monkeypatch):
 
 
 class TestSourcesAPI:
+    def test_run_api_passes_shutdown_flag(self, flask_client, monkeypatch):
+        import gui
+
+        captured = {}
+
+        def fake_start(args):
+            captured["args"] = args
+            return True, "Pipeline started."
+
+        monkeypatch.setattr(gui.runner, "start", fake_start)
+        rv = flask_client.post("/api/run", json={"shutdown_after_run": True, "channels": ["Aevy TV"]})
+
+        assert rv.status_code == 200
+        assert "--shutdown-after-run" in captured["args"]
+        assert captured["args"][-2:] == ["--channels", "Aevy TV"]
+
+    def test_config_api_masks_credentials(self, flask_client, tmp_path):
+        (tmp_path / ".env").write_text(
+            "SMTP_PASSWORD=mail-secret\nYOUTUBE_API_KEY=youtube-secret\nSMTP_SERVER=smtp.example.com\n"
+        )
+        rv = flask_client.get("/api/config")
+        assert rv.status_code == 200
+        data = rv.get_json()
+        assert data["SMTP_PASSWORD"] == "********"
+        assert data["YOUTUBE_API_KEY"] == "********"
+        assert data["SMTP_SERVER"] == "smtp.example.com"
+
     def test_get_sources_returns_all(self, flask_client):
         rv = flask_client.get("/api/sources")
         assert rv.status_code == 200
@@ -36,6 +62,22 @@ class TestSourcesAPI:
         data = rv.get_json()
         assert data["success"] is True
 
+    def test_cinematic_toggle_is_saved_per_source(self, flask_client):
+        flask_client.post("/api/sources", json={
+            "name": "Selected Channel",
+            "type": "youtube",
+            "channel_id": "UCselected123",
+        })
+
+        rv = flask_client.post("/api/sources/cinematic", json={
+            "identifier": "UCselected123",
+            "enabled": True,
+        })
+
+        assert rv.status_code == 200
+        sources = flask_client.get("/api/sources").get_json()
+        assert sources[0]["generate_cinematic_video"] is True
+
     def test_add_rss_source(self, flask_client):
         rv = flask_client.post("/api/sources", json={
             "name": "Test RSS", "type": "rss", "url": "https://example.com/feed.xml"
@@ -43,6 +85,21 @@ class TestSourcesAPI:
         assert rv.status_code == 200
         data = rv.get_json()
         assert data["success"] is True
+
+    def test_reject_invalid_source_category(self, flask_client):
+        rv = flask_client.post("/api/sources", json={
+            "name": "Bad category", "type": "rss",
+            "url": "https://example.com/feed.xml", "category": "anything",
+        })
+        assert rv.status_code == 400
+
+    def test_clamps_source_item_limit(self, flask_client):
+        rv = flask_client.post("/api/sources", json={
+            "name": "Large feed", "type": "rss",
+            "url": "https://example.com/large.xml", "max_items": 5000,
+        })
+        assert rv.status_code == 200
+        assert rv.get_json()["sources"][0]["max_items"] == 50
 
     def test_add_webpage_source(self, flask_client):
         rv = flask_client.post("/api/sources", json={
@@ -69,10 +126,6 @@ class TestSourcesAPI:
         assert rv.status_code == 200
         data = rv.get_json()
         assert data["success"] is True
-
-    def test_backward_compat_channels_alias(self, flask_client):
-        rv = flask_client.get("/api/channels")
-        assert rv.status_code == 200
 
     def test_status_reports_source_types(self, flask_client):
         rv = flask_client.get("/api/status")

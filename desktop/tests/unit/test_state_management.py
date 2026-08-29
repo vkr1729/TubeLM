@@ -5,7 +5,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from main import load_channel_state as load_source_state, save_state, load_seen_urls, save_seen_urls
+from main import (
+    load_source_state,
+    materialize_source_checkpoints,
+    save_seen_urls,
+    save_state,
+    load_seen_urls,
+)
 
 
 class TestSeenUrls:
@@ -48,23 +54,6 @@ class TestStateManagement:
         assert dt is not None
         assert dt.tzinfo is not None
 
-    def test_falls_back_to_channels_key(self, tmp_path):
-        state_file = tmp_path / "state.json"
-        now = datetime.now(timezone.utc)
-        channel_time = now - timedelta(days=3)
-        state = {
-            "last_run_time": (now - timedelta(days=1)).isoformat(),
-            "channels": {
-                "UCtest123": channel_time.isoformat(),
-            },
-        }
-        state_file.write_text(json.dumps(state))
-        dt = load_source_state(state_file, "youtube:UCtest123")
-        assert dt is not None
-        assert dt.tzinfo is not None
-        # Verify we got the per-channel time, NOT the global last_run_time
-        assert dt.strftime("%Y-%m-%d") == channel_time.strftime("%Y-%m-%d")
-
     def test_falls_back_to_global_last_run(self, tmp_path):
         state_file = tmp_path / "state.json"
         now = datetime.now(timezone.utc)
@@ -88,12 +77,32 @@ class TestStateManagement:
         assert "youtube:UCtest123" in data["sources"]
         assert "rss:a1b2c3d4e5f6" in data["sources"]
 
-    def test_save_state_preserves_channels_key(self, tmp_path):
+    def test_save_state_removes_legacy_channels_key(self, tmp_path):
         state_file = tmp_path / "state.json"
         state = {"channels": {"UCold": "2025-01-01T00:00:00+00:00"}}
         state_file.write_text(json.dumps(state))
         save_state(state_file, ["youtube:UCnew"])
         data = json.loads(state_file.read_text())
-        assert "channels" in data
-        assert "UCold" in data["channels"]
+        assert "channels" not in data
         assert "sources" in data
+
+    def test_failed_new_source_keeps_original_global_checkpoint(self, tmp_path):
+        state_file = tmp_path / "state.json"
+        original = "2026-07-31T01:51:02+00:00"
+        state_file.write_text(json.dumps({"last_run_time": original}))
+
+        class Handler:
+            def __init__(self, key):
+                self.key = key
+
+            def state_key(self):
+                return self.key
+
+        successful = Handler("youtube:successful")
+        failed = Handler("youtube:failed")
+        materialize_source_checkpoints(state_file, [successful, failed])
+        save_state(state_file, [successful.state_key()])
+
+        data = json.loads(state_file.read_text())
+        assert data["sources"][failed.state_key()] == original
+        assert data["sources"][successful.state_key()] != original

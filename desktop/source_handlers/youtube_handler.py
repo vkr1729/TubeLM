@@ -17,9 +17,16 @@ logger = logging.getLogger(__name__)
 
 YOUTUBE_RSS_URL = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/videos"
+YOUTUBE_CHANNELS_API_URL = "https://www.googleapis.com/youtube/v3/channels"
+YOUTUBE_PLAYLIST_ITEMS_API_URL = "https://www.googleapis.com/youtube/v3/playlistItems"
 YOUTUBE_WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
 MIN_VIDEO_DURATION_SECONDS = 180
+MAX_API_PLAYLIST_PAGES = 5
 SHORTS_KEYWORDS = re.compile(r"#shorts?", re.IGNORECASE)
+FEED_HEADERS = {
+    "User-Agent": "TubeLM/2.0 (+https://github.com/vkr1729/TubeLM)",
+    "Accept": "application/atom+xml, application/xml;q=0.9, text/xml;q=0.8",
+}
 
 
 def _parse_rss_datetime(entry) -> datetime:
@@ -54,10 +61,11 @@ def _extract_video_id(entry) -> str | None:
 
 
 class YouTubeHandler(BaseSourceHandler):
-    def __init__(self, name: str, channel_id: str, youtube_api_key: str = ""):
+    def __init__(self, name: str, channel_id: str, youtube_api_key: str = "", category: str = "tech"):
         self._name = name
         self._channel_id = channel_id
         self._api_key = youtube_api_key
+        self._category = category
 
     @property
     def source_type(self) -> str:
@@ -66,6 +74,10 @@ class YouTubeHandler(BaseSourceHandler):
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def category(self) -> str:
+        return self._category
 
     @property
     def channel_id(self) -> str:
@@ -105,20 +117,20 @@ class YouTubeHandler(BaseSourceHandler):
     def _fetch_channel_videos(self, since_dt: datetime) -> list[dict] | None:
         url = YOUTUBE_RSS_URL.format(channel_id=self._channel_id)
         max_attempts = 3
-        attempt = 0
         feed = None
 
-        while attempt < max_attempts:
-            attempt += 1
+        for attempt in range(1, max_attempts + 1):
             try:
-                feed = feedparser.parse(url)
-                status_code = feed.get("status")
-                if status_code in (403, 404):
-                    logger.error(
-                        "RSS feed for channel %s returned hard error HTTP %s.",
-                        self._channel_id, status_code,
+                response = requests.get(url, headers=FEED_HEADERS, timeout=15)
+                if response.status_code == 404:
+                    logger.warning(
+                        "YouTube RSS returned HTTP 404 for valid-or-unknown channel %s; "
+                        "trying the official YouTube API fallback.",
+                        self._channel_id,
                     )
-                    break
+                    return self._fetch_channel_videos_api(since_dt)
+                response.raise_for_status()
+                feed = feedparser.parse(response.content)
                 if not feed.bozo or feed.entries:
                     break
                 logger.warning(
@@ -127,15 +139,20 @@ class YouTubeHandler(BaseSourceHandler):
                 )
             except Exception as exc:
                 logger.warning(
-                    "feedparser.parse() raised for channel %s on attempt %d/%d: %s",
-                    self._channel_id, attempt, max_attempts, exc, exc_info=True,
+                    "YouTube RSS request failed for channel %s on attempt %d/%d (%s).",
+                    self._channel_id, attempt, max_attempts, type(exc).__name__,
                 )
             if attempt < max_attempts:
-                time.sleep(5 * attempt)
+                time.sleep(2 * attempt)
 
         if feed is None or (feed.bozo and not feed.entries):
-            logger.error("RSS feed for channel %s remains malformed after %d attempts.", self._channel_id, max_attempts)
-            return None
+            logger.warning(
+                "YouTube RSS for channel %s remains unavailable after %d attempts; "
+                "trying the official YouTube API fallback.",
+                self._channel_id,
+                max_attempts,
+            )
+            return self._fetch_channel_videos_api(since_dt)
 
         videos = []
         for entry in feed.entries:
@@ -160,6 +177,133 @@ class YouTubeHandler(BaseSourceHandler):
                 "description": description,
             })
         return videos
+
+    def _fetch_channel_videos_api(self, since_dt: datetime) -> list[dict] | None:
+        """Discover uploads through the official API when the public RSS feed fails.
+
+        ``None`` means discovery could not be completed and the caller must not
+        advance this source's state. An empty list is returned only after the API
+        successfully confirms that no uploads are newer than ``since_dt``.
+        """
+        if not self._api_key:
+            logger.error(
+                "Cannot fall back to the YouTube API for channel %s because "
+                "YOUTUBE_API_KEY is not configured; preserving its checkpoint.",
+                self._channel_id,
+            )
+            return None
+
+        try:
+            channel_response = requests.get(
+                YOUTUBE_CHANNELS_API_URL,
+                params={
+                    "part": "contentDetails",
+                    "id": self._channel_id,
+                    "key": self._api_key,
+                    "maxResults": 1,
+                },
+                timeout=15,
+            )
+            channel_response.raise_for_status()
+            channel_items = channel_response.json().get("items", [])
+            if not channel_items:
+                logger.error(
+                    "YouTube API did not recognize channel %s; preserving its checkpoint.",
+                    self._channel_id,
+                )
+                return None
+
+            uploads_id = (
+                channel_items[0]
+                .get("contentDetails", {})
+                .get("relatedPlaylists", {})
+                .get("uploads")
+            )
+            if not uploads_id:
+                logger.error(
+                    "YouTube API returned no uploads playlist for channel %s; "
+                    "preserving its checkpoint.",
+                    self._channel_id,
+                )
+                return None
+
+            videos: list[dict] = []
+            page_token: str | None = None
+            for _page_number in range(MAX_API_PLAYLIST_PAGES):
+                params = {
+                    "part": "snippet,contentDetails",
+                    "playlistId": uploads_id,
+                    "key": self._api_key,
+                    "maxResults": 50,
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+
+                playlist_response = requests.get(
+                    YOUTUBE_PLAYLIST_ITEMS_API_URL,
+                    params=params,
+                    timeout=15,
+                )
+                playlist_response.raise_for_status()
+                payload = playlist_response.json()
+                reached_checkpoint = False
+
+                for item in payload.get("items", []):
+                    snippet = item.get("snippet", {})
+                    content_details = item.get("contentDetails", {})
+                    published_raw = (
+                        content_details.get("videoPublishedAt")
+                        or snippet.get("publishedAt")
+                    )
+                    if not published_raw:
+                        continue
+                    try:
+                        published_dt = datetime.fromisoformat(
+                            published_raw.replace("Z", "+00:00")
+                        ).astimezone(timezone.utc)
+                    except (TypeError, ValueError):
+                        logger.debug(
+                            "Ignoring YouTube API item with invalid publishedAt for channel %s.",
+                            self._channel_id,
+                        )
+                        continue
+
+                    if published_dt <= since_dt:
+                        reached_checkpoint = True
+                        continue
+
+                    video_id = content_details.get("videoId") or (
+                        snippet.get("resourceId", {}).get("videoId")
+                    )
+                    if not video_id:
+                        continue
+                    videos.append({
+                        "title": snippet.get("title", ""),
+                        "url": YOUTUBE_WATCH_URL.format(video_id=video_id),
+                        "video_id": video_id,
+                        "published": published_dt.strftime("%Y-%m-%d"),
+                        "description": snippet.get("description", ""),
+                    })
+
+                page_token = payload.get("nextPageToken")
+                if reached_checkpoint or not page_token:
+                    break
+
+            logger.info(
+                "YouTube API fallback found %d upload(s) after the checkpoint for %s.",
+                len(videos),
+                self._channel_id,
+            )
+            return videos
+        except Exception as exc:
+            # Requests exceptions include the full URL, so do not log ``exc``:
+            # the URL contains the configured API key.
+            logger.error(
+                "YouTube API fallback failed for channel %s (%s); preserving its checkpoint.",
+                self._channel_id,
+                type(exc).__name__,
+            )
+            return None
 
     def _filter_by_keyword(self, videos: list[dict]) -> list[dict]:
         filtered = []
@@ -207,8 +351,13 @@ class YouTubeHandler(BaseSourceHandler):
                 )
                 resp.raise_for_status()
                 items = resp.json().get("items", [])
-            except Exception:
-                logger.warning("YouTube API duration fetch failed for batch %d-%d — keeping those videos.", i, i + len(batch), exc_info=True)
+            except Exception as exc:
+                # Do not log the exception URL: requests includes query params,
+                # which would expose the configured YouTube API key.
+                logger.warning(
+                    "YouTube API duration fetch failed for batch %d-%d (%s) — keeping those videos.",
+                    i, i + len(batch), type(exc).__name__,
+                )
                 continue
             for item in items:
                 vid_id = item.get("id", "")

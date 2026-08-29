@@ -1,4 +1,4 @@
-notebooklm-py[browser]
+notebooklm-py[browser]==0.8.1
 feedparser
 requests
 jinja2
@@ -8,4 +8,3 @@ markdown-it-py
 trafilatura>=1.8.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
-

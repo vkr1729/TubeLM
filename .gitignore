@@ -1,62 +1,40 @@
-# AI Orchestration state files (strictly local)
-GEMINI.md
-CLAUDE.md
-implementation_plan.md
-success_criteria.md
-walkthrough.md
-antigravity-init.sh
-
-# Sensitive Environment Configurations
+# Personal configuration and credentials
 .env
-.env.bak
-*.env
+.env.*
+!.env.example
+sources.json
 channels.json
 
-# Local Pipeline State & Logs
+# Local runtime output
 state.json
 logs/
 summaries/
-scratch/
 *.log
 *.bak
 
-# Runtime Database & Dev Artifacts
-tubelm_database
-screen.png
-
-# Virtual Environment & Python Caches
+# Python
 .venv/
 venv/
-ENV/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
 .pytest_cache/
 .mypy_cache/
 
-# OS/IDE Configurations
+# Generated build output
+build/
+dist/
+desktop/build/
+desktop/dist/
+
+# Editor and operating-system files
 .DS_Store
 .vscode/
 .idea/
 
-# Packaged Build Outputs
-desktop/dist/
-desktop/build/
-dist/
-build/
-
+# Local agent instructions and tooling
 AGENTS.md
-
-# Local sources config (contains personal RSS/channels)
-sources.json
-
-# Local scripts/scratch
-launch_claude.sh
-
-# Local Marketing materials
-marketing_strategy.md
-reddit_*.md
-
-# Local dev/commandcode configs
+CLAUDE.md
+GEMINI.md
+.claude/
 .commandcode/
+.kimchi/

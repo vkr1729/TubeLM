@@ -29,6 +29,11 @@ class BaseSourceHandler(ABC):
     def name(self) -> str:
         ...
 
+    @property
+    def category(self) -> str:
+        """Content category for prompt selection. Default: 'tech'."""
+        return "tech"
+
     @abstractmethod
     def discover(self, since_dt: datetime, seen_urls: set[str] | None = None) -> list[SourceItem] | None:
         ...

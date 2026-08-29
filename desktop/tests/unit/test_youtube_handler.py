@@ -11,6 +11,73 @@ class TestYouTubeHandlerDiscovery:
         assert handler.source_type == "youtube"
         assert handler.name == "Test"
 
+    def test_rss_404_without_api_key_preserves_checkpoint(self):
+        handler = YouTubeHandler("Unavailable", "UCunknown")
+        with patch("source_handlers.youtube_handler.requests.get") as mock_get:
+            response = MagicMock(status_code=404)
+            mock_get.return_value = response
+            videos = handler._fetch_channel_videos(datetime.now(timezone.utc))
+        assert videos is None
+        mock_get.assert_called_once()
+
+    def test_rss_404_uses_official_api_fallback(self):
+        handler = YouTubeHandler("Valid", "UCvalid", youtube_api_key="fake_key")
+        rss_response = MagicMock(status_code=404)
+        channel_response = MagicMock(status_code=200)
+        channel_response.json.return_value = {
+            "items": [{
+                "contentDetails": {
+                    "relatedPlaylists": {"uploads": "UUvalid"}
+                }
+            }]
+        }
+        playlist_response = MagicMock(status_code=200)
+        playlist_response.json.return_value = {
+            "items": [{
+                "snippet": {
+                    "title": "A useful new upload",
+                    "description": "Long-form briefing",
+                },
+                "contentDetails": {
+                    "videoId": "abcdefghijk",
+                    "videoPublishedAt": "2026-08-14T10:00:00Z",
+                },
+            }]
+        }
+
+        with patch(
+            "source_handlers.youtube_handler.requests.get",
+            side_effect=[rss_response, channel_response, playlist_response],
+        ) as mock_get:
+            videos = handler._fetch_channel_videos(
+                datetime(2026, 8, 1, tzinfo=timezone.utc)
+            )
+
+        assert videos == [{
+            "title": "A useful new upload",
+            "url": "https://www.youtube.com/watch?v=abcdefghijk",
+            "video_id": "abcdefghijk",
+            "published": "2026-08-14",
+            "description": "Long-form briefing",
+        }]
+        assert mock_get.call_count == 3
+
+    def test_api_fallback_failure_preserves_checkpoint(self):
+        handler = YouTubeHandler("Valid", "UCvalid", youtube_api_key="fake_key")
+        rss_response = MagicMock(status_code=404)
+        api_response = MagicMock(status_code=500)
+        api_response.raise_for_status.side_effect = RuntimeError("API unavailable")
+
+        with patch(
+            "source_handlers.youtube_handler.requests.get",
+            side_effect=[rss_response, api_response],
+        ):
+            videos = handler._fetch_channel_videos(
+                datetime(2026, 8, 1, tzinfo=timezone.utc)
+            )
+
+        assert videos is None
+
 
 class TestYouTubeHandlerFiltering:
     def test_keyword_filter_removes_shorts(self):

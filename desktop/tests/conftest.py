@@ -44,11 +44,6 @@ def rss_malformed_xml(fixtures_dir):
 
 
 @pytest.fixture
-def legacy_channels_json(fixtures_dir):
-    return (fixtures_dir / "channels_legacy.json").read_text()
-
-
-@pytest.fixture
 def mock_notebooklm_client():
     client = AsyncMock()
     client.notebooks.create.return_value = MagicMock(id="nb_test_001")

@@ -9,24 +9,28 @@ import os
 import sys
 import json
 import re
-import queue
 import socket
 import logging
 import threading
 import subprocess
 import webbrowser
+import time
 import feedparser
 import requests
 import hashlib
 import copy
+import tempfile
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from threading import Timer
+from urllib.parse import urlparse
 
 from flask import Flask, jsonify, request, Response, send_from_directory, render_template_string
 
 import paths
 from sources_loader import load_sources
+from run_control import is_pipeline_running, load_compute_deferral
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,7 +45,6 @@ app = Flask(__name__)
 # Base paths
 PROJECT_DIR = paths.get_bundle_dir()
 ENV_FILE = paths.get_env_file()
-CHANNELS_FILE = paths.get_channels_file()
 SOURCES_FILE = paths.get_sources_file()
 STATE_FILE = paths.get_state_file()
 SUMMARIES_DIR = paths.get_summaries_dir()
@@ -54,24 +57,23 @@ load_dotenv(ENV_FILE)
 class PipelineRunner:
     def __init__(self):
         self.process = None
-        self.log_queue = queue.Queue(maxsize=2000)
         self.is_running = False
         self.lock = threading.Lock()
-        self.output_log = []
+        self.log_condition = threading.Condition()
+        self.output_log = deque(maxlen=5000)
+        self.log_sequence = 0
 
     def start(self, args_list):
         with self.lock:
             if self.is_running:
                 return False, "Pipeline is already running."
+            if is_pipeline_running(paths.get_pipeline_lock_file()):
+                return False, "A scheduled or resumed pipeline is already running."
             
             self.is_running = True
-            self.output_log = []
-            # Clear queue
-            while not self.log_queue.empty():
-                try:
-                    self.log_queue.get_nowait()
-                except queue.Empty:
-                    break
+            with self.log_condition:
+                self.output_log.clear()
+                self.log_sequence = 0
 
             threading.Thread(target=self._run, args=(args_list,), daemon=True).start()
             return True, "Pipeline started."
@@ -100,38 +102,62 @@ class PipelineRunner:
             )
             
             for line in self.process.stdout:
-                self.output_log.append(line)
-                try:
-                    self.log_queue.put(line, timeout=0.1)
-                except queue.Full:
-                    pass # Don't block background thread if queue filled
+                self._publish_log(line)
                     
             self.process.wait()
             exit_code = self.process.returncode
             end_msg = f"\n--- Pipeline finished with exit code {exit_code} ---\n"
-            self.output_log.append(end_msg)
-            self.log_queue.put(end_msg)
+            self._publish_log(end_msg)
         except Exception as e:
             err_msg = f"\n--- Pipeline execution error: {e} ---\n"
-            self.output_log.append(err_msg)
-            self.log_queue.put(err_msg)
+            self._publish_log(err_msg)
         finally:
             self.is_running = False
+            with self.log_condition:
+                self.log_condition.notify_all()
+
+    def _publish_log(self, line):
+        """Publish a bounded, replayable line to every connected browser."""
+        with self.log_condition:
+            self.log_sequence += 1
+            self.output_log.append((self.log_sequence, line))
+            self.log_condition.notify_all()
 
     def stream_logs(self):
-        # Stream already accumulated logs
-        for line in self.output_log:
-            yield f"data: {line.rstrip()}\n\n"
-            
-        # Stream new logs
-        while self.is_running or not self.log_queue.empty():
-            try:
-                line = self.log_queue.get(timeout=1.0)
+        last_sequence = 0
+        while True:
+            with self.log_condition:
+                pending = [(seq, line) for seq, line in self.output_log if seq > last_sequence]
+                if not pending and not self.is_running:
+                    return
+                if not pending:
+                    self.log_condition.wait(timeout=1.0)
+                    continue
+
+            for sequence, line in pending:
+                last_sequence = sequence
                 yield f"data: {line.rstrip()}\n\n"
-            except queue.Empty:
-                continue
 
 runner = PipelineRunner()
+
+_runtime_cache_lock = threading.Lock()
+_notebooks_fetch_lock = threading.Lock()
+_scheduler_cache = {"expires": 0.0, "value": None}
+_auth_cache = {"expires": 0.0, "value": None}
+_requirements_cache = {"expires": 0.0, "value": None}
+_notebooks_cache = {
+    "expires": 0.0,
+    "state_mtime_ns": None,
+    "value": None,
+}
+
+
+def _invalidate_runtime_caches():
+    with _runtime_cache_lock:
+        _scheduler_cache["expires"] = 0.0
+        _auth_cache["expires"] = 0.0
+        _requirements_cache["expires"] = 0.0
+        _notebooks_cache["expires"] = 0.0
 
 # ── Env Config Helpers ────────────────────────────────────────────────────────
 
@@ -150,6 +176,26 @@ def read_env_file():
     return config
 
 def write_env_file(updates):
+    allowed_keys = {
+        "SMTP_SERVER", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD",
+        "SENDER_EMAIL", "RECIPIENT_EMAIL", "YOUTUBE_API_KEY",
+        "NOTEBOOKS_RETENTION_LIMIT", "NOTEBOOKLM_BROWSER",
+        "GENERATE_INFOGRAPHICS",
+    }
+    if not isinstance(updates, dict):
+        raise ValueError("Configuration payload must be a JSON object.")
+
+    sanitized_updates = {}
+    for key, value in updates.items():
+        if key not in allowed_keys:
+            continue
+        if not isinstance(value, (str, int, float, bool)):
+            raise ValueError(f"Invalid value for {key}.")
+        string_value = str(value).strip()
+        if "\n" in string_value or "\r" in string_value:
+            raise ValueError(f"Invalid line break in {key}.")
+        sanitized_updates[key] = string_value
+
     if not ENV_FILE.exists():
         # Create from example if possible
         if paths.is_frozen():
@@ -170,7 +216,7 @@ def write_env_file(updates):
         existing_lines = f.readlines()
 
     lines = []
-    keys_to_update = updates.copy()
+    keys_to_update = sanitized_updates.copy()
     
     for line in existing_lines:
         trimmed = line.strip()
@@ -280,7 +326,7 @@ for /L %%i in (1,1,12) do (
 :start_sync
 echo Starting sync pipeline... >> "!LOG_FILE!"
 cd /d "{PROJECT_DIR}"
-{exec_cmd} >> "!LOG_FILE!" 2>&1
+{exec_cmd} --scheduled >> "!LOG_FILE!" 2>&1
 echo === Run complete: %DATE% %TIME% | Exit code: %ERRORLEVEL% === >> "!LOG_FILE!"
 exit /b %ERRORLEVEL%
 """
@@ -406,8 +452,10 @@ done
 
 # Run sync pipeline
 echo "Starting sync pipeline..."
-{exec_cmd}
+set +e
+{exec_cmd} --scheduled
 EXIT_CODE=$?
+set -e
 
 echo "=== Run complete: $(date) | Exit code: $EXIT_CODE ==="
 find "$LOG_DIR" -name "weekly_run_*.log" -mtime +84 -delete 2>/dev/null || true
@@ -575,13 +623,22 @@ def get_systemd_status():
     return status
 
 
-def get_scheduler_status():
+def get_scheduler_status(force=False):
+    now = time.monotonic()
+    with _runtime_cache_lock:
+        if not force and _scheduler_cache["value"] is not None and now < _scheduler_cache["expires"]:
+            return copy.deepcopy(_scheduler_cache["value"])
+
     if sys.platform == "win32":
-        return get_windows_status()
+        status = get_windows_status()
     elif sys.platform == "darwin":
-        return get_macos_status()
+        status = get_macos_status()
     else:
-        return get_systemd_status()
+        status = get_systemd_status()
+
+    with _runtime_cache_lock:
+        _scheduler_cache.update(value=copy.deepcopy(status), expires=now + 20)
+    return status
 
 # ── API Endpoints ─────────────────────────────────────────────────────────────
 
@@ -597,10 +654,6 @@ def index():
 @app.route("/summaries/<path:filename>")
 def serve_summary_file(filename):
     return send_from_directory(str(SUMMARIES_DIR), filename)
-
-@app.route("/assets/<path:filename>")
-def serve_asset_file(filename):
-    return send_from_directory(str(paths.get_assets_dir()), filename)
 
 @app.route("/api/status")
 def api_status():
@@ -624,6 +677,7 @@ def api_status():
             pass
 
     systemd_info = get_scheduler_status()
+    compute_deferral = load_compute_deferral(paths.get_compute_deferral_file())
 
     return jsonify({
         "source_count": source_count,
@@ -631,7 +685,10 @@ def api_status():
         "channel_count": channel_count,
         "last_run": last_run,
         "systemd": systemd_info,
-        "pipeline_running": runner.is_running,
+        "pipeline_running": runner.is_running or is_pipeline_running(paths.get_pipeline_lock_file()),
+        "compute_deferred_until": (
+            compute_deferral["not_before_dt"].isoformat() if compute_deferral else None
+        ),
     })
 
 # ── YouTube Channel Details Extractor Helper ──────────────────────────────────
@@ -723,7 +780,7 @@ def extract_youtube_channel_info(url):
         "channel_id": channel_id
     }
 
-@app.route("/api/channels/extract", methods=["POST"])
+@app.route("/api/sources/youtube/extract", methods=["POST"])
 def api_extract_channel():
     data = request.json or {}
     url = data.get("url", "").strip()
@@ -740,17 +797,8 @@ def api_extract_channel():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-@app.route("/api/channels/<channel_id>", methods=["DELETE"])
-def api_delete_channel_legacy(channel_id):
-    return api_delete_source(channel_id)
-
-
 def _get_sources_path():
-    """Return the canonical sources file path for both reads and writes.
-
-    In dev mode, prefers the project-root sources.json (creating it if only
-    channels.json exists). In frozen/data-dir mode, uses ~/.tubelm/sources.json.
-    """
+    """Return the canonical sources file path for both reads and writes."""
     return paths.get_sources_file()
 
 
@@ -761,7 +809,28 @@ def _load_existing_sources():
 
 def _write_sources(sources):
     dest = _get_sources_path()
-    dest.write_text(json.dumps(sources, indent=2), encoding="utf-8")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(sources, indent=2) + "\n"
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=dest.parent, prefix=f".{dest.name}.",
+        suffix=".tmp", delete=False,
+    ) as tmp:
+        tmp.write(payload)
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(dest)
+
+
+def _bounded_int(value, default: int, minimum: int = 1, maximum: int = 50) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(parsed, maximum))
+
+
+def _valid_http_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def compute_state_key(source):
@@ -797,7 +866,6 @@ def _enrich_sources_with_state_keys(sources):
 
 
 @app.route("/api/sources", methods=["GET", "POST"])
-@app.route("/api/channels", methods=["GET", "POST"])
 def api_sources():
     if request.method == "POST":
         data = request.json or {}
@@ -807,29 +875,50 @@ def api_sources():
         if not name:
             return jsonify({"error": "Missing name"}), 400
 
+        category = data.get("category", "tech").strip()
+        valid_categories = {"health", "tech", "deep_explainer", "news_feed"}
+        if category not in valid_categories:
+            return jsonify({"error": f"Unknown category: {category}"}), 400
+
         if source_type == "youtube":
             channel_id = data.get("channel_id", "").strip()
             if not channel_id:
                 return jsonify({"error": "Missing channel_id"}), 400
-            entry = {"name": name, "type": "youtube", "channel_id": channel_id}
+            entry = {
+                "name": name,
+                "type": "youtube",
+                "channel_id": channel_id,
+                "category": category,
+                "generate_cinematic_video": bool(
+                    data.get("generate_cinematic_video", False)
+                ),
+            }
         elif source_type == "rss":
             url = data.get("url", "").strip()
-            if not url:
-                return jsonify({"error": "Missing url"}), 400
+            if not _valid_http_url(url):
+                return jsonify({"error": "A valid http(s) URL is required"}), 400
             entry = {
                 "name": name, "type": "rss", "url": url,
                 "force_text_extraction": data.get("force_text_extraction", False),
-                "max_items": data.get("max_items", 15),
+                "max_items": _bounded_int(data.get("max_items"), 15),
+                "category": category,
+                "generate_cinematic_video": bool(
+                    data.get("generate_cinematic_video", False)
+                ),
             }
         elif source_type == "webpage":
             url = data.get("url", "").strip()
-            if not url:
-                return jsonify({"error": "Missing url"}), 400
+            if not _valid_http_url(url):
+                return jsonify({"error": "A valid http(s) URL is required"}), 400
             entry = {
                 "name": name, "type": "webpage", "url": url,
                 "is_index_page": data.get("is_index_page", False),
                 "link_selector": data.get("link_selector", ""),
-                "max_items": data.get("max_items", 10),
+                "max_items": _bounded_int(data.get("max_items"), 10),
+                "category": category,
+                "generate_cinematic_video": bool(
+                    data.get("generate_cinematic_video", False)
+                ),
             }
         else:
             return jsonify({"error": f"Unknown source type: {source_type}"}), 400
@@ -851,6 +940,30 @@ def api_sources():
     else:
         sources = _load_existing_sources()
         return jsonify(_enrich_sources_with_state_keys(sources))
+
+
+@app.route("/api/sources/cinematic", methods=["POST"])
+def api_update_source_cinematic():
+    data = request.json or {}
+    identifier = data.get("identifier", "")
+    enabled = data.get("enabled")
+    if not identifier or not isinstance(enabled, bool):
+        return jsonify({"error": "identifier and boolean enabled are required"}), 400
+
+    sources = _load_existing_sources()
+    source = next(
+        (
+            item
+            for item in sources
+            if item.get("channel_id") == identifier or item.get("url") == identifier
+        ),
+        None,
+    )
+    if source is None:
+        return jsonify({"error": "Source not found"}), 404
+    source["generate_cinematic_video"] = enabled
+    _write_sources(sources)
+    return jsonify({"success": True, "enabled": enabled})
 
 
 def _find_and_remove_source(sources, identifier):
@@ -880,7 +993,6 @@ def _find_and_remove_source(sources, identifier):
 
 
 @app.route("/api/sources/<identifier>", methods=["DELETE"])
-@app.route("/api/channels/<identifier>", methods=["DELETE"])
 def api_delete_source(identifier):
     sources = _load_existing_sources()
     if not sources:
@@ -894,7 +1006,6 @@ def api_delete_source(identifier):
 
 
 @app.route("/api/sources/delete", methods=["POST"])
-@app.route("/api/channels/delete", methods=["POST"])
 def api_delete_source_post():
     data = request.json or {}
     identifier = data.get("identifier")
@@ -982,7 +1093,7 @@ def api_update_channel_state():
     if not state_key:
         return jsonify({"error": "Missing state_key or channel_id"}), 400
 
-    state = {"last_run_time": None, "channels": {}, "sources": {}}
+    state = {"last_run_time": None, "sources": {}}
     if STATE_FILE.exists():
         try:
             state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
@@ -991,18 +1102,11 @@ def api_update_channel_state():
 
     if "sources" not in state or not isinstance(state["sources"], dict):
         state["sources"] = {}
-    if "channels" not in state or not isinstance(state["channels"], dict):
-        state["channels"] = {}
+    state.pop("channels", None)
 
     if timestamp == "Never" or not timestamp:
         if state_key in state["sources"]:
             del state["sources"][state_key]
-        if state_key.startswith("youtube:"):
-            bare_id = state_key[len("youtube:"):]
-            if bare_id in state["channels"]:
-                del state["channels"][bare_id]
-        elif channel_id and channel_id in state["channels"]:
-            del state["channels"][channel_id]
     else:
         # Validate timestamp format
         try:
@@ -1011,10 +1115,6 @@ def api_update_channel_state():
             datetime.fromisoformat(ts_to_parse)
             state["sources"][state_key] = timestamp
 
-            # Backward compatibility: write YouTube channels to legacy channels dict
-            if state_key.startswith("youtube:"):
-                bare_id = state_key[len("youtube:"):]
-                state["channels"][bare_id] = timestamp
         except ValueError:
             return jsonify({"error": "Invalid timestamp format. Must be ISO8601."}), 400
 
@@ -1027,7 +1127,7 @@ def api_update_channel_state():
 @app.route("/api/config", methods=["GET", "POST"])
 def api_config():
     if request.method == "POST":
-        updates = request.json
+        updates = request.json or {}
         try:
             write_env_file(updates)
             return jsonify({"success": True})
@@ -1035,56 +1135,66 @@ def api_config():
             return jsonify({"error": str(e)}), 500
     else:
         config = read_env_file()
-        # Hide actual password in response for safety
+        # Never send stored credentials back to the browser.
         clean_config = config.copy()
-        if "SMTP_PASSWORD" in clean_config and clean_config["SMTP_PASSWORD"]:
-            clean_config["SMTP_PASSWORD"] = "********"
+        for secret_key in ("SMTP_PASSWORD", "YOUTUBE_API_KEY"):
+            if clean_config.get(secret_key):
+                clean_config[secret_key] = "********"
         return jsonify(clean_config)
 
 @app.route("/api/prompts", methods=["GET", "POST"])
 def api_prompts():
-    summary_user_path = paths.get_data_dir() / "Summary_Prompt.md"
-    podcast_user_path = paths.get_data_dir() / "Podcast_Prompt.md"
-    
-    summary_bundle_path = paths.get_prompts_dir() / "Summary_Prompt.md"
-    podcast_bundle_path = paths.get_prompts_dir() / "Podcast_Prompt.md"
-    
+    """Category-based prompt management.
+
+    GET  ?category=health&type=summary  → returns prompt text for that category/type
+    GET  (no params)                    → returns all categories with their prompts
+    POST {category, type, text}         → saves prompt text for that category/type
+
+    """
+    valid_categories = ["health", "tech", "deep_explainer", "news_feed"]
+    valid_types = ["summary", "podcast"]
+    bundled_prompts_dir = paths.get_prompts_dir()
+    user_prompts_dir = paths.get_user_prompts_dir()
+
     if request.method == "POST":
-        data = request.json
-        summary_text = data.get("summary_prompt", "").strip()
-        podcast_text = data.get("podcast_prompt", "").strip()
-        
+        data = request.json or {}
+        category = data.get("category", "").strip()
+        prompt_type = data.get("type", "").strip()
+        text = data.get("text", "").strip()
+
+        if category not in valid_categories:
+            return jsonify({"error": f"Invalid category: {category}"}), 400
+        if prompt_type not in valid_types:
+            return jsonify({"error": f"Invalid type: {prompt_type}"}), 400
+
         try:
-            summary_user_path.write_text(summary_text, encoding="utf-8")
-            podcast_user_path.write_text(podcast_text, encoding="utf-8")
+            target_path = user_prompts_dir / prompt_type / f"{category}.md"
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(text, encoding="utf-8")
             return jsonify({"success": True})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     else:
-        # Read from user path if exists, otherwise bundle
-        if summary_user_path.exists():
-            summary_text = summary_user_path.read_text(encoding="utf-8").strip()
-        elif summary_bundle_path.exists():
-            summary_text = summary_bundle_path.read_text(encoding="utf-8").strip()
-        else:
-            summary_text = ""
-            
-        if podcast_user_path.exists():
-            podcast_text = podcast_user_path.read_text(encoding="utf-8").strip()
-        elif podcast_bundle_path.exists():
-            podcast_text = podcast_bundle_path.read_text(encoding="utf-8").strip()
-        else:
-            podcast_text = ""
-            
-        return jsonify({
-            "summary_prompt": summary_text,
-            "podcast_prompt": podcast_text
-        })
+        # Return all category prompts
+        result = {"categories": valid_categories, "types": valid_types, "prompts": {}}
+        for cat in valid_categories:
+            result["prompts"][cat] = {}
+            for pt in valid_types:
+                user_path = user_prompts_dir / pt / f"{cat}.md"
+                bundled_path = bundled_prompts_dir / pt / f"{cat}.md"
+                prompt_path = user_path if user_path.exists() else bundled_path
+                result["prompts"][cat][pt] = (
+                    prompt_path.read_text(encoding="utf-8").strip()
+                    if prompt_path.exists() else ""
+                )
+
+        return jsonify(result)
 
 
 @app.route("/api/scheduler/toggle", methods=["POST"])
 @app.route("/api/systemd/toggle", methods=["POST"])
 def api_scheduler_toggle():
+    _invalidate_runtime_caches()
     try:
         if sys.platform == "win32":
             active = toggle_windows_scheduler()
@@ -1111,12 +1221,17 @@ def api_scheduler_toggle():
 @app.route("/api/scheduler/setup", methods=["POST"])
 @app.route("/api/systemd/setup", methods=["POST"])
 def api_scheduler_setup():
+    _invalidate_runtime_caches()
     day = "Sat"
     time_str = "08:00"
     if request.is_json:
         req_data = request.json or {}
         day = req_data.get("day_of_week", "Sat")
         time_str = req_data.get("time", "08:00")
+
+    valid_days = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+    if day not in valid_days or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time_str):
+        return jsonify({"error": "Invalid schedule day or time."}), 400
         
     try:
         if sys.platform == "win32":
@@ -1131,6 +1246,7 @@ def api_scheduler_setup():
             
             service_path = timer_dir / "tubelm-sync.service"
             timer_path = timer_dir / "tubelm-sync.timer"
+            resume_service_path = timer_dir / "tubelm-resume.service"
             
             script_path = paths.get_data_dir() / "run_weekly.sh"
             
@@ -1167,8 +1283,10 @@ done
 
 # Run sync pipeline
 echo "Starting sync pipeline..."
-{exec_cmd}
+set +e
+{exec_cmd} --scheduled
 EXIT_CODE=$?
+set -e
 
 echo "=== Run complete: $(date) | Exit code: $EXIT_CODE ==="
 find "$LOG_DIR" -name "weekly_run_*.log" -mtime +84 -delete 2>/dev/null || true
@@ -1183,6 +1301,8 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart={script_path}
+Restart=on-failure
+RestartSec=30min
 StandardOutput=journal
 StandardError=journal
 """
@@ -1197,9 +1317,27 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 """
+
+            resume_service_content = f"""[Unit]
+Description=Resume an interrupted TubeLM pipeline
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart={exec_cmd} --resume
+Restart=on-failure
+RestartSec=15min
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+"""
             
             service_path.write_text(service_content, encoding="utf-8")
             timer_path.write_text(timer_content, encoding="utf-8")
+            resume_service_path.write_text(resume_service_content, encoding="utf-8")
             
             try:
                 import os
@@ -1214,6 +1352,7 @@ WantedBy=timers.target
             except Exception as linger_err:
                 logger.warning("Could not enable loginctl user lingering: %s", linger_err)
             subprocess.run(["systemctl", "--user", "enable", "--now", "tubelm-sync.timer"], capture_output=True, check=True)
+            subprocess.run(["systemctl", "--user", "enable", "tubelm-resume.service"], capture_output=True, check=True)
             
             return jsonify({"success": True})
     except Exception as e:
@@ -1225,6 +1364,13 @@ def get_notebooklm_bin():
 
 @app.route("/api/auth/status")
 def api_auth_status():
+    force = request.args.get("refresh") == "1"
+    now = time.monotonic()
+    with _runtime_cache_lock:
+        cached = _auth_cache["value"]
+        if not force and cached is not None and now < _auth_cache["expires"]:
+            return jsonify(copy.deepcopy(cached))
+
     try:
         from notebooklm import NotebookLMClient
         import asyncio
@@ -1240,18 +1386,24 @@ def api_auth_status():
             output = "Authentication check passed. Session is active."
         finally:
             loop.close()
-        return jsonify({
+        payload = {
             "authenticated": authenticated,
             "output": output
-        })
+        }
     except Exception as e:
-        return jsonify({
+        detail = str(e).splitlines()[0][:500]
+        payload = {
             "authenticated": False,
-            "output": f"Authentication check failed: {e}"
-        })
+            "output": f"Authentication check failed: {detail}"
+        }
+
+    with _runtime_cache_lock:
+        _auth_cache.update(value=copy.deepcopy(payload), expires=now + 60)
+    return jsonify(payload)
 
 @app.route("/api/auth/login", methods=["POST"])
 def api_auth_login():
+    _invalidate_runtime_caches()
     try:
         browser = os.getenv("NOTEBOOKLM_BROWSER", "chrome")
         from notebooklm.paths import get_storage_path
@@ -1281,11 +1433,63 @@ def api_auth_login():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
-@app.route("/api/notebooks")
-def api_notebooks():
+_DIGEST_NOTEBOOK_TITLE_RE = re.compile(
+    r"^(?P<source>.+) Digest — (?P<date>\d{4}-\d{2}-\d{2})$"
+)
+
+
+def _notebook_created_timestamp(notebook) -> float:
+    created_at = getattr(notebook, "created_at", None)
+    if not created_at:
+        return 0.0
+    try:
+        return created_at.timestamp()
+    except (AttributeError, OSError, OverflowError, ValueError):
+        return 0.0
+
+
+def _latest_notebook_links(notebook_list) -> dict[str, str]:
+    """Return the newest, most complete digest workspace for each source."""
+    latest = {}
+    for notebook in notebook_list:
+        match = _DIGEST_NOTEBOOK_TITLE_RE.fullmatch((notebook.title or "").strip())
+        if not match:
+            continue
+        source_name = match.group("source").strip()
+        rank = (
+            match.group("date"),
+            int(getattr(notebook, "sources_count", 0) or 0),
+            _notebook_created_timestamp(notebook),
+        )
+        current = latest.get(source_name)
+        if current is None or rank > current[0]:
+            latest[source_name] = (
+                rank,
+                f"https://notebooklm.google.com/notebook/{notebook.id}",
+            )
+
+    return {
+        source_name: latest[source_name][1]
+        for source_name in sorted(latest, key=str.casefold)
+    }
+
+
+def _fetch_real_notebooks():
+    from notebooklm import NotebookLMClient
+    import asyncio
+
+    async def fetch_real():
+        async with NotebookLMClient.from_storage(keepalive=30) as client:
+            return await client.notebooks.list()
+
+    return asyncio.run(fetch_real())
+
+
+def _notebook_links_from_local_digests() -> dict[str, str]:
+    """Best-effort fallback for an unavailable NotebookLM session."""
     notebooks = {}
     if not SUMMARIES_DIR.exists():
-        return jsonify(notebooks)
+        return notebooks
         
     channel_header_re = re.compile(r'^##\s+(.+)$', re.MULTILINE)
     notebook_link_re = re.compile(
@@ -1307,25 +1511,110 @@ def api_notebooks():
                     notebooks[ch_name] = url
         except Exception as e:
             logger.error("Error parsing digest %s for notebook URLs: %s", f.name, e)
-            
+
+    return notebooks
+
+
+def _save_notebook_links_cache(notebooks: dict[str, str]) -> None:
+    cache_path = paths.get_notebook_links_cache_file()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        {
+            "version": 1,
+            "updated_at": datetime.now().astimezone().isoformat(),
+            "notebooks": notebooks,
+        },
+        indent=2,
+    )
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=cache_path.parent,
+        prefix=f".{cache_path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        tmp.write(payload)
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(cache_path)
+
+
+def _load_notebook_links_cache() -> dict[str, str] | None:
+    try:
+        data = json.loads(
+            paths.get_notebook_links_cache_file().read_text(encoding="utf-8")
+        )
+        notebooks = data.get("notebooks")
+        if not isinstance(notebooks, dict):
+            return None
+        if not all(isinstance(name, str) and isinstance(url, str) for name, url in notebooks.items()):
+            return None
+        return notebooks
+    except (OSError, AttributeError, json.JSONDecodeError):
+        return None
+
+
+def _notebook_state_mtime_ns() -> int | None:
+    try:
+        return STATE_FILE.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _cached_notebook_links(now: float, state_mtime_ns: int | None):
+    with _runtime_cache_lock:
+        if (
+            _notebooks_cache["value"] is not None
+            and now < _notebooks_cache["expires"]
+            and state_mtime_ns == _notebooks_cache["state_mtime_ns"]
+        ):
+            return copy.deepcopy(_notebooks_cache["value"])
+    return None
+
+
+@app.route("/api/notebooks")
+def api_notebooks():
+    state_mtime_ns = _notebook_state_mtime_ns()
+    now = time.monotonic()
+    cached = _cached_notebook_links(now, state_mtime_ns)
+    if cached is not None:
+        return jsonify(cached)
+
+    # The dashboard loads this endpoint from two views at startup. Coalesce
+    # simultaneous cache misses so they produce one NotebookLM request.
+    with _notebooks_fetch_lock:
+        state_mtime_ns = _notebook_state_mtime_ns()
+        now = time.monotonic()
+        cached = _cached_notebook_links(now, state_mtime_ns)
+        if cached is not None:
+            return jsonify(cached)
+
+        try:
+            notebooks = _latest_notebook_links(_fetch_real_notebooks())
+            _save_notebook_links_cache(notebooks)
+            cache_seconds = 90
+        except Exception as exc:
+            logger.warning(
+                "Could not refresh NotebookLM workspaces (%s); using the last successful index.",
+                type(exc).__name__,
+            )
+            notebooks = _load_notebook_links_cache()
+            if notebooks is None:
+                notebooks = _notebook_links_from_local_digests()
+            cache_seconds = 30
+
+        with _runtime_cache_lock:
+            _notebooks_cache.update(
+                value=copy.deepcopy(notebooks),
+                state_mtime_ns=state_mtime_ns,
+                expires=now + cache_seconds,
+            )
     return jsonify(notebooks)
 
 @app.route("/api/notebooks/real")
 def api_notebooks_real():
     try:
-        from notebooklm import NotebookLMClient
-        import asyncio
-        
-        async def fetch_real():
-            async with NotebookLMClient.from_storage(keepalive=30) as client:
-                return await client.notebooks.list()
-                
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            nb_list = loop.run_until_complete(fetch_real())
-        finally:
-            loop.close()
+        nb_list = _fetch_real_notebooks()
             
         serialized = []
         for nb in nb_list:
@@ -1360,6 +1649,8 @@ def api_delete_notebook(notebook_id):
         finally:
             loop.close()
             
+        if success:
+            _invalidate_runtime_caches()
         return jsonify({"success": success})
     except Exception as e:
         logger.exception("Failed to delete notebook %s", notebook_id)
@@ -1496,6 +1787,7 @@ def api_trigger_run():
     data = request.json or {}
     dry_run = data.get("dry_run", False)
     skip_email = data.get("skip_email", False)
+    shutdown_after_run = data.get("shutdown_after_run", False)
     channels = data.get("channels", [])
     
     args = []
@@ -1503,6 +1795,8 @@ def api_trigger_run():
         args.append("--dry-run")
     if skip_email:
         args.append("--skip-email")
+    if shutdown_after_run:
+        args.append("--shutdown-after-run")
     if channels:
         args.append("--channels")
         args.append(",".join(channels))
@@ -1560,6 +1854,12 @@ def api_system_requirements():
       1. Playwright Chromium browser (headless, for NotebookLM automation)
       2. Google Chrome or Chromium (for rookiepy cookie extraction)
     """
+    now = time.monotonic()
+    with _runtime_cache_lock:
+        cached = _requirements_cache["value"]
+        if cached is not None and now < _requirements_cache["expires"]:
+            return jsonify(copy.deepcopy(cached))
+
     import shutil as _shutil
     import sys
     requirements = []
@@ -1641,8 +1941,13 @@ def api_system_requirements():
         ),
     })
 
-    all_ok = all(r["ok"] for r in requirements)
-    return jsonify({"all_ok": all_ok, "requirements": requirements})
+    payload = {
+        "all_ok": all(r["ok"] for r in requirements),
+        "requirements": requirements,
+    }
+    with _runtime_cache_lock:
+        _requirements_cache.update(value=copy.deepcopy(payload), expires=now + 300)
+    return jsonify(payload)
 
 
 

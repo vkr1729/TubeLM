@@ -1,45 +1,30 @@
-name: Verify Code Compilation
+name: Verify
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
-  verify:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: desktop/requirements-dev.txt
 
-    - name: Install dependencies for import resolution
-      run: |
-        pip install --upgrade pip
-        pip install python-dotenv feedparser requests jinja2 markdown-it-py flask notebooklm-py rookiepy pystray pillow
+      - name: Install dependencies
+        run: pip install -r desktop/requirements-dev.txt
 
-    - name: Check Python Syntax & Compilation
-      run: |
-        python -m py_compile \
-          desktop/main.py \
-          desktop/email_service.py \
-          desktop/config.py \
-          desktop/notebooklm_service.py \
-          desktop/gui.py \
-          desktop/paths.py \
-          desktop/linux_launcher.py \
-          desktop/win_launcher.py \
-          desktop/mac_launcher.py
-        echo "All files compile successfully!"
+      - name: Compile
+        run: python -m compileall -q desktop
 
-    - name: Validate PyInstaller spec syntax
-      run: |
-        python3 -c "import ast; ast.parse(open('desktop/tubelm.spec').read()); print('tubelm.spec: OK')"
-        python3 -c "import ast; ast.parse(open('desktop/tubelm_win.spec').read()); print('tubelm_win.spec: OK')"
-        python3 -c "import ast; ast.parse(open('desktop/tubelm_mac.spec').read()); print('tubelm_mac.spec: OK')"
+      - name: Test
+        env:
+          PYTHONPATH: desktop
+        run: pytest desktop/tests -q

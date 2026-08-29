@@ -2,7 +2,7 @@
 """
 test_gui_e2e.py — Comprehensive End-to-End GUI & API Test Suite for TubeLM.
 Launches the Flask Web Dashboard, queries all active API endpoints, drives the browser
-via Playwright utilizing native Chrome, and saves screenshots of the dark-mode dashboard.
+via Playwright utilizing native Chrome, and validates both dashboard themes.
 """
 
 import os
@@ -19,7 +19,12 @@ PORT = 5050
 BASE_URL = f"http://127.0.0.1:{PORT}"
 PROJECT_DIR = Path(__file__).parent.parent.resolve()
 ROOT_DIR = PROJECT_DIR.parent.resolve()
-REPORT_DIR = ROOT_DIR / "summaries" / "test_report"
+REPORT_DIR = Path(
+    os.environ.get(
+        "TUBELM_E2E_REPORT_DIR",
+        str(ROOT_DIR / "summaries" / "test_report"),
+    )
+).resolve()
 
 print("=========================================================================")
 print("             📺 Starting TubeLM E2E GUI Testing Suite 📺               ")
@@ -47,39 +52,15 @@ print(f"[*] Dynamically selected available test port: {PORT}")
 # ── 1. Start Flask GUI Subprocess ──────────────────────────────────────────────
 print("[*] Launching TubeLM GUI Server in background...")
 
-# Auto-detect if we should launch native compiled binary or dev script
-packaged_binary = os.environ.get("TUBELM_TEST_BINARY")
-if not packaged_binary:
-    packaged_binary = "/usr/bin/tubelm"
-    if not os.path.exists(packaged_binary):
-        packaged_binary = "/opt/tubelm/tubelm"
-
-# Verify if package binary path is valid or overridden
-is_packaged = os.path.exists(packaged_binary) if packaged_binary else False
-
-if is_packaged:
-    cmd = [packaged_binary, "--gui", "--port", str(PORT)]
-    if packaged_binary.lower().endswith(".exe"):
-        cmd = ["wine", packaged_binary, "--gui", "--port", str(PORT)]
-        
-    print(f"[*] Packaging mode detected. Launching: {' '.join(cmd)}")
-    server_process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-else:
-    print("[*] Development mode detected. Launching raw python launcher script...")
-    venv_python = ROOT_DIR / ".venv" / "bin" / "python"
-    python_bin = str(venv_python) if venv_python.exists() else sys.executable
-    server_process = subprocess.Popen(
-        [python_bin, str(PROJECT_DIR / "gui.py"), "--port", str(PORT)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=str(PROJECT_DIR)
-    )
+venv_python = ROOT_DIR / ".venv" / "bin" / "python"
+python_bin = str(venv_python) if venv_python.exists() else sys.executable
+server_process = subprocess.Popen(
+    [python_bin, str(PROJECT_DIR / "gui.py"), "--port", str(PORT)],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+    cwd=str(PROJECT_DIR),
+)
 
 # Wait for Flask to boot and respond
 time.sleep(3)
@@ -96,9 +77,9 @@ try:
     assert "systemd" in data
     print("✅ OK")
 
-    # B. Audit /api/channels (GET)
-    print(" -> GET /api/channels ... ", end="")
-    resp = requests.get(f"{BASE_URL}/api/channels", timeout=5)
+    # B. Audit /api/sources (GET)
+    print(" -> GET /api/sources ... ", end="")
+    resp = requests.get(f"{BASE_URL}/api/sources", timeout=5)
     resp.raise_for_status()
     channels = resp.json()
     assert isinstance(channels, list)
@@ -117,8 +98,10 @@ try:
     resp = requests.get(f"{BASE_URL}/api/prompts", timeout=5)
     resp.raise_for_status()
     prompts = resp.json()
-    assert "summary_prompt" in prompts
-    assert "podcast_prompt" in prompts
+    # New category-based structure
+    assert "categories" in prompts
+    assert "prompts" in prompts
+    assert "tech" in prompts["prompts"]
     print("✅ OK")
 
     # E. Audit /api/digests
@@ -170,22 +153,83 @@ try:
             print("[*] Falling back to default playwright browser...")
             browser = p.chromium.launch(headless=True)
 
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            color_scheme="dark",
+        )
         page = context.new_page()
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
 
         # Navigate to Dashboard
         print(f"[*] Navigating to Dashboard: {BASE_URL}")
-        page.goto(BASE_URL)
+        navigation = page.goto(BASE_URL)
+        assert navigation and navigation.ok
         page.wait_for_timeout(2000)
 
         # Capture Homepage Dashboard Screenshot
-        homepage_shot = REPORT_DIR / "01_homepage_dashboard.png"
+        homepage_shot = REPORT_DIR / "01_dashboard.png"
         page.screenshot(path=str(homepage_shot))
         print(f"✅ Saved homepage screenshot: {homepage_shot}")
 
-        # Check if basic UI elements are present
-        assert page.locator("body").count() > 0
-        print("✅ Dashboard page DOM validated.")
+        # Validate the overview and every primary navigation destination.
+        assert page.locator("html").get_attribute("data-theme") == "dark"
+        assert page.locator("#dashboard h1").inner_text() == "Briefings, under control."
+        assert page.locator(".metric-card").count() == 4
+        expected_tabs = {
+            "sources": "Content Sources",
+            "settings": "Settings",
+            "run": "Run Pipeline",
+            "digests": "Digests Library",
+        }
+
+        # The theme switch must update immediately and survive navigation/reload.
+        page.locator("#theme-toggle").click()
+        assert page.locator("html").get_attribute("data-theme") == "light"
+        assert page.locator("#theme-toggle-label").inner_text() == "Dark mode"
+        page.wait_for_timeout(250)  # Allow the surface-color transition to settle.
+        for tab_id, heading in expected_tabs.items():
+            page.locator(f'.nav-item[data-tab="{tab_id}"] button').click()
+            assert page.locator(f"#{tab_id} h1").inner_text() == heading
+        page.locator('.nav-item[data-tab="dashboard"] button').click()
+        page.reload()
+        page.wait_for_timeout(300)
+        assert page.locator("html").get_attribute("data-theme") == "light"
+        page.locator("#theme-toggle").click()
+        assert page.locator("html").get_attribute("data-theme") == "dark"
+
+        for tab_id, heading in expected_tabs.items():
+            page.locator(f'.nav-item[data-tab="{tab_id}"] button').click()
+            assert page.locator(f"#{tab_id}").is_visible()
+            assert page.locator(f"#{tab_id} h1").inner_text() == heading
+
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.locator('.nav-item[data-tab="sources"] button').click()
+        page.locator("#channels-table-body tr").first.wait_for()
+        page.locator(".content-area").evaluate(
+            "el => { el.scrollTop = document.querySelectorAll('#sources .glass-card')[1].offsetTop - 24; }"
+        )
+        page.mouse.move(1240, 40)
+        page.wait_for_timeout(400)
+        sources_shot = REPORT_DIR / "02_sources.png"
+        page.screenshot(path=str(sources_shot))
+
+        page.locator('.nav-item[data-tab="run"] button').click()
+        page.locator(".content-area").evaluate("el => { el.scrollTop = 0; }")
+        page.mouse.move(1240, 40)
+        page.wait_for_timeout(400)
+        run_shot = REPORT_DIR / "03_run_console.png"
+        page.screenshot(path=str(run_shot))
+
+        page.locator('.nav-item[data-tab="dashboard"] button').click()
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(250)
+        mobile_shot = REPORT_DIR / "04_mobile_dashboard.png"
+        page.screenshot(path=str(mobile_shot), full_page=True)
+        assert page.locator(".sidebar").is_visible()
+        assert not page.locator(".brand").is_visible()
+        assert not page_errors, f"Browser JavaScript errors: {page_errors}"
+        print("✅ Both themes, navigation, responsive layout, and JavaScript console validated.")
 
         # Clean shutdown browser
         browser.close()

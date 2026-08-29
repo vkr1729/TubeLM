@@ -28,11 +28,12 @@ def _parse_feed_datetime(entry) -> datetime:
 
 
 class GenericRSSHandler(BaseSourceHandler):
-    def __init__(self, name: str, url: str, force_text_extraction: bool = False, max_items: int = 15):
+    def __init__(self, name: str, url: str, force_text_extraction: bool = False, max_items: int = 15, category: str = "tech"):
         self._name = name
         self._url = url
         self._force_text_extraction = force_text_extraction
         self._max_items = max_items
+        self._category = category
 
     @property
     def source_type(self) -> str:
@@ -41,6 +42,10 @@ class GenericRSSHandler(BaseSourceHandler):
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def category(self) -> str:
+        return self._category
 
     @property
     def url(self) -> str:

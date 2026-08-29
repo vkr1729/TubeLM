@@ -19,12 +19,13 @@ USER_AGENT = "TubeLM/2.0"
 
 class WebpageScraperHandler(BaseSourceHandler):
     def __init__(self, name: str, url: str, is_index_page: bool = False,
-                 link_selector: str = "", max_items: int = 10):
+                 link_selector: str = "", max_items: int = 10, category: str = "tech"):
         self._name = name
         self._url = url
         self._is_index_page = is_index_page
         self._link_selector = link_selector
         self._max_items = max_items
+        self._category = category
 
     @property
     def source_type(self) -> str:
@@ -33,6 +34,10 @@ class WebpageScraperHandler(BaseSourceHandler):
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def category(self) -> str:
+        return self._category
 
     @property
     def url(self) -> str:

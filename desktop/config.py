@@ -38,17 +38,58 @@ def _get_optional(key: str, default: str = "") -> str:
     return val if val else default
 
 
+def _get_bool(key: str, default: bool = False) -> bool:
+    value = os.getenv(key)
+    if value is None or not value.strip():
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigurationError(f"{key} must be true or false, got: {value!r}")
+
+
 def _load_prompt_file(filename: str) -> str:
-    """Load a prompt template from a Markdown file in the shared prompts directory.
+    """Load a prompt override, falling back to the bundled default.
 
     Returns the file content stripped of leading/trailing whitespace,
     or an empty string if the file is missing or empty.
     """
-    path = paths.get_prompts_dir() / filename
-    if path.exists():
-        content = path.read_text(encoding="utf-8").strip()
+    for prompt_dir in (paths.get_user_prompts_dir(), paths.get_prompts_dir()):
+        path = prompt_dir / filename
+        if path.exists():
+            content = path.read_text(encoding="utf-8").strip()
+            if content:
+                return content
+    return ""
+
+
+_DEFAULT_CATEGORY = "tech"
+_VALID_CATEGORIES = ("health", "tech", "deep_explainer", "news_feed")
+
+
+def load_category_prompt(category: str, prompt_type: str) -> str:
+    """Load a category-specific prompt for either 'summary' or 'podcast'.
+
+    Looks for  shared/prompts/{prompt_type}/{category}.md.
+    Falls back to  shared/prompts/{prompt_type}/tech.md  if the
+    category file is missing or empty.
+    Returns empty string only if even the fallback is absent.
+    """
+    if category not in _VALID_CATEGORIES:
+        category = _DEFAULT_CATEGORY
+
+    content = _load_prompt_file(f"{prompt_type}/{category}.md")
+    if content:
+        return content
+
+    # Fallback to default category
+    if category != _DEFAULT_CATEGORY:
+        content = _load_prompt_file(f"{prompt_type}/{_DEFAULT_CATEGORY}.md")
         if content:
             return content
+
     return ""
 
 
@@ -65,9 +106,7 @@ class Config:
     # YouTube Data API key (REQUIRED for duration-based Shorts filtering)
     youtube_api_key: str
 
-    # Custom prompt templates from Markdown files
-    summary_prompt: str   # Content of Summary_Prompt.md (or empty → use default)
-    podcast_prompt: str   # Content of Podcast_Prompt.md (or empty → use default)
+
 
     # Local file paths
     sources_file: Path
@@ -76,11 +115,11 @@ class Config:
     # Retention configuration
     notebooks_retention_limit: int
 
+    # Infographics are retained as an opt-in feature because they are rarely used.
+    generate_infographics: bool = False
+
     # Default browser for NotebookLM extraction (chrome, edge, safari, firefox, opera, etc.)
     notebooklm_browser: str = "chrome"
-
-    # Premium email theme template name
-    email_theme: str = "email_digest.html"
 
     # Derived: use SSL (port 465) or STARTTLS (port 587)
     use_ssl: bool = field(init=False)
@@ -122,11 +161,9 @@ def load_config() -> Config:
         sender_email=_get_optional("SENDER_EMAIL"),
         recipient_email=_get_optional("RECIPIENT_EMAIL"),
         youtube_api_key=_get_optional("YOUTUBE_API_KEY"),
-        summary_prompt=_load_prompt_file("Summary_Prompt.md"),
-        podcast_prompt=_load_prompt_file("Podcast_Prompt.md"),
         sources_file=paths.get_sources_file(),
         state_file=paths.get_state_file(),
         notebooks_retention_limit=notebooks_retention_limit,
+        generate_infographics=_get_bool("GENERATE_INFOGRAPHICS", False),
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
-        email_theme=_get_optional("EMAIL_THEME", "email_digest.html"),
     )

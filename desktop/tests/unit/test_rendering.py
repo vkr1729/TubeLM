@@ -1,6 +1,11 @@
 import pytest
 from pathlib import Path
-from email_service import _render_channel_html
+from email_service import (
+    _render_artifact_completion_html,
+    _render_artifact_completion_text,
+    _render_channel_html,
+    _render_channel_text,
+)
 
 class TestTemplateRendering:
     def test_youtube_rendering(self):
@@ -19,13 +24,19 @@ class TestTemplateRendering:
             ]
         }
         
-        # Test rendering default theme
-        html = _render_channel_html(channel_data, "2026-05-30", None, "email_digest.html")
+        html = _render_channel_html(channel_data, "2026-05-30", None)
         assert "New Videos" in html
         assert "YouTube" in html
         assert "https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg" in html
         assert "A nice video summary" in html
         assert ".summary-html h4" in html
+        assert "Visual brief" not in html
+        assert 'width="50%"' in html
+
+        text = _render_channel_text(channel_data, "2026-05-30")
+        assert "TUBELM BRIEFING" in text
+        assert "Amazing Video" in text
+        assert "https://www.youtube.com/watch" in text
 
     def test_rss_rendering_no_thumbnails(self):
         channel_data = {
@@ -42,8 +53,7 @@ class TestTemplateRendering:
             ]
         }
         
-        # Test rendering theme1 (Premium Dark)
-        html = _render_channel_html(channel_data, "2026-05-30", None, "theme1_premium_dark.html")
+        html = _render_channel_html(channel_data, "2026-05-30", None)
         assert "New Articles" in html
         assert "RSS Feed" in html
         assert "Article Entry" in html
@@ -64,7 +74,7 @@ class TestTemplateRendering:
         }
         
         # When infographic_cid is None, it should resolve the local filename relatively
-        html = _render_channel_html(channel_data, "2026-05-30", None, "email_digest.html")
+        html = _render_channel_html(channel_data, "2026-05-30", None)
         assert "2026-05-30_OpenAI_News_infographic.jpg" in html
         assert "cid:" not in html
         assert "📊" in html  # Stats bar should show infographic emoji
@@ -92,3 +102,43 @@ class TestTemplateRendering:
         # 4. Assert JPEG file size is non-zero
         assert jpg_path.stat().st_size > 0
 
+    def test_partial_item_mapping_falls_back_to_complete_global_summary(self):
+        channel_data = {
+            "channel_name": "Test Channel",
+            "source_type": "youtube",
+            "summary_text": "## First Video — Test Channel\n\nOnly the first title maps, but this complete response must stay visible.",
+            "videos": [
+                {"title": "First Video", "url": "https://example.com/1", "published": "2026-08-15"},
+                {"title": "Completely Different", "url": "https://example.com/2", "published": "2026-08-15"},
+            ],
+        }
+
+        html = _render_channel_html(channel_data, "2026-08-15", None)
+
+        assert "Only the first title maps" in html
+        assert "The throughline" in html
+        assert "Why it matters" not in html
+
+    def test_completion_email_is_clean_without_external_assets(self):
+        batch = {
+            "week_start": "2026-08-24",
+            "entries": [
+                {
+                    "notebook_id": "notebook-1",
+                    "source_name": "Doctor Alex",
+                    "channel_order": 3,
+                    "artifact_title": "The Healthspan Blueprint",
+                    "filename": "TubeLM 03 - Doctor Alex - The Healthspan Blueprint.mp4",
+                }
+            ],
+        }
+
+        html = _render_artifact_completion_html("video", batch)
+        text = _render_artifact_completion_text("video", batch)
+
+        assert "Cinematic Videos ready" in html
+        assert "TubeLM 03 - Doctor Alex - The Healthspan Blueprint.mp4" in html
+        assert "https://notebooklm.google.com/notebook/notebook-1" in html
+        assert "@media screen and (max-width:640px)" in html
+        assert "<img" not in html
+        assert "Doctor Alex" in text
