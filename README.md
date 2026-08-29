@@ -1,6 +1,6 @@
 # TubeLM
 
-**Version 3.0.0**
+**Version 3.1.0**
 
 TubeLM is my personal, Linux-first pipeline for turning new YouTube videos, RSS
 articles, and webpages into grounded NotebookLM briefings.
@@ -10,9 +10,11 @@ The useful work happens in this order:
 1. Discover new source material.
 2. Create or resume the NotebookLM notebook and generate its summary.
 3. Save the local digest and send the summary email immediately.
-4. Generate eligible Audio Overviews and selected Cinematic Videos in the
+4. Optionally use `agy` with Gemini 3.7 Flash (High) to select and email the
+   ten highest-signal items across every completed source digest.
+5. Generate eligible Audio Overviews and selected Cinematic Videos in the
    background.
-5. Resume unfinished artifact work after quota refreshes or computer restarts.
+6. Resume unfinished artifact work after quota refreshes or computer restarts.
 
 There are no packaged installers or cross-platform release builds. This repository
 runs directly from a Python virtual environment. Anyone using another operating
@@ -43,6 +45,8 @@ The dashboard also has a responsive mobile layout:
 - Filters YouTube Shorts using the YouTube Data API.
 - Creates grounded NotebookLM summaries using category-specific prompts.
 - Sends a clean HTML digest to one configured email address before artifact work.
+- Can send one optional cross-source Editor's Top 10 email selected by `agy`
+  with Gemini 3.7 Flash (High); this is disabled by default.
 - Generates Audio Overviews only when a notebook contains more than one source.
 - Generates Cinematic Videos only for sources enabled in the dashboard.
 - Keeps infographic support in the code, disabled by default.
@@ -95,7 +99,7 @@ Open `http://127.0.0.1:5000` if the browser does not open automatically.
 Use the dashboard for day-to-day changes. The two local files are:
 
 - `.env` — SMTP, email recipient, YouTube API key, browser choice, and optional
-  settings.
+  settings, including `GENERATE_TOP_10_DIGEST=false` by default.
 - `sources.json` — monitored sources, categories, limits, and the per-source
   `generate_cinematic_video` flag.
 
@@ -132,6 +136,19 @@ repository defaults untouched.
 The dashboard can install and manage the weekly `systemd --user` timer used on this
 machine. `run_weekly.sh` is the small wrapper used for manual Linux scheduling.
 
+When the Editor's Top 10 setting is enabled, `agy` must be installed,
+authenticated, and available on `PATH`. TubeLM passes compact item details and
+grounded summaries—not the full HTML emails—to
+`gemini-3.7-flash-high`. The ranking is schema-validated, rendered through the
+local email template, and sent only after every source summary has finalized.
+
+To build and send a Top 10 from existing digests for a specific week:
+
+```bash
+PYTHONPATH=desktop .venv/bin/python desktop/scripts/send_top10_from_digests.py \
+  --since 2026-08-24 --until 2026-08-29
+```
+
 ## Artifact and quota behavior
 
 Digest delivery does not wait for Studio artifacts.
@@ -156,6 +173,7 @@ desktop/
 ├── main.py                    # Pipeline entry point
 ├── gui.py                     # Local dashboard and API
 ├── notebooklm_service.py      # Notebook and summary operations
+├── top10_service.py           # Durable agy ranking and cross-source digest
 ├── weekly_audio_service.py    # Durable Audio queue
 ├── weekly_video_service.py    # Durable Cinematic queue and downloads
 ├── source_handlers/           # YouTube, RSS, and webpage discovery

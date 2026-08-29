@@ -48,6 +48,13 @@ class TestSourcesAPI:
         assert data["YOUTUBE_API_KEY"] == "********"
         assert data["SMTP_SERVER"] == "smtp.example.com"
 
+    def test_config_api_accepts_top10_toggle(self, flask_client, tmp_path):
+        rv = flask_client.post(
+            "/api/config", json={"GENERATE_TOP_10_DIGEST": "true"}
+        )
+        assert rv.status_code == 200
+        assert "GENERATE_TOP_10_DIGEST=true" in (tmp_path / ".env").read_text()
+
     def test_get_sources_returns_all(self, flask_client):
         rv = flask_client.get("/api/sources")
         assert rv.status_code == 200

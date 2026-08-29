@@ -7,8 +7,9 @@ Entry point. Orchestrates:
   3. RSS video discovery + multi-layer Shorts filtering
   4. NotebookLM notebook creation, source upload, and summary
   5. Per-source email delivery and checkpointing
-  6. Independent conditional Audio and opt-in Cinematic Video generation
-  7. Durable background resume when compute is limited
+  6. Optional cross-source Top 10 selection and email
+  7. Independent conditional Audio and opt-in Cinematic Video generation
+  8. Durable background resume when compute is limited
 
 Usage:
   python main.py              # Full run
@@ -63,6 +64,11 @@ from weekly_audio_service import (
     resume_weekly_audio_batches,
     seal_weekly_audio_batch,
     unnotified_completed_audio_batches,
+)
+from top10_service import (
+    generate_and_send_top10_digest,
+    prepare_top10_batch,
+    record_top10_source,
 )
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
@@ -540,6 +546,14 @@ async def async_main(
         materialize_source_checkpoints(cfg.state_file, handlers)
 
     run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    top10_enabled = bool(
+        getattr(cfg, "generate_top10_digest", False)
+        and not dry_run
+        and not skip_email
+    )
+    top10_run_date = (
+        prepare_top10_batch(run_date) if top10_enabled else run_date
+    )
 
     retry_stages = [
         {"name": "Initial Run", "delay_hours": 0},
@@ -652,6 +666,11 @@ async def async_main(
                     html_path.write_text(html_body, encoding="utf-8")
                     logger.info("Local HTML digest saved to %s", html_path)
 
+                    if top10_enabled:
+                        record_top10_source(
+                            handler.state_key(), result, top10_run_date
+                        )
+
                     if skip_email:
                         logger.info("[%s] Email delivery skipped by configuration.", handler.name)
                     else:
@@ -732,6 +751,15 @@ async def async_main(
     if dry_run:
         logger.info("Dry run complete; no notebooks or artifacts were created or resumed.")
         return True
+
+    if top10_enabled:
+        try:
+            generate_and_send_top10_digest(cfg, top10_run_date)
+        except Exception:
+            logger.exception(
+                "The optional Top 10 digest failed; its durable batch is preserved for retry."
+            )
+            return False
 
     # Studio work starts only after every summary/email has been finalized.
     # Audio and selected Cinematic Videos then advance as independent queues.

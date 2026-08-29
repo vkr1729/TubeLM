@@ -180,7 +180,7 @@ def write_env_file(updates):
         "SMTP_SERVER", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD",
         "SENDER_EMAIL", "RECIPIENT_EMAIL", "YOUTUBE_API_KEY",
         "NOTEBOOKS_RETENTION_LIMIT", "NOTEBOOKLM_BROWSER",
-        "GENERATE_INFOGRAPHICS",
+        "GENERATE_INFOGRAPHICS", "GENERATE_TOP_10_DIGEST",
     }
     if not isinstance(updates, dict):
         raise ValueError("Configuration payload must be a JSON object.")

@@ -118,6 +118,9 @@ class Config:
     # Infographics are retained as an opt-in feature because they are rarely used.
     generate_infographics: bool = False
 
+    # Cross-source Top 10 email selected by agy/Gemini after summaries complete.
+    generate_top10_digest: bool = False
+
     # Default browser for NotebookLM extraction (chrome, edge, safari, firefox, opera, etc.)
     notebooklm_browser: str = "chrome"
 
@@ -165,5 +168,6 @@ def load_config() -> Config:
         state_file=paths.get_state_file(),
         notebooks_retention_limit=notebooks_retention_limit,
         generate_infographics=_get_bool("GENERATE_INFOGRAPHICS", False),
+        generate_top10_digest=_get_bool("GENERATE_TOP_10_DIGEST", False),
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
     )

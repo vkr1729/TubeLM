@@ -94,6 +94,10 @@ def get_summaries_dir() -> Path:
     return get_data_dir() / "summaries"
 
 
+def get_top10_digest_batch_file() -> Path:
+    return get_data_dir() / "top10_digest_batch.json"
+
+
 def ensure_data_dir() -> None:
     """Create runtime directories and seed missing personal configuration."""
     get_data_dir().mkdir(parents=True, exist_ok=True)

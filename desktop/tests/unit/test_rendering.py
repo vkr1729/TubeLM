@@ -5,6 +5,8 @@ from email_service import (
     _render_artifact_completion_text,
     _render_channel_html,
     _render_channel_text,
+    _render_top10_html,
+    _render_top10_text,
 )
 
 class TestTemplateRendering:
@@ -142,3 +144,43 @@ class TestTemplateRendering:
         assert "@media screen and (max-width:640px)" in html
         assert "<img" not in html
         assert "Doctor Alex" in text
+
+    def test_top10_email_is_responsive_accessible_and_escaped(self):
+        selection = {
+            "run_date": "2026-08-29",
+            "candidate_count": 84,
+            "items": [
+                {
+                    "rank": 1,
+                    "title": "Agent systems <script>alert(1)</script>",
+                    "url": "https://example.com/agent-systems",
+                    "source_name": "Example Research",
+                    "source_type": "rss",
+                    "published": "2026-08-28",
+                    "why_it_matters": "This explains the concrete architecture and its tradeoffs. Read it to distinguish useful automation from agent hype.",
+                },
+                {
+                    "rank": 2,
+                    "title": "A grounded health review",
+                    "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
+                    "source_name": "Evidence Lab",
+                    "source_type": "youtube",
+                    "published": "2026-08-27",
+                    "why_it_matters": "The review separates observed effects from speculation. It gives the reader a practical evidence threshold.",
+                },
+            ],
+        }
+
+        html = _render_top10_html(selection)
+        text = _render_top10_text(selection)
+
+        assert "The Editor's" in html
+        assert "from 84 new items" in html
+        assert "@media screen and (max-width: 680px)" in html
+        assert "<h1" in html and html.count("<h2") == 2
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+        assert "<script>alert(1)</script>" not in html
+        assert "Read the article" in html
+        assert "Watch the video" in html
+        assert "TUBELM — EDITOR'S TOP 10" in text
+        assert "https://example.com/agent-systems" in text

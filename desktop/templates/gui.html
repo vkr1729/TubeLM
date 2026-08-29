@@ -1618,6 +1618,15 @@
                         <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Cinematic Video remains the primary artifact. Infographics are off by default.</span>
                     </div>
 
+                    <div class="form-group">
+                        <label>Cross-source Editor's Top 10 Email</label>
+                        <select name="GENERATE_TOP_10_DIGEST" style="width: 100%; padding: 10px 14px;">
+                            <option value="false">Off — keep existing per-source digests only</option>
+                            <option value="true">On — rank this run with Gemini 3.7 Flash (High)</option>
+                        </select>
+                        <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">After every source summary is complete, agy selects the ten highest-signal videos and articles and sends one editorial digest. Off by default.</span>
+                    </div>
+
                     <button type="submit" class="btn" style="margin-top: 16px;">Save Configuration</button>
                 </form>
             </div>

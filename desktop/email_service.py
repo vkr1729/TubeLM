@@ -1,5 +1,5 @@
 """
-email_service.py — SMTP email delivery for the weekly digest.
+email_service.py — SMTP email delivery for TubeLM digests.
 
 Sends one email per channel. Each email includes:
   - Channel name and notebook link
@@ -185,6 +185,39 @@ def _render_channel_text(channel_data: dict, run_date: str) -> str:
     return "\n".join(lines)
 
 
+def _render_top10_html(selection: dict) -> str:
+    """Render the cross-source Top 10 selection as email-safe HTML."""
+    env = Environment(
+        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+        autoescape=select_autoescape(["html"]),
+    )
+    return env.get_template("top10_digest.html").render(selection=selection)
+
+
+def _render_top10_text(selection: dict) -> str:
+    """Render a complete plain-text alternative for the Top 10 email."""
+    items = selection.get("items", [])
+    lines = [
+        "TUBELM — EDITOR'S TOP 10",
+        f"{selection.get('run_date', '')} · selected from {selection.get('candidate_count', len(items))} new items",
+        "",
+    ]
+    for item in items:
+        source_type = item.get("source_type", "item")
+        action = "WATCH" if source_type == "youtube" else "READ"
+        lines.extend(
+            [
+                f"{item.get('rank', '')}. {item.get('title', 'Untitled')}",
+                f"   {item.get('source_name', 'Unknown source')} · {item.get('published', '')}",
+                f"   {item.get('why_it_matters', '')}",
+                f"   {action}: {item.get('url', '')}",
+                "",
+            ]
+        )
+    lines.append("Selected by Gemini 3.7 Flash (High) from TubeLM's grounded source summaries.")
+    return "\n".join(lines)
+
+
 def _artifact_completion_context(artifact_kind: str, batch: dict) -> dict:
     """Normalize one completed artifact batch for HTML and text rendering."""
     if artifact_kind not in {"audio", "video"}:
@@ -365,6 +398,30 @@ def send_channel_email(channel_data: dict, cfg: Config) -> None:
     _send_message(msg, cfg)
 
     logger.info("Digest email sent for '%s'.", channel_name)
+
+
+def send_top10_email(selection: dict, cfg: Config) -> None:
+    """Build and send the optional cross-source Top 10 briefing."""
+    item_count = len(selection.get("items", []))
+    subject = f"TubeLM Editor's Top {item_count} · {selection.get('run_date', '')}"
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = cfg.sender_email
+    msg["To"] = cfg.recipient_email
+    msg.attach(MIMEText(_render_top10_text(selection), "plain", "utf-8"))
+    msg.attach(MIMEText(_render_top10_html(selection), "html", "utf-8"))
+
+    logger.info(
+        "Sending Top %d digest to %s via %s:%d (%s)…",
+        item_count,
+        cfg.recipient_email,
+        cfg.smtp_server,
+        cfg.smtp_port,
+        "SSL" if cfg.use_ssl else "STARTTLS",
+    )
+    _send_message(msg, cfg)
+    logger.info("Top %d digest email sent.", item_count)
 
 
 def verify_smtp_connection(cfg: Config) -> None:
