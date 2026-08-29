@@ -1,5 +1,6 @@
 notebooklm-py[browser]==0.8.1
 flask>=3.0.0
+pillow>=10.0.0
 feedparser
 requests
 jinja2
