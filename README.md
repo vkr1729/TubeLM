@@ -86,6 +86,12 @@ Start the dashboard:
 ./tubelm-launch.sh
 ```
 
+To add a clickable TubeLM launcher to the Linux desktop:
+
+```bash
+./desktop/install_launcher.sh
+```
+
 Or launch it directly:
 
 ```bash
@@ -178,6 +184,8 @@ desktop/
 ├── weekly_video_service.py    # Durable Cinematic queue and downloads
 ├── source_handlers/           # YouTube, RSS, and webpage discovery
 ├── templates/                 # Dashboard and email HTML
+├── TubeLM.desktop.in          # Linux desktop launcher template
+├── install_launcher.sh        # Installs the launcher for this checkout
 └── tests/                     # Focused unit and integration checks
 
 shared/prompts/                # Category prompt defaults

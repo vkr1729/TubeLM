@@ -22,6 +22,7 @@ from email_service import (
     send_top10_email,
 )
 from summary_quality import strip_follow_up_offers
+from top10_downloader import download_top10_videos
 
 logger = logging.getLogger(__name__)
 
@@ -473,6 +474,15 @@ def _rank_render_and_send(
     output_path.write_text(_render_top10_html(selection), encoding="utf-8")
     logger.info("Local Top 10 HTML digest saved to %s", output_path)
     send_top10_email(selection, cfg)
+    if getattr(cfg, "download_top10_videos", False):
+        try:
+            download_top10_videos(
+                selection,
+                dest_dir=getattr(cfg, "top10_download_dir", None),
+                prev_dir=getattr(cfg, "top10_prev_dir", None),
+            )
+        except Exception as exc:
+            logger.error("Failed to download Top 10 videos: %s", exc)
     return selection, output_path
 
 

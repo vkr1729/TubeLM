@@ -110,3 +110,40 @@ def test_durable_batch_replaces_one_source_and_resumes(tmp_path, monkeypatch):
     assert list(batch["sources"]) == ["youtube:example"]
     assert len(batch["sources"]["youtube:example"]["items"]) == 1
     assert top10_service.prepare_top10_batch("2026-08-29") == "2026-08-28"
+
+
+def test_rank_render_and_send_respects_download_toggle(monkeypatch, tmp_path):
+    summaries_dir = tmp_path / "summaries"
+    summaries_dir.mkdir()
+    monkeypatch.setattr(top10_service.paths, "get_summaries_dir", lambda: summaries_dir)
+
+    ranked_items = []
+    for idx, c in enumerate(_candidates(2), start=1):
+        item = dict(c)
+        item["rank"] = idx
+        item["why_it_matters"] = "A compelling reason to review this item."
+        ranked_items.append(item)
+
+    monkeypatch.setattr(
+        top10_service,
+        "rank_top10_candidates",
+        lambda candidates: {"items": ranked_items, "candidate_count": len(ranked_items)},
+    )
+    monkeypatch.setattr(top10_service, "send_top10_email", lambda sel, cfg: None)
+
+    download_called = []
+    monkeypatch.setattr(
+        top10_service,
+        "download_top10_videos",
+        lambda selection, dest_dir=None, prev_dir=None: download_called.append(selection),
+    )
+
+    # When False, downloader is not called
+    cfg_disabled = SimpleNamespace(download_top10_videos=False)
+    top10_service._rank_render_and_send(_candidates(2), cfg_disabled, "2026-08-30")
+    assert len(download_called) == 0
+
+    # When True, downloader is called
+    cfg_enabled = SimpleNamespace(download_top10_videos=True, top10_download_dir=None, top10_prev_dir=None)
+    top10_service._rank_render_and_send(_candidates(2), cfg_enabled, "2026-08-30")
+    assert len(download_called) == 1

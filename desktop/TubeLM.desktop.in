@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=TubeLM
+Comment=Open the TubeLM NotebookLM briefing dashboard
+Exec=@PROJECT_ROOT@/tubelm-launch.sh
+Path=@PROJECT_ROOT@
+Icon=@PROJECT_ROOT@/shared/assets/logo.png
+Terminal=false
+Categories=Utility;

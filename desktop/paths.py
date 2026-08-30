@@ -86,6 +86,14 @@ def get_previous_video_download_dir() -> Path:
     return Path.home() / "Downloads" / "TorBox" / "TubeLM_Prev"
 
 
+def get_top10_video_download_dir() -> Path:
+    return Path.home() / "Downloads" / "TorBox" / "Top_10"
+
+
+def get_top10_previous_video_download_dir() -> Path:
+    return Path.home() / "Downloads" / "TorBox" / "Top_10_Prev"
+
+
 def get_notebook_links_cache_file() -> Path:
     return get_data_dir() / "notebook_links_cache.json"
 

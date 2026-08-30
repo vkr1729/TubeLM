@@ -121,6 +121,11 @@ class Config:
     # Cross-source Top 10 email selected by agy/Gemini after summaries complete.
     generate_top10_digest: bool = False
 
+    # Automatically download ranked Top 10 YouTube videos locally using yt-dlp.
+    download_top10_videos: bool = False
+    top10_download_dir: Path = field(default_factory=paths.get_top10_video_download_dir)
+    top10_prev_dir: Path = field(default_factory=paths.get_top10_previous_video_download_dir)
+
     # Default browser for NotebookLM extraction (chrome, edge, safari, firefox, opera, etc.)
     notebooklm_browser: str = "chrome"
 
@@ -156,6 +161,20 @@ def load_config() -> Config:
             f"NOTEBOOKS_RETENTION_LIMIT must be an integer, got: {retention_limit_raw!r}"
         ) from exc
 
+    top10_download_dir_raw = _get_optional("TOP10_DOWNLOAD_DIR")
+    top10_download_dir = (
+        Path(top10_download_dir_raw).expanduser().resolve()
+        if top10_download_dir_raw
+        else paths.get_top10_video_download_dir()
+    )
+
+    top10_prev_dir_raw = _get_optional("TOP10_PREV_DIR")
+    top10_prev_dir = (
+        Path(top10_prev_dir_raw).expanduser().resolve()
+        if top10_prev_dir_raw
+        else paths.get_top10_previous_video_download_dir()
+    )
+
     return Config(
         smtp_server=_get_optional("SMTP_SERVER"),
         smtp_port=smtp_port,
@@ -169,5 +188,8 @@ def load_config() -> Config:
         notebooks_retention_limit=notebooks_retention_limit,
         generate_infographics=_get_bool("GENERATE_INFOGRAPHICS", False),
         generate_top10_digest=_get_bool("GENERATE_TOP_10_DIGEST", False),
+        download_top10_videos=_get_bool("DOWNLOAD_TOP_10_VIDEOS", False),
+        top10_download_dir=top10_download_dir,
+        top10_prev_dir=top10_prev_dir,
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
     )
