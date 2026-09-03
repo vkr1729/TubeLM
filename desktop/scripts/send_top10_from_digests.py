@@ -25,20 +25,27 @@ def _iso_date(value: str) -> date:
 
 
 def main() -> None:
+    cfg = load_config()
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
     parser = argparse.ArgumentParser(
-        description="Select and send a Top 10 from existing TubeLM HTML digests."
+        description="Select and send a Top digest from existing TubeLM HTML digests."
     )
     parser.add_argument("--since", type=_iso_date, default=week_start)
     parser.add_argument("--until", type=_iso_date, default=today)
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=None,
+        help="Number of items to select (defaults to TOP_DIGEST_COUNT in config).",
+    )
     args = parser.parse_args()
     if args.since > args.until:
         parser.error("--since must be on or before --until")
 
     digest_paths = []
     for digest_path in paths.get_summaries_dir().glob("*_digest.html"):
-        if "TubeLM_Top_10" in digest_path.name:
+        if "TubeLM_Top_" in digest_path.name:
             continue
         try:
             digest_date = date.fromisoformat(digest_path.name[:10])
@@ -50,7 +57,7 @@ def main() -> None:
         parser.error("No local HTML digests were found in the requested date range.")
 
     selection, output_path = send_top10_from_html_digests(
-        load_config(), digest_paths, args.until.isoformat()
+        cfg, digest_paths, args.until.isoformat(), target_count=args.count
     )
     print(
         f"Sent Top {len(selection['items'])} selected from "

@@ -195,10 +195,10 @@ def _render_top10_html(selection: dict) -> str:
 
 
 def _render_top10_text(selection: dict) -> str:
-    """Render a complete plain-text alternative for the Top 10 email."""
+    """Render a complete plain-text alternative for the Top digest email."""
     items = selection.get("items", [])
     lines = [
-        "TUBELM — EDITOR'S TOP 10",
+        f"TUBELM — EDITOR'S TOP {len(items)}",
         f"{selection.get('run_date', '')} · selected from {selection.get('candidate_count', len(items))} new items",
         "",
     ]

@@ -182,5 +182,5 @@ class TestTemplateRendering:
         assert "<script>alert(1)</script>" not in html
         assert "Read the article" in html
         assert "Watch the video" in html
-        assert "TUBELM — EDITOR'S TOP 10" in text
+        assert "TUBELM — EDITOR'S TOP 2" in text
         assert "https://example.com/agent-systems" in text

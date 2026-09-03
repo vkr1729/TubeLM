@@ -251,20 +251,29 @@ def download_top10_videos(
             "title": title,
         })
 
+    # Register any non-YouTube article items for NotebookLM Cinematic Video generation
+    queued_articles = []
+    try:
+        from top_article_video_service import register_top_article_videos
+        queued_articles = register_top_article_videos(selection)
+    except Exception as exc:
+        logger.warning("Could not register top article videos: %s", exc)
+
     if not download_tasks:
-        logger.info("No YouTube videos found in the Top 10 list; skipping folder rotation and download.")
+        logger.info("No YouTube videos found in the Top list; skipping folder rotation and download.")
         return {
             "downloaded": 0,
             "failed": 0,
             "skipped_non_video": skipped_non_video,
+            "queued_articles": len(queued_articles),
             "total_videos": 0,
         }
 
     logger.info(
-        "Preparing to download %d Top 10 video(s) to %s (skipped %d non-video item(s)).",
+        "Preparing to download %d Top video(s) to %s (queued %d article video(s)).",
         len(download_tasks),
         target_dest_dir,
-        skipped_non_video,
+        len(queued_articles),
     )
 
     # Perform just-in-time folder rotation before downloading
@@ -290,9 +299,10 @@ def download_top10_videos(
         "downloaded": downloaded,
         "failed": failed,
         "skipped_non_video": skipped_non_video,
+        "queued_articles": len(queued_articles),
         "total_videos": len(download_tasks),
         "dest_dir": str(target_dest_dir),
         "prev_dir": str(target_prev_dir),
     }
-    logger.info("Top 10 video download finished: %s", summary)
+    logger.info("Top video download finished: %s", summary)
     return summary

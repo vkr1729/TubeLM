@@ -70,6 +70,10 @@ from top10_service import (
     prepare_top10_batch,
     record_top10_source,
 )
+from top_article_video_service import (
+    pending_top_article_video_count,
+    process_top_article_videos,
+)
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
 
@@ -359,13 +363,18 @@ async def _finish_background_artifacts(
 
     audio_batch = {"pending": 0, "deferred_until": None, "rate_limited": False}
     video_batch = {"pending": 0, "deferred_until": None, "rate_limited": False}
-    if pending_weekly_audio_count() or pending_weekly_video_count():
+    top_article_batch = {"pending": 0, "deferred_until": None, "rate_limited": False}
+    if pending_weekly_audio_count() or pending_weekly_video_count() or pending_top_article_video_count():
         async with NotebookLMClient.from_storage(keepalive=600) as client:
             if pending_weekly_audio_count():
                 audio_batch = await resume_weekly_audio_batches(client)
             # Video is always attempted separately, even when Audio is limited.
             if pending_weekly_video_count():
                 video_batch = await resume_weekly_video_batches(client)
+            if pending_top_article_video_count():
+                top_article_batch = await process_top_article_videos(
+                    client, dest_dir=getattr(cfg, "top10_download_dir", None)
+                )
 
     if audio_batch["pending"]:
         logger.info(
@@ -376,6 +385,11 @@ async def _finish_background_artifacts(
         logger.info(
             "%d weekly Cinematic Video(s) remain; background resume is scheduled.",
             video_batch["pending"],
+        )
+    if top_article_batch["pending"]:
+        logger.info(
+            "%d Top Digest article Cinematic Video(s) remain; background resume is scheduled.",
+            top_article_batch["pending"],
         )
 
     deferred_artifacts = await resume_deferred_artifacts(

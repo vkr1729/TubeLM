@@ -25,7 +25,7 @@
 </head>
 <body style="margin:0;padding:0;background:#ecece6;color:#171815;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-    The ten highest-signal videos and articles from {{ selection.candidate_count }} new items this week.
+    The {{ selection['items'] | length }} highest-signal videos and articles from {{ selection.candidate_count }} new items this week.
   </div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#ecece6;">
     <tr>

@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,8 @@ from top10_downloader import download_top10_videos
 logger = logging.getLogger(__name__)
 
 AGY_MODEL = "gemini-3.7-flash-high"
-TOP10_SIZE = 10
+DEFAULT_TOP_DIGEST_COUNT = 20
+TOP10_SIZE = DEFAULT_TOP_DIGEST_COUNT
 MAX_ITEM_SUMMARY_CHARS = 2_400
 AGY_TIMEOUT_SECONDS = 600
 
@@ -262,20 +264,22 @@ def load_candidates_from_html_digests(
 
 
 def _selection_prompt(candidates: list[dict[str, str]], target_count: int) -> str:
-    candidate_payload = [
-        {
-            key: item[key]
-            for key in (
-                "candidate_id",
-                "source_name",
-                "source_type",
-                "title",
-                "published",
-                "summary",
-            )
-        }
-        for item in candidates
-    ]
+    max_summary_per_candidate = max(250, min(800, 80_000 // max(len(candidates), 1)))
+    candidate_payload = []
+    for item in candidates:
+        summary_raw = item.get("summary", "").strip()
+        if len(summary_raw) > max_summary_per_candidate:
+            summary_raw = summary_raw[:max_summary_per_candidate].rsplit(" ", 1)[0].rstrip()
+        candidate_payload.append(
+            {
+                "candidate_id": item["candidate_id"],
+                "source_name": item["source_name"],
+                "source_type": item["source_type"],
+                "title": item["title"],
+                "published": item.get("published", ""),
+                "summary": summary_raw,
+            }
+        )
     return f"""You are the senior editor for a private weekly intelligence briefing.
 
 Your task is to rank exactly {target_count} items from the supplied, already-curated videos and articles. The reader has limited time and wants the highest-signal material, not merely the most sensational titles.
@@ -359,18 +363,32 @@ def _find_json_object(value: str) -> dict[str, Any]:
     raise Top10DigestError("agy did not return a valid Top 10 JSON object.")
 
 
-def rank_top10_candidates(candidates: list[dict[str, str]]) -> dict[str, Any]:
+def rank_top10_candidates(
+    candidates: list[dict[str, str]], target_count: int | None = None
+) -> dict[str, Any]:
     """Ask agy/Gemini to rank the supplied candidates and validate its result."""
     if not candidates:
-        raise Top10DigestError("No candidates are available for Top 10 selection.")
-    target_count = min(TOP10_SIZE, len(candidates))
+        raise Top10DigestError("No candidates are available for Top digest selection.")
+    requested_count = (
+        target_count
+        if target_count is not None and target_count > 0
+        else DEFAULT_TOP_DIGEST_COUNT
+    )
+    effective_target_count = min(requested_count, len(candidates))
     candidate_ids = [item["candidate_id"] for item in candidates]
     agy_bin = shutil.which("agy")
     if not agy_bin:
-        raise Top10DigestError("The Top 10 digest is enabled, but `agy` is not installed.")
+        raise Top10DigestError("The Top digest is enabled, but `agy` is not installed.")
 
-    prompt = _selection_prompt(candidates, target_count)
-    schema = _selection_schema(candidate_ids, target_count)
+    prompt = _selection_prompt(candidates, effective_target_count)
+    schema = _selection_schema(candidate_ids, effective_target_count)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", encoding="utf-8", delete=False
+    ) as schema_file:
+        json.dump(schema, schema_file, separators=(",", ":"))
+        schema_path = schema_file.name
+
     command = [
         agy_bin,
         "-p",
@@ -378,7 +396,7 @@ def rank_top10_candidates(candidates: list[dict[str, str]]) -> dict[str, Any]:
         "--model",
         AGY_MODEL,
         "--json-schema",
-        json.dumps(schema, separators=(",", ":")),
+        schema_path,
         "--output-format",
         "json",
         "--disable-slash-commands",
@@ -386,8 +404,8 @@ def rank_top10_candidates(candidates: list[dict[str, str]]) -> dict[str, Any]:
         "10m",
     ]
     logger.info(
-        "Selecting %d Top 10 item(s) from %d candidates with agy model %s.",
-        target_count,
+        "Selecting %d Top item(s) from %d candidates with agy model %s.",
+        effective_target_count,
         len(candidates),
         AGY_MODEL,
     )
@@ -401,19 +419,24 @@ def rank_top10_candidates(candidates: list[dict[str, str]]) -> dict[str, Any]:
             timeout=AGY_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as exc:
-        raise Top10DigestError("agy timed out while selecting the Top 10.") from exc
+        raise Top10DigestError("agy timed out while selecting the Top digest.") from exc
     except OSError as exc:
-        raise Top10DigestError("agy could not be started for Top 10 selection.") from exc
+        raise Top10DigestError("agy could not be started for Top digest selection.") from exc
+    finally:
+        try:
+            os.remove(schema_path)
+        except OSError:
+            pass
     if completed.returncode != 0:
         raise Top10DigestError(
-            f"agy failed during Top 10 selection (exit code {completed.returncode})."
+            f"agy failed during Top digest selection (exit code {completed.returncode})."
         )
 
     response = _find_json_object(completed.stdout)
     rankings = response.get("rankings")
-    if not isinstance(rankings, list) or len(rankings) != target_count:
+    if not isinstance(rankings, list) or len(rankings) != effective_target_count:
         raise Top10DigestError(
-            f"agy returned {len(rankings) if isinstance(rankings, list) else 0} rankings; expected {target_count}."
+            f"agy returned {len(rankings) if isinstance(rankings, list) else 0} rankings; expected {effective_target_count}."
         )
 
     by_id = {item["candidate_id"]: item for item in candidates}
@@ -439,8 +462,10 @@ def rank_top10_candidates(candidates: list[dict[str, str]]) -> dict[str, Any]:
     }
 
 
-def generate_and_send_top10_digest(cfg: Any, run_date: str) -> bool:
-    """Generate and send the pending Top 10 batch; return False when empty."""
+def generate_and_send_top10_digest(
+    cfg: Any, run_date: str, target_count: int | None = None
+) -> bool:
+    """Generate and send the pending Top digest batch; return False when empty."""
     batch = _read_batch()
     if not batch or batch.get("sent_at"):
         return False
@@ -449,11 +474,14 @@ def generate_and_send_top10_digest(cfg: Any, run_date: str) -> bool:
         batch["sent_at"] = datetime.now(timezone.utc).isoformat()
         batch["status"] = "skipped_no_candidates"
         _write_batch(batch)
-        logger.info("Top 10 digest skipped because this run has no new candidates.")
+        logger.info("Top digest skipped because this run has no new candidates.")
         return False
 
     selection, _ = _rank_render_and_send(
-        candidates, cfg, str(batch.get("run_date") or run_date)
+        candidates,
+        cfg,
+        str(batch.get("run_date") or run_date),
+        target_count=target_count,
     )
 
     batch["sent_at"] = datetime.now(timezone.utc).isoformat()
@@ -466,13 +494,24 @@ def generate_and_send_top10_digest(cfg: Any, run_date: str) -> bool:
 
 
 def _rank_render_and_send(
-    candidates: list[dict[str, str]], cfg: Any, run_date: str
+    candidates: list[dict[str, str]],
+    cfg: Any,
+    run_date: str,
+    target_count: int | None = None,
 ) -> tuple[dict[str, Any], Path]:
-    selection = rank_top10_candidates(candidates)
+    count = (
+        target_count
+        if target_count is not None and target_count > 0
+        else getattr(cfg, "top_digest_count", DEFAULT_TOP_DIGEST_COUNT)
+    )
+    selection = rank_top10_candidates(candidates, target_count=count)
     selection["run_date"] = run_date
-    output_path = paths.get_summaries_dir() / f"{run_date}_TubeLM_Top_10_digest.html"
+    item_count = len(selection.get("items", []))
+    output_path = (
+        paths.get_summaries_dir() / f"{run_date}_TubeLM_Top_{item_count}_digest.html"
+    )
     output_path.write_text(_render_top10_html(selection), encoding="utf-8")
-    logger.info("Local Top 10 HTML digest saved to %s", output_path)
+    logger.info("Local Top %d HTML digest saved to %s", item_count, output_path)
     send_top10_email(selection, cfg)
     if getattr(cfg, "download_top10_videos", False):
         try:
@@ -482,12 +521,15 @@ def _rank_render_and_send(
                 prev_dir=getattr(cfg, "top10_prev_dir", None),
             )
         except Exception as exc:
-            logger.error("Failed to download Top 10 videos: %s", exc)
+            logger.error("Failed to download Top %d videos: %s", item_count, exc)
     return selection, output_path
 
 
 def send_top10_from_html_digests(
-    cfg: Any, digest_paths: list[Path], run_date: str
+    cfg: Any,
+    digest_paths: list[Path],
+    run_date: str,
+    target_count: int | None = None,
 ) -> tuple[dict[str, Any], Path]:
     """Rank and email items extracted from existing local digest HTML files."""
     candidates = load_candidates_from_html_digests(digest_paths)
@@ -498,4 +540,6 @@ def send_top10_from_html_digests(
         len(candidates),
         len(digest_paths),
     )
-    return _rank_render_and_send(candidates, cfg, run_date)
+    return _rank_render_and_send(
+        candidates, cfg, run_date, target_count=target_count
+    )

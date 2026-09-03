@@ -118,10 +118,11 @@ class Config:
     # Infographics are retained as an opt-in feature because they are rarely used.
     generate_infographics: bool = False
 
-    # Cross-source Top 10 email selected by agy/Gemini after summaries complete.
+    # Cross-source Top digest email selected by agy/Gemini after summaries complete.
     generate_top10_digest: bool = False
+    top_digest_count: int = 20
 
-    # Automatically download ranked Top 10 YouTube videos locally using yt-dlp.
+    # Automatically download ranked Top YouTube videos locally using yt-dlp.
     download_top10_videos: bool = False
     top10_download_dir: Path = field(default_factory=paths.get_top10_video_download_dir)
     top10_prev_dir: Path = field(default_factory=paths.get_top10_previous_video_download_dir)
@@ -161,6 +162,14 @@ def load_config() -> Config:
             f"NOTEBOOKS_RETENTION_LIMIT must be an integer, got: {retention_limit_raw!r}"
         ) from exc
 
+    top_digest_count_raw = _get_optional("TOP_DIGEST_COUNT", "20")
+    try:
+        top_digest_count = int(top_digest_count_raw) if top_digest_count_raw.strip() else 20
+    except ValueError as exc:
+        raise ConfigurationError(
+            f"TOP_DIGEST_COUNT must be an integer, got: {top_digest_count_raw!r}"
+        ) from exc
+
     top10_download_dir_raw = _get_optional("TOP10_DOWNLOAD_DIR")
     top10_download_dir = (
         Path(top10_download_dir_raw).expanduser().resolve()
@@ -188,6 +197,7 @@ def load_config() -> Config:
         notebooks_retention_limit=notebooks_retention_limit,
         generate_infographics=_get_bool("GENERATE_INFOGRAPHICS", False),
         generate_top10_digest=_get_bool("GENERATE_TOP_10_DIGEST", False),
+        top_digest_count=top_digest_count,
         download_top10_videos=_get_bool("DOWNLOAD_TOP_10_VIDEOS", False),
         top10_download_dir=top10_download_dir,
         top10_prev_dir=top10_prev_dir,
