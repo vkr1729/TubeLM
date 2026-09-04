@@ -27,7 +27,7 @@ from top10_downloader import download_top10_videos
 
 logger = logging.getLogger(__name__)
 
-AGY_MODEL = "gemini-3.7-flash-high"
+AGY_MODEL = "gemini-3.8-flash-high"
 DEFAULT_TOP_DIGEST_COUNT = 20
 TOP10_SIZE = DEFAULT_TOP_DIGEST_COUNT
 MAX_ITEM_SUMMARY_CHARS = 2_400

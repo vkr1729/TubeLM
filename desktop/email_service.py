@@ -220,7 +220,7 @@ def _render_top10_text(selection: dict) -> str:
                 "",
             ]
         )
-    lines.append("Selected by Gemini 3.7 Flash (High) from TubeLM's grounded source summaries.")
+    lines.append("Selected by Gemini 3.8 Flash (High) from TubeLM's grounded source summaries.")
     return "\n".join(lines)
 
 

@@ -10,7 +10,7 @@ The useful work happens in this order:
 1. Discover new source material.
 2. Create or resume the NotebookLM notebook and generate its summary.
 3. Save the local digest and send the summary email immediately.
-4. Optionally use `agy` with Gemini 3.7 Flash (High) to select and email the
+4. Optionally use `agy` with Gemini 3.8 Flash (High) to select and email the
    ten highest-signal items across every completed source digest.
 5. Generate eligible Audio Overviews and selected Cinematic Videos in the
    background.
@@ -46,7 +46,7 @@ The dashboard also has a responsive mobile layout:
 - Creates grounded NotebookLM summaries using category-specific prompts.
 - Sends a clean HTML digest to one configured email address before artifact work.
 - Can send one optional cross-source Editor's Top 10 email selected by `agy`
-  with Gemini 3.7 Flash (High); this is disabled by default.
+  with Gemini 3.8 Flash (High); this is disabled by default.
 - Generates Audio Overviews only when a notebook contains more than one source.
 - Generates Cinematic Videos only for sources enabled in the dashboard.
 - Keeps infographic support in the code, disabled by default.
@@ -145,7 +145,7 @@ machine. `run_weekly.sh` is the small wrapper used for manual Linux scheduling.
 When the Editor's Top 10 setting is enabled, `agy` must be installed,
 authenticated, and available on `PATH`. TubeLM passes compact item details and
 grounded summaries—not the full HTML emails—to
-`gemini-3.7-flash-high`. The ranking is schema-validated, rendered through the
+`gemini-3.8-flash-high`. The ranking is schema-validated, rendered through the
 local email template, and sent only after every source summary has finalized.
 
 To build and send a Top 10 from existing digests for a specific week:
