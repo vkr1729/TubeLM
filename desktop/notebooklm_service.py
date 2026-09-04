@@ -90,10 +90,10 @@ CRITICAL OUTPUT CONTRACT:
 
 _SUMMARY_PLACEHOLDER_PATTERNS = (
     r"\bstudio panel\b",
-    r"\b[a-z0-9_-]+\.md\b",
+    r"\b(?:saved (?:as|to)|available (?:as|in)|see|check|created|generated|as)\s+[a-z0-9_-]+\.md\b",
     r"\bonce you (?:give|confirm|approve)\b",
     r"\bdoes this (?:plan|outline) look\b",
-    r"\bi (?:have|will) (?:created|create|write|saved|save|compiled)\b",
+    r"\bi (?:have|will) (?:created|create|write|written|saved|save|compiled) (?:a |the |this )?(?:note|briefing|report|deliverable|file|document|summary|outline)\b",
     r"\bfull deliverable\b",
     r"\bproposed (?:briefing )?outline\b",
 )
@@ -106,7 +106,9 @@ def _validate_summary_text(text: str, item_count: int) -> tuple[bool, str]:
         return False, "the response was empty"
 
     for pattern in _SUMMARY_PLACEHOLDER_PATTERNS:
-        if re.search(pattern, normalized, flags=re.IGNORECASE):
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if match:
+            logger.warning("Summary rejected by pattern %r (matched: %r)", pattern, match.group(0))
             return False, "the response referred to a file, plan, or Studio action"
 
     min_chars = max(120, min(800, item_count * 100))
@@ -759,6 +761,7 @@ async def process_source_items(
                 )
                 if matched:
                     source_ids.append(matched.id)
+                    item.source_id = matched.id
                 else:
                     missing_items.append(item)
 
@@ -772,10 +775,29 @@ async def process_source_items(
             else:
                 logger.info("All %d requested source(s) already exist in the resumed notebook.", len(items))
 
-            if len(source_ids) != len(items):
-                result["error"] = f"Only {len(source_ids)} of {len(items)} source items were added."
+            successful_items = [
+                item for item in items
+                if getattr(item, "source_id", None) and item.source_id in source_ids
+            ]
+
+            if not source_ids or not successful_items:
+                result["error"] = f"None of {len(items)} source items could be added to notebook."
                 logger.error("%s", result["error"])
                 return result
+
+            if len(successful_items) < len(items):
+                logger.warning(
+                    "Proceeding with %d of %d source items (%d failed to ingest and were skipped).",
+                    len(successful_items),
+                    len(items),
+                    len(items) - len(successful_items),
+                )
+                items = successful_items
+                successful_urls = {it.url for it in successful_items}
+                result["items"] = [
+                    entry for entry in videos_list if entry.get("url") in successful_urls
+                ]
+                result["videos"] = result["items"]
 
             logger.info("Waiting for %d source(s) to process (timeout=%ds)…", len(source_ids), int(_SOURCE_WAIT_TIMEOUT))
             try:

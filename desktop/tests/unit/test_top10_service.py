@@ -171,3 +171,107 @@ def test_rank_render_and_send_uses_configured_target_count(monkeypatch, tmp_path
 
     assert passed_counts == [15]
     assert "2026-08-30_TubeLM_Top_1_digest.html" in output_path.name
+
+
+def test_generate_and_send_top10_digest_two_pass_flow(monkeypatch, tmp_path):
+    batch_path = tmp_path / "top10_batch.json"
+    summaries_dir = tmp_path / "summaries"
+    summaries_dir.mkdir()
+    monkeypatch.setattr(top10_service.paths, "get_top10_digest_batch_file", lambda: batch_path)
+    monkeypatch.setattr(top10_service.paths, "get_summaries_dir", lambda: summaries_dir)
+
+    channel = {
+        "channel_name": "Channel 1",
+        "source_type": "youtube",
+        "summary_text": "## Video 1\n\nSummary 1.",
+        "videos": [{"title": "Video 1", "url": "https://www.youtube.com/watch?v=11111111111", "published": "2026-09-04"}],
+    }
+    top10_service.record_top10_source("youtube:1", channel, "2026-09-04")
+
+    sent_emails = []
+    monkeypatch.setattr(top10_service, "send_top10_email", lambda sel, cfg: sent_emails.append(sel))
+    monkeypatch.setattr(
+        top10_service,
+        "rank_top10_candidates",
+        lambda candidates, target_count=None: {
+            "items": [{"rank": 1, "title": "Video 1", "why_it_matters": "Significant video", "url": "https://www.youtube.com/watch?v=11111111111", "candidate_id": "item-0001"}],
+            "candidate_count": len(candidates),
+        },
+    )
+
+    cfg = SimpleNamespace(top_digest_count=20, download_top10_videos=False)
+
+    # 1. First Pass: Interim edition
+    res_interim = top10_service.generate_and_send_top10_digest(cfg, "2026-09-04", is_interim=True)
+    assert res_interim is True
+    assert len(sent_emails) == 1
+    assert sent_emails[0]["is_interim"] is True
+
+    batch = json.loads(batch_path.read_text())
+    assert batch.get("interim_sent_at") is not None
+    assert batch.get("sent_at") is None
+    assert (summaries_dir / "2026-09-04_TubeLM_Top_1_interim_digest.html").exists()
+
+    # 2. Final Pass without new candidates -> skips duplicate
+    res_final = top10_service.generate_and_send_top10_digest(cfg, "2026-09-04", is_interim=False)
+    assert res_final is True
+    assert len(sent_emails) == 1  # Not sent again!
+    batch = json.loads(batch_path.read_text())
+    assert batch.get("sent_at") is not None
+    assert batch.get("status") == "final_identical_to_interim"
+
+
+def test_generate_and_send_top10_digest_final_with_new_candidates(monkeypatch, tmp_path):
+    batch_path = tmp_path / "top10_batch.json"
+    summaries_dir = tmp_path / "summaries"
+    summaries_dir.mkdir()
+    monkeypatch.setattr(top10_service.paths, "get_top10_digest_batch_file", lambda: batch_path)
+    monkeypatch.setattr(top10_service.paths, "get_summaries_dir", lambda: summaries_dir)
+
+    channel1 = {
+        "channel_name": "Channel 1",
+        "source_type": "youtube",
+        "summary_text": "## Video 1\n\nSummary 1.",
+        "videos": [{"title": "Video 1", "url": "https://www.youtube.com/watch?v=11111111111", "published": "2026-09-04"}],
+    }
+    top10_service.record_top10_source("youtube:1", channel1, "2026-09-04")
+
+    sent_emails = []
+    monkeypatch.setattr(top10_service, "send_top10_email", lambda sel, cfg: sent_emails.append(sel))
+    monkeypatch.setattr(
+        top10_service,
+        "rank_top10_candidates",
+        lambda candidates, target_count=None: {
+            "items": [
+                {"rank": idx, "title": f"Video {idx}", "why_it_matters": "Reason", "url": f"https://example.com/{idx}", "candidate_id": c["candidate_id"]}
+                for idx, c in enumerate(candidates, 1)
+            ],
+            "candidate_count": len(candidates),
+        },
+    )
+
+    cfg = SimpleNamespace(top_digest_count=20, download_top10_videos=False)
+
+    # Interim pass
+    top10_service.generate_and_send_top10_digest(cfg, "2026-09-04", is_interim=True)
+    assert len(sent_emails) == 1
+    assert sent_emails[0]["is_interim"] is True
+
+    # Now a retried channel succeeds and adds a new candidate!
+    channel2 = {
+        "channel_name": "Channel 2",
+        "source_type": "youtube",
+        "summary_text": "## Video 2\n\nSummary 2.",
+        "videos": [{"title": "Video 2", "url": "https://www.youtube.com/watch?v=22222222222", "published": "2026-09-04"}],
+    }
+    top10_service.record_top10_source("youtube:2", channel2, "2026-09-04")
+
+    # Final pass -> sends Final Edition with both channels!
+    res_final = top10_service.generate_and_send_top10_digest(cfg, "2026-09-04", is_interim=False)
+    assert res_final is True
+    assert len(sent_emails) == 2
+    assert sent_emails[1]["is_interim"] is False
+    assert sent_emails[1]["is_final_after_interim"] is True
+    assert sent_emails[1]["candidate_count"] == 2
+    assert (summaries_dir / "2026-09-04_TubeLM_Top_2_digest.html").exists()
+

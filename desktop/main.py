@@ -570,11 +570,14 @@ async def async_main(
     )
 
     retry_stages = [
-        {"name": "Initial Run", "delay_hours": 0},
-        {"name": "1-Hour Retry Run", "delay_hours": 1},
-        {"name": "3-Hour Retry Run", "delay_hours": 2},
+        {"name": "Initial Run", "delay_seconds": 0},
+        {"name": "Fast Retry 1", "delay_seconds": 30},
+        {"name": "Fast Retry 2", "delay_seconds": 60},
     ]
 
+    total_initial_handlers = len(handlers)
+    completed_source_keys: set[str] = set()
+    interim_top10_sent = False
     active_handlers = list(handlers)
     quota_deferred_until = None
 
@@ -582,18 +585,18 @@ async def async_main(
         if not active_handlers:
             break
 
-        if stage["delay_hours"] > 0:
-            delay_sec = stage["delay_hours"] * 3600
+        delay_sec = stage.get("delay_seconds", stage.get("delay_hours", 0) * 3600)
+        if delay_sec > 0:
             if dry_run:
                 logger.info(
-                    "[%s] DRY-RUN: Simulating sleep delay of %d hour(s) (%d seconds). Sleeping 1s for dry-run.",
-                    stage["name"], stage["delay_hours"], delay_sec,
+                    "[%s] DRY-RUN: Simulating delay of %ds. Sleeping 1s for dry-run.",
+                    stage["name"], delay_sec,
                 )
                 await asyncio.sleep(1)
             else:
                 logger.info(
-                    "[%s] Sleeping %d hour(s) before retry run...",
-                    stage["name"], stage["delay_hours"],
+                    "[%s] Waiting %ds before retry run...",
+                    stage["name"], delay_sec,
                 )
                 await asyncio.sleep(delay_sec)
 
@@ -615,6 +618,7 @@ async def async_main(
             if not items:
                 logger.info("[%s] No new content found.", handler.name)
                 successful_keys.append(state_key)
+                completed_source_keys.add(state_key)
                 if not dry_run:
                     save_state(cfg.state_file, [state_key])
                 continue
@@ -716,6 +720,7 @@ async def async_main(
                 # recreating every notebook from the stage.
                 save_state(cfg.state_file, [handler.state_key()])
                 successful_keys.append(handler.state_key())
+                completed_source_keys.add(handler.state_key())
                 logger.info(
                     "[%s] Summary delivered; background artifacts are durably queued.",
                     handler.name,
@@ -740,6 +745,39 @@ async def async_main(
             len(successful_keys),
             len(active_handlers),
         )
+
+        # Check if Stage 0 qualified for Interim Top 20 Digest (>= 70% completed)
+        if stage_idx == 0 and top10_enabled and not interim_top10_sent and active_handlers:
+            completion_ratio = (
+                len(completed_source_keys) / total_initial_handlers
+                if total_initial_handlers > 0
+                else 1.0
+            )
+            if completion_ratio >= 0.70:
+                logger.info(
+                    "Pass 1 reached %.1f%% completion (%d/%d sources). Triggering Interim Top 20 Digest...",
+                    completion_ratio * 100,
+                    len(completed_source_keys),
+                    total_initial_handlers,
+                )
+                try:
+                    generate_and_send_top10_digest(cfg, top10_run_date, is_interim=True)
+                    interim_top10_sent = True
+                except Exception:
+                    logger.exception(
+                        "The interim Top 10 digest encountered an error; continuing with retries."
+                    )
+
+        if not dry_run and successful_keys:
+            try:
+                await _finish_background_artifacts(
+                    cfg,
+                    seal_video_batch=False,
+                    send_completion_emails=False,
+                )
+            except Exception:
+                logger.warning("Could not advance background artifacts during %s.", stage["name"])
+
         if quota_deferred_until:
             break
 
@@ -753,35 +791,46 @@ async def async_main(
             "Run paused until %s; completed summaries and emails will not be repeated.",
             quota_deferred_until.astimezone().strftime("%Y-%m-%d %H:%M %Z"),
         )
-        return False
-
-    if active_handlers:
-        logger.error(
-            "Run incomplete after all retry stages; %d source(s) remain safely checkpointed for resume.",
-            len(active_handlers),
-        )
-        return False
 
     if dry_run:
         logger.info("Dry run complete; no notebooks or artifacts were created or resumed.")
         return True
 
+    if active_handlers:
+        logger.warning(
+            "Run incomplete after all retry stages; %d source(s) remain safely checkpointed for resume: %s",
+            len(active_handlers),
+            ", ".join(h.name for h in active_handlers),
+        )
+
     if top10_enabled:
         try:
-            generate_and_send_top10_digest(cfg, top10_run_date)
+            generate_and_send_top10_digest(cfg, top10_run_date, is_interim=False)
         except Exception:
             logger.exception(
                 "The optional Top 10 digest failed; its durable batch is preserved for retry."
             )
-            return False
 
     # Studio work starts only after every summary/email has been finalized.
     # Audio and selected Cinematic Videos then advance as independent queues.
-    if not await _finish_background_artifacts(
-        cfg,
-        seal_video_batch=True,
-        send_completion_emails=completion_emails_enabled,
-    ):
+    artifacts_ok = True
+    try:
+        artifacts_ok = await _finish_background_artifacts(
+            cfg,
+            seal_video_batch=True,
+            send_completion_emails=completion_emails_enabled,
+        )
+    except Exception:
+        logger.exception("Error finishing background studio artifacts.")
+        artifacts_ok = False
+
+    if active_handlers or not artifacts_ok or quota_deferred_until:
+        logger.warning(
+            "Weekly sync finished with remaining work. Incomplete sources: %d, artifacts ok: %s, quota deferred: %s.",
+            len(active_handlers),
+            artifacts_ok,
+            bool(quota_deferred_until),
+        )
         return False
 
     logger.info("Weekly sync complete. Summaries and all queued artifacts are finalized.")

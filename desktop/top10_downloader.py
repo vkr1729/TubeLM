@@ -156,6 +156,22 @@ def download_single_video(
     """Download a single video via yt-dlp to the exact target path."""
     bin_path = yt_dlp_bin or resolve_yt_dlp_bin()
 
+    if output_path.exists() and output_path.stat().st_size > 1024:
+        logger.info("Video %s already exists (%d bytes); skipping download.", output_path.name, output_path.stat().st_size)
+        return True
+
+    # If the video already exists with a different rank prefix (e.g. from interim run), rename it!
+    if " - " in output_path.name and output_path.parent.exists():
+        suffix = output_path.name.split(" - ", 1)[-1]
+        for candidate in output_path.parent.glob("*.mp4"):
+            if candidate.name.endswith(f" - {suffix}") and candidate.stat().st_size > 1024:
+                try:
+                    logger.info("Renaming existing download %s -> %s", candidate.name, output_path.name)
+                    candidate.rename(output_path)
+                    return True
+                except OSError:
+                    pass
+
     # Use output template matching target filename
     output_template = str(output_path.with_suffix("")) + ".%(ext)s"
 
@@ -215,6 +231,7 @@ def download_top10_videos(
     prev_dir: Path | None = None,
     yt_dlp_bin: str | None = None,
     dry_run: bool = False,
+    rotate: bool = True,
 ) -> dict[str, Any]:
     """Filter YouTube items from the Top 10 digest, rotate folders, and download videos."""
     items = selection.get("items", [])
@@ -277,7 +294,7 @@ def download_top10_videos(
     )
 
     # Perform just-in-time folder rotation before downloading
-    if not dry_run:
+    if not dry_run and rotate:
         rotate_top10_folders(target_dest_dir, target_prev_dir)
 
     downloaded = 0

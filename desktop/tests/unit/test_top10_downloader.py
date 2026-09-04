@@ -187,3 +187,78 @@ def test_config_top10_paths(monkeypatch, tmp_path):
     assert cfg.top10_download_dir == custom_dest
     assert cfg.top10_prev_dir == custom_prev
     assert cfg.download_top10_videos is True
+
+
+def test_download_single_video_skips_existing_file(monkeypatch, tmp_path):
+    dest_file = tmp_path / "01 - Channel - Video One.mp4"
+    dest_file.write_bytes(b"x" * 2048)
+
+    executed = []
+    monkeypatch.setattr(top10_downloader.subprocess, "run", lambda *args, **kwargs: executed.append(args))
+
+    success = top10_downloader.download_single_video(
+        url="https://youtube.com/watch?v=123",
+        output_path=dest_file,
+    )
+    assert success is True
+    assert len(executed) == 0  # Skipped because file already exists!
+
+
+def test_download_single_video_renames_existing_file_with_different_rank(monkeypatch, tmp_path):
+    old_file = tmp_path / "01 - Channel - Video One.mp4"
+    old_file.write_bytes(b"x" * 2048)
+
+    new_file = tmp_path / "02 - Channel - Video One.mp4"
+
+    executed = []
+    monkeypatch.setattr(top10_downloader.subprocess, "run", lambda *args, **kwargs: executed.append(args))
+
+    success = top10_downloader.download_single_video(
+        url="https://youtube.com/watch?v=123",
+        output_path=new_file,
+    )
+    assert success is True
+    assert len(executed) == 0
+    assert not old_file.exists()
+    assert new_file.exists()
+    assert new_file.stat().st_size == 2048
+
+
+def test_download_top10_videos_skips_rotation_when_rotate_false(monkeypatch, tmp_path):
+    dest_dir = tmp_path / "Top_10"
+    prev_dir = tmp_path / "Top_10_Prev"
+    dest_dir.mkdir()
+    prev_dir.mkdir()
+
+    existing_video = dest_dir / "01 - Channel A - Video One.mp4"
+    existing_video.write_bytes(b"x" * 2048)
+
+    rotation_called = []
+    monkeypatch.setattr(
+        top10_downloader, "rotate_top10_folders", lambda d, p: rotation_called.append((d, p))
+    )
+    monkeypatch.setattr(top10_downloader, "resolve_yt_dlp_bin", lambda: "/usr/bin/yt-dlp")
+
+    selection = {
+        "items": [
+            {
+                "rank": 1,
+                "source_type": "youtube",
+                "source_name": "Channel A",
+                "title": "Video One",
+                "url": "https://www.youtube.com/watch?v=aaaaa111111",
+            }
+        ]
+    }
+
+    summary = top10_downloader.download_top10_videos(
+        selection=selection,
+        dest_dir=dest_dir,
+        prev_dir=prev_dir,
+        rotate=False,
+    )
+
+    assert len(rotation_called) == 0  # Folder rotation skipped!
+    assert existing_video.exists()
+    assert summary["downloaded"] == 1
+

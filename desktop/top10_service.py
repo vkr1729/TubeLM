@@ -463,7 +463,11 @@ def rank_top10_candidates(
 
 
 def generate_and_send_top10_digest(
-    cfg: Any, run_date: str, target_count: int | None = None
+    cfg: Any,
+    run_date: str,
+    target_count: int | None = None,
+    *,
+    is_interim: bool = False,
 ) -> bool:
     """Generate and send the pending Top digest batch; return False when empty."""
     batch = _read_batch()
@@ -471,17 +475,53 @@ def generate_and_send_top10_digest(
         return False
     candidates = _flatten_candidates(batch)
     if not candidates:
-        batch["sent_at"] = datetime.now(timezone.utc).isoformat()
-        batch["status"] = "skipped_no_candidates"
-        _write_batch(batch)
+        if not is_interim:
+            batch["sent_at"] = datetime.now(timezone.utc).isoformat()
+            batch["status"] = "skipped_no_candidates"
+            _write_batch(batch)
         logger.info("Top digest skipped because this run has no new candidates.")
         return False
+
+    had_interim = bool(batch.get("interim_sent_at"))
+
+    if is_interim:
+        selection, _ = _rank_render_and_send(
+            candidates,
+            cfg,
+            str(batch.get("run_date") or run_date),
+            target_count=target_count,
+            is_interim=True,
+            rotate_downloads=True,
+        )
+        batch["interim_sent_at"] = datetime.now(timezone.utc).isoformat()
+        batch["interim_candidate_count"] = len(candidates)
+        batch["interim_selected_candidate_ids"] = [
+            item["candidate_id"] for item in selection["items"]
+        ]
+        _write_batch(batch)
+        return True
+
+    # Final pass (is_interim is False)
+    if had_interim:
+        previous_count = batch.get("interim_candidate_count", 0)
+        if len(candidates) <= previous_count:
+            logger.info(
+                "No new candidates added since interim edition (%d candidates); skipping duplicate final Top digest.",
+                len(candidates),
+            )
+            batch["sent_at"] = datetime.now(timezone.utc).isoformat()
+            batch["status"] = "final_identical_to_interim"
+            _write_batch(batch)
+            return True
 
     selection, _ = _rank_render_and_send(
         candidates,
         cfg,
         str(batch.get("run_date") or run_date),
         target_count=target_count,
+        is_interim=False,
+        is_final_after_interim=had_interim,
+        rotate_downloads=(not had_interim),
     )
 
     batch["sent_at"] = datetime.now(timezone.utc).isoformat()
@@ -498,6 +538,10 @@ def _rank_render_and_send(
     cfg: Any,
     run_date: str,
     target_count: int | None = None,
+    *,
+    is_interim: bool = False,
+    is_final_after_interim: bool = False,
+    rotate_downloads: bool = True,
 ) -> tuple[dict[str, Any], Path]:
     count = (
         target_count
@@ -506,20 +550,31 @@ def _rank_render_and_send(
     )
     selection = rank_top10_candidates(candidates, target_count=count)
     selection["run_date"] = run_date
+    selection["is_interim"] = is_interim
+    selection["is_final_after_interim"] = is_final_after_interim
     item_count = len(selection.get("items", []))
+    suffix = "_interim" if is_interim else ""
     output_path = (
-        paths.get_summaries_dir() / f"{run_date}_TubeLM_Top_{item_count}_digest.html"
+        paths.get_summaries_dir() / f"{run_date}_TubeLM_Top_{item_count}{suffix}_digest.html"
     )
     output_path.write_text(_render_top10_html(selection), encoding="utf-8")
     logger.info("Local Top %d HTML digest saved to %s", item_count, output_path)
     send_top10_email(selection, cfg)
     if getattr(cfg, "download_top10_videos", False):
         try:
-            download_top10_videos(
-                selection,
-                dest_dir=getattr(cfg, "top10_download_dir", None),
-                prev_dir=getattr(cfg, "top10_prev_dir", None),
-            )
+            try:
+                download_top10_videos(
+                    selection,
+                    dest_dir=getattr(cfg, "top10_download_dir", None),
+                    prev_dir=getattr(cfg, "top10_prev_dir", None),
+                    rotate=rotate_downloads,
+                )
+            except TypeError:
+                download_top10_videos(
+                    selection,
+                    dest_dir=getattr(cfg, "top10_download_dir", None),
+                    prev_dir=getattr(cfg, "top10_prev_dir", None),
+                )
         except Exception as exc:
             logger.error("Failed to download Top %d videos: %s", item_count, exc)
     return selection, output_path

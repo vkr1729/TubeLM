@@ -47,3 +47,15 @@ def test_accepts_direct_complete_summary():
     valid, reason = _validate_summary_text(response, 2)
     assert valid is True
     assert reason == ""
+
+
+def test_accepts_creator_speech_with_first_person_creation():
+    response = (
+        "## Omarchy Automation Framework\n\n"
+        "In this live coding session, the creator explains: 'I have created an automation framework "
+        "that handles window tiling and system setup.' The architecture is modular and fast. " * 3
+    )
+    valid, reason = _validate_summary_text(response, 1)
+    assert valid is True
+    assert reason == ""
+

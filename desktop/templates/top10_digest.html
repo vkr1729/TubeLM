@@ -40,7 +40,9 @@
                 </tr>
               </table>
               <div style="margin-top:46px;">
-                <span style="display:inline-block;padding:7px 10px;background:#d9ff63;color:#171815;font-size:10px;line-height:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;border-radius:3px;">Cross-source edit</span>
+                <span style="display:inline-block;padding:7px 10px;background:#d9ff63;color:#171815;font-size:10px;line-height:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;border-radius:3px;">
+                  {% if selection.is_interim %}Early Edition · First Pass{% elif selection.is_final_after_interim %}Final Edition · All Sources{% else %}Cross-source edit{% endif %}
+                </span>
               </div>
               <h1 class="hero-title" style="margin:18px 0 0;color:#f8f8f4;font-size:48px;line-height:49px;letter-spacing:-.05em;font-weight:780;">The Editor's<br>Top {{ selection['items'] | length }}</h1>
             </td>
@@ -51,7 +53,13 @@
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td style="color:#f8f8f4;font-size:13px;line-height:19px;font-weight:750;">{{ selection['items'] | length }} essential picks</td>
-                  <td align="right" style="color:#8d8f86;font-size:12px;line-height:19px;">from {{ selection.candidate_count }} new items</td>
+                  <td align="right" style="color:#8d8f86;font-size:12px;line-height:19px;">
+                    {% if selection.is_interim %}
+                      from {{ selection.candidate_count }} items (Early Edition)
+                    {% else %}
+                      from {{ selection.candidate_count }} new items
+                    {% endif %}
+                  </td>
                 </tr>
               </table>
             </td>
