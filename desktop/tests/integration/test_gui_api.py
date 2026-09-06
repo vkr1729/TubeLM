@@ -161,3 +161,37 @@ class TestSourcesAPI:
         data = rv.get_json()
         assert data["success"] is True
         assert data["state"]["sources"]["rss:abcd1234efgh"] == "2026-05-30T12:00:00Z"
+
+    def test_reader_endpoints(self, flask_client, tmp_path, monkeypatch):
+        import paths
+        site_dir = tmp_path / "site"
+        site_dir.mkdir(parents=True, exist_ok=True)
+        (site_dir / "index.html").write_text("<html><body>TubeLM Web Reader</body></html>")
+        (site_dir / "feed.xml").write_text("<rss></rss>")
+        monkeypatch.setattr(paths, "get_site_dir", lambda: site_dir)
+
+        rv = flask_client.get("/reader")
+        assert rv.status_code == 200
+        assert "TubeLM Web Reader" in rv.get_data(as_text=True)
+
+        rv_feed = flask_client.get("/reader/feed.xml")
+        assert rv_feed.status_code == 200
+        assert "<rss></rss>" in rv_feed.get_data(as_text=True)
+
+    def test_api_build_reader_optional_compression(self, flask_client, monkeypatch):
+        from unittest.mock import MagicMock
+        import web_reader
+
+        mock_build = MagicMock(return_value="/mock/site/index.html")
+        monkeypatch.setattr(web_reader, "build_reader_site", mock_build)
+
+        # Default / false
+        rv = flask_client.post("/api/reader/build", json={"compress_audio": False})
+        assert rv.status_code == 200
+        assert mock_build.call_args.kwargs["compress_audio"] is False
+
+        # Explicit true
+        rv2 = flask_client.post("/api/reader/build", json={"compress_audio": True})
+        assert rv2.status_code == 200
+        assert mock_build.call_args.kwargs["compress_audio"] is True
+

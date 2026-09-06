@@ -127,6 +127,12 @@ class Config:
     top10_download_dir: Path = field(default_factory=paths.get_top10_video_download_dir)
     top10_prev_dir: Path = field(default_factory=paths.get_top10_previous_video_download_dir)
 
+    # Web reader and delivery configuration
+    send_channel_emails: bool = False
+    deploy_to_gh_pages: bool = True
+    gh_pages_url: str = "https://vkr1729.github.io/TubeLM/"
+    compress_audio: bool = False
+
     # Default browser for NotebookLM extraction (chrome, edge, safari, firefox, opera, etc.)
     notebooklm_browser: str = "chrome"
 
@@ -154,9 +160,9 @@ def load_config() -> Config:
                 f"SMTP_PORT must be an integer, got: {smtp_port_raw!r}"
             ) from exc
 
-    retention_limit_raw = _get_optional("NOTEBOOKS_RETENTION_LIMIT", "0")
+    retention_limit_raw = _get_optional("NOTEBOOKS_RETENTION_LIMIT", "2")
     try:
-        notebooks_retention_limit = int(retention_limit_raw) if retention_limit_raw.strip() else 0
+        notebooks_retention_limit = int(retention_limit_raw) if retention_limit_raw.strip() else 2
     except ValueError as exc:
         raise ConfigurationError(
             f"NOTEBOOKS_RETENTION_LIMIT must be an integer, got: {retention_limit_raw!r}"
@@ -201,5 +207,9 @@ def load_config() -> Config:
         download_top10_videos=_get_bool("DOWNLOAD_TOP_10_VIDEOS", False),
         top10_download_dir=top10_download_dir,
         top10_prev_dir=top10_prev_dir,
+        send_channel_emails=_get_bool("SEND_CHANNEL_EMAILS", False),
+        deploy_to_gh_pages=_get_bool("DEPLOY_TO_GH_PAGES", True),
+        gh_pages_url=_get_optional("GH_PAGES_URL", "https://vkr1729.github.io/TubeLM/"),
+        compress_audio=_get_bool("COMPRESS_AUDIO", False),
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
     )

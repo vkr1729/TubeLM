@@ -653,7 +653,83 @@ def index():
 
 @app.route("/summaries/<path:filename>")
 def serve_summary_file(filename):
-    return send_from_directory(str(SUMMARIES_DIR), filename)
+    return send_from_directory(str(SUMMARIES_DIR), filename, conditional=True)
+
+@app.route("/reader")
+def serve_reader():
+    site_dir = paths.get_site_dir()
+    index_file = site_dir / "index.html"
+    if not index_file.exists():
+        from web_reader import build_reader_site
+        build_reader_site(paths.get_summaries_dir(), paths.get_audio_dir(), site_dir, paths.get_sources_file())
+    return send_from_directory(str(site_dir), "index.html")
+
+@app.route("/reader/<path:filename>")
+def serve_reader_static(filename):
+    return send_from_directory(str(paths.get_site_dir()), filename, conditional=True)
+
+@app.route("/audio/<path:filename>")
+def serve_audio_file(filename):
+    return send_from_directory(str(paths.get_audio_dir()), filename, conditional=True)
+
+@app.route("/api/reader/build", methods=["POST"])
+def api_build_reader():
+    try:
+        data = request.get_json(silent=True) or {}
+        compress_audio = bool(data.get("compress_audio", False))
+        from web_reader import build_reader_site
+        build_reader_site(
+            paths.get_summaries_dir(),
+            paths.get_audio_dir(),
+            paths.get_site_dir(),
+            paths.get_sources_file(),
+            compress_audio=compress_audio,
+        )
+        return jsonify({"success": True, "message": "Web Reader rebuilt successfully."})
+    except Exception as exc:
+        logger.exception("Failed to rebuild web reader site.")
+        return jsonify({"error": str(exc)}), 500
+
+@app.route("/api/reader/read-state", methods=["GET"])
+def api_get_read_state():
+    state_file = paths.get_read_state_file()
+    if state_file.exists():
+        try:
+            return jsonify(json.loads(state_file.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return jsonify({"read_ids": []})
+
+@app.route("/api/reader/read-state", methods=["POST"])
+def api_save_read_state():
+    data = request.get_json() or {}
+    read_ids = data.get("read_ids")
+    state_file = paths.get_read_state_file()
+    
+    if not isinstance(read_ids, list):
+        item_id = data.get("id")
+        if item_id:
+            cur = []
+            if state_file.exists():
+                try:
+                    cur = json.loads(state_file.read_text(encoding="utf-8")).get("read_ids", [])
+                except Exception:
+                    cur = []
+            s = set(cur)
+            if data.get("is_read", True):
+                s.add(item_id)
+            else:
+                s.discard(item_id)
+            read_ids = sorted(s)
+        else:
+            return jsonify({"error": "Missing read_ids or id"}), 400
+
+    try:
+        state_file.write_text(json.dumps({"read_ids": sorted(set(read_ids))}, indent=2), encoding="utf-8")
+        return jsonify({"success": True, "read_ids": sorted(set(read_ids))})
+    except Exception as exc:
+        logger.exception("Failed to save read state file.")
+        return jsonify({"error": str(exc)}), 500
 
 @app.route("/api/status")
 def api_status():

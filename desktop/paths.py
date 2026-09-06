@@ -102,6 +102,18 @@ def get_summaries_dir() -> Path:
     return get_data_dir() / "summaries"
 
 
+def get_audio_dir() -> Path:
+    return get_data_dir() / "audio"
+
+
+def get_site_dir() -> Path:
+    return get_data_dir() / "site"
+
+
+def get_read_state_file() -> Path:
+    return get_data_dir() / "read_state.json"
+
+
 def get_top10_digest_batch_file() -> Path:
     return get_data_dir() / "top10_digest_batch.json"
 
@@ -114,6 +126,8 @@ def ensure_data_dir() -> None:
     """Create runtime directories and seed missing personal configuration."""
     get_data_dir().mkdir(parents=True, exist_ok=True)
     get_summaries_dir().mkdir(exist_ok=True)
+    get_audio_dir().mkdir(exist_ok=True)
+    get_site_dir().mkdir(exist_ok=True)
 
     env_target = get_env_file()
     env_example = PROJECT_DIR / ".env.example"

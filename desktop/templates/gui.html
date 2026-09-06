@@ -1294,6 +1294,13 @@
             <li class="nav-item" data-tab="digests">
                 <button><svg width="18" height="18" aria-hidden="true"><use href="#icon-book-open"/></svg> Digests</button>
             </li>
+            <li class="nav-item">
+                <a href="/reader" target="_blank" style="display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; color: var(--text-secondary); text-decoration: none; font-size: 14px; font-weight: 500; border-radius: 6px; transition: all 0.2s;" onmouseover="this.style.color='var(--text-primary)'; this.style.backgroundColor='var(--soft-hover)'" onmouseout="this.style.color='var(--text-secondary)'; this.style.backgroundColor='transparent'">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+                    <span>Web Reader <span style="font-size: 10px; padding: 2px 5px; background: rgba(217, 255, 99, 0.15); color: var(--accent); border-radius: 4px; margin-left: 4px;">v4.0</span></span>
+                    <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-left: auto; opacity: 0.6;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                </a>
+            </li>
         </ul>
 
         <div class="sidebar-footer">
@@ -1788,9 +1795,14 @@
 
         <!-- Digests Tab -->
         <div class="tab-content" id="digests">
-            <div class="header">
-                <h1>Digests Library</h1>
-                <p>Read historically generated intelligence briefings.</p>
+            <div class="header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+                <div>
+                    <h1>Digests Library</h1>
+                    <p>Read historically generated intelligence briefings.</p>
+                </div>
+                <a href="/reader" target="_blank" style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; background: var(--accent); color: var(--accent-text); border-radius: 6px; font-weight: 600; font-size: 13px; text-decoration: none; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                    Launch Modern Web Reader ↗
+                </a>
             </div>
 
             <div class="digest-split">
@@ -2796,7 +2808,7 @@
                     });
             } else if (type === 'html') {
                 viewer.classList.add('fullscreen');
-                viewer.innerHTML = `<iframe src="/summaries/${artifactName}" title="Saved TubeLM digest" sandbox="allow-same-origin" style="width:100%; height:100%; border:none; background:#11120f; border-radius:12px;"></iframe>`;
+                viewer.innerHTML = `<iframe src="/summaries/${artifactName}" title="Saved TubeLM digest" sandbox="allow-same-origin allow-scripts" allowfullscreen allow="fullscreen" style="width:100%; height:100%; border:none; background:#11120f; border-radius:12px;"></iframe>`;
             } else if (type === 'png') {
                 viewer.classList.add('fullscreen');
                 viewer.innerHTML = `
@@ -2814,9 +2826,12 @@
                 `;
             } else if (type === 'video') {
                 viewer.innerHTML = `
-                    <div class="video-container" style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100%; gap:24px; padding:40px; text-align:center;">
+                    <div class="video-container" style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100%; gap:20px; padding:40px; text-align:center;">
                         <h2 style="color:var(--text-primary); margin:0;">Video Briefing — ${safeDate}</h2>
-                        <video controls src="/summaries/${artifactName}" style="width:100%; max-width:600px; border-radius:8px; border:1px solid var(--border-color);"></video>
+                        <video id="gui-video-player" controls playsinline src="/summaries/${artifactName}" style="width:100%; max-width:720px; border-radius:8px; border:1px solid var(--border-color);"></video>
+                        <button onclick="document.getElementById('gui-video-player').requestFullscreen()" class="btn-secondary" style="padding:6px 14px; font-size:12px; font-weight:600;">
+                            Full Screen ⛶
+                        </button>
                     </div>
                 `;
             }

@@ -11,6 +11,7 @@ logs/
 summaries/
 *.log
 *.bak
+*.db
 
 # Python
 .venv/

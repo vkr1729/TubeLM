@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TubeLM Reader — Mock V1 (Modern Split-Pane)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            },
+            surface: {
+              base: '#0b0f19',
+              raised: '#111827',
+              border: '#1f2937',
+              hover: '#1e293b'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+  </style>
+</head>
+<body class="bg-[#0b0f19] text-gray-100 font-sans antialiased h-screen flex flex-col overflow-hidden">
+
+  <!-- Top Global Header -->
+  <header class="h-14 border-b border-gray-800 bg-gray-900/60 backdrop-blur px-4 flex items-center justify-between flex-shrink-0 z-20">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">
+        TL
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="font-bold tracking-tight text-white">TubeLM Reader</span>
+          <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold">v4.0 Split-Pane</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Week Switcher & Global Controls -->
+    <div class="flex items-center gap-3">
+      <div class="flex items-center bg-gray-800/80 p-0.5 rounded-lg border border-gray-700/60 text-xs">
+        <button id="week-current" class="px-3 py-1 rounded-md bg-indigo-600 text-white font-medium shadow-sm transition">Current Week (Sep 01–07)</button>
+        <button id="week-prev" class="px-3 py-1 rounded-md text-gray-400 hover:text-gray-200 transition">Prev Week (Aug 25–31)</button>
+      </div>
+
+      <div class="h-4 w-px bg-gray-800"></div>
+
+      <a href="feed.xml" class="text-xs flex items-center gap-1.5 text-amber-400/90 hover:text-amber-300 px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/20 transition">
+        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83c0-8.59-6.97-15.56-15.56-15.56zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg>
+        <span>RSS Feed</span>
+      </a>
+
+      <button id="theme-toggle" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 9h-1m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Split Pane Layout -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- Left Sidebar (Channels & Navigation) -->
+    <aside class="w-84 border-r border-gray-800 bg-gray-950 flex flex-col flex-shrink-0">
+      <!-- Search & Filters -->
+      <div class="p-3 border-b border-gray-800/80 space-y-2.5">
+        <div class="relative">
+          <input type="text" id="channel-search" placeholder="Search 37 channels or topics..." class="w-full bg-gray-900 border border-gray-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500 transition">
+          <svg class="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        </div>
+
+        <div class="flex items-center gap-1 text-[11px] overflow-x-auto pb-0.5 no-scrollbar">
+          <button class="cat-pill active px-2.5 py-1 rounded-md bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-medium">All (37)</button>
+          <button class="cat-pill px-2.5 py-1 rounded-md bg-gray-900 text-gray-400 hover:text-gray-300 border border-gray-800 transition">Tech (11)</button>
+          <button class="cat-pill px-2.5 py-1 rounded-md bg-gray-900 text-gray-400 hover:text-gray-300 border border-gray-800 transition">Health (10)</button>
+          <button class="cat-pill px-2.5 py-1 rounded-md bg-gray-900 text-gray-400 hover:text-gray-300 border border-gray-800 transition">Explainer (16)</button>
+        </div>
+      </div>
+
+      <!-- Channel & Top-Level Index List -->
+      <div class="flex-1 overflow-y-auto p-2 space-y-1" id="sidebar-list">
+        <!-- Top 20 Executive Item -->
+        <button class="sidebar-item active w-full text-left p-2.5 rounded-lg bg-indigo-600/10 border border-indigo-500/30 hover:bg-indigo-600/20 transition group">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-bold text-indigo-400 flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5 text-indigo-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg>
+              Executive Top 20
+            </span>
+            <span class="text-[10px] font-mono bg-indigo-500/20 text-indigo-300 px-1.5 py-0.2 rounded font-semibold">Flagship</span>
+          </div>
+          <div class="text-xs text-gray-300 font-medium truncate">Top 10 Must-Watch + Next 10</div>
+          <div class="text-[10px] text-gray-500 mt-1 flex items-center gap-2">
+            <span>20 items ranked</span>
+            <span>·</span>
+            <span>Gemini 3.8 Flash</span>
+          </div>
+        </button>
+
+        <div class="pt-2 pb-1 px-2 text-[10px] font-mono text-gray-500 uppercase tracking-wider font-semibold">Channels (37)</div>
+
+        <!-- Channel 1: Andrej Karpathy (Has Audio) -->
+        <button class="sidebar-item w-full text-left p-2.5 rounded-lg hover:bg-gray-900 border border-transparent hover:border-gray-800 transition group">
+          <div class="flex items-center justify-between mb-0.5">
+            <span class="text-xs font-semibold text-gray-200 group-hover:text-white truncate">Andrej Karpathy</span>
+            <span class="flex items-center gap-1">
+              <span class="text-[10px] font-mono px-1 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold" title="Audio Overview Generated">🎧 Audio</span>
+              <span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+            </span>
+          </div>
+          <div class="text-[11px] text-gray-400 truncate">Deep Dive into LLM Pre-training & Tokenizers</div>
+          <div class="text-[10px] text-gray-500 mt-1 flex items-center justify-between">
+            <span>2 videos · Tech</span>
+            <span class="text-[10px] text-gray-400">1.68M subs</span>
+          </div>
+        </button>
+
+        <!-- Channel 2: Asianometry (Single Video - No Audio) -->
+        <button class="sidebar-item w-full text-left p-2.5 rounded-lg hover:bg-gray-900 border border-transparent hover:border-gray-800 transition group">
+          <div class="flex items-center justify-between mb-0.5">
+            <span class="text-xs font-semibold text-gray-200 group-hover:text-white truncate">Asianometry</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+          </div>
+          <div class="text-[11px] text-gray-400 truncate">ASML High-NA EUV: Physics & Fab Economics</div>
+          <div class="text-[10px] text-gray-500 mt-1 flex items-center justify-between">
+            <span>1 video · Explainer</span>
+            <span class="text-[10px] text-gray-400">960K subs</span>
+          </div>
+        </button>
+
+        <!-- Channel 3: Physionic (Has Audio) -->
+        <button class="sidebar-item w-full text-left p-2.5 rounded-lg hover:bg-gray-900 border border-transparent hover:border-gray-800 transition group">
+          <div class="flex items-center justify-between mb-0.5">
+            <span class="text-xs font-semibold text-gray-200 group-hover:text-white truncate">Physionic</span>
+            <span class="flex items-center gap-1">
+              <span class="text-[10px] font-mono px-1 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold">🎧 Audio</span>
+              <span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+            </span>
+          </div>
+          <div class="text-[11px] text-gray-400 truncate">ApoB, LDL & Endothelial Infiltration Mechanisms</div>
+          <div class="text-[10px] text-gray-500 mt-1 flex items-center justify-between">
+            <span>3 videos · Health</span>
+            <span class="text-[10px] text-gray-400">398K subs</span>
+          </div>
+        </button>
+
+        <!-- Channel 4: Patrick Boyle (Has Audio) -->
+        <button class="sidebar-item w-full text-left p-2.5 rounded-lg hover:bg-gray-900 border border-transparent hover:border-gray-800 transition group">
+          <div class="flex items-center justify-between mb-0.5">
+            <span class="text-xs font-semibold text-gray-200 group-hover:text-white truncate">Patrick Boyle</span>
+            <span class="flex items-center gap-1">
+              <span class="text-[10px] font-mono px-1 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-semibold">🎧 Audio</span>
+              <span class="w-1.5 h-1.5 rounded-full bg-gray-600"></span>
+            </span>
+          </div>
+          <div class="text-[11px] text-gray-400 truncate">Central Bank Balance Sheets & Quantitative Tightening</div>
+          <div class="text-[10px] text-gray-500 mt-1 flex items-center justify-between">
+            <span>2 videos · Explainer</span>
+            <span class="text-[10px] text-gray-400">1.33M subs</span>
+          </div>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Right Reading Canvas (Detailed View) -->
+    <main class="flex-1 overflow-y-auto bg-[#0b0f19] p-6 lg:p-10 max-w-5xl mx-auto w-full">
+
+      <!-- Active View: Channel Detail (e.g. Andrej Karpathy) -->
+      <article class="space-y-8">
+
+        <!-- Channel Header & Actions -->
+        <div class="border-b border-gray-800 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-xs font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-medium">Tech / AI Systems</span>
+              <span class="text-xs text-gray-400">Week of Sep 01 – Sep 07, 2026</span>
+              <span class="text-xs text-gray-600">·</span>
+              <span class="text-xs text-emerald-400 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> NotebookLM Grounded
+              </span>
+            </div>
+            <h1 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">Andrej Karpathy</h1>
+            <p class="text-sm text-gray-400 mt-1">2 new videos analyzed · 1.68M Subscribers · Direct primary source walkthroughs</p>
+          </div>
+
+          <div class="flex items-center gap-2.5 flex-shrink-0">
+            <button class="px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-800 text-xs text-gray-200 hover:bg-gray-700 transition flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+              <span>Mark as Read</span>
+            </button>
+            <a href="https://notebooklm.google.com" target="_blank" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium shadow-md shadow-indigo-600/20 transition flex items-center gap-1.5">
+              <span>Open Public Notebook</span>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+            </a>
+          </div>
+        </div>
+
+        <!-- CONDITIONAL AUDIO PLAYER: Rendered ONLY when multiple videos generated an overview -->
+        <div class="p-4 rounded-xl bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-gray-900 border border-purple-500/30 shadow-lg relative overflow-hidden">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse"></span>
+              <span class="text-xs font-bold uppercase tracking-wider text-purple-300 font-mono">NotebookLM Audio Overview (14:32)</span>
+              <span class="text-[10px] text-gray-400 font-mono px-1.5 py-0.5 rounded bg-purple-500/20">Generated for 2 videos</span>
+            </div>
+            <span class="text-xs text-gray-400 font-mono">Stream directly / No Google login required</span>
+          </div>
+
+          <!-- HTML5 Native Streaming Audio Player -->
+          <div class="flex items-center gap-4 bg-gray-950/80 p-2.5 rounded-lg border border-gray-800">
+            <button class="w-9 h-9 rounded-full bg-purple-600 hover:bg-purple-500 text-white flex items-center justify-center shadow-md transition flex-shrink-0">
+              <svg class="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <div class="flex-1">
+              <div class="flex items-center justify-between text-[11px] font-mono text-gray-400 mb-1">
+                <span>04:15</span>
+                <span class="text-gray-200 font-medium">Deep Dive: Tokenizers & Byte Pair Encoding Mechanics</span>
+                <span>14:32</span>
+              </div>
+              <div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden cursor-pointer">
+                <div class="bg-purple-500 h-full w-[30%] rounded-full"></div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 text-xs font-mono text-gray-400 flex-shrink-0">
+              <button class="hover:text-white px-1.5 py-0.5 rounded bg-gray-800">1.25x</button>
+              <a href="#" download class="hover:text-white p-1" title="Download MP3 for offline listening">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Executive Synthesis -->
+        <section class="space-y-4">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span class="w-2 h-2 rounded bg-indigo-500"></span>
+            Weekly Synthesis & Key Takeaways
+          </h2>
+          <div class="p-5 rounded-xl bg-gray-900/60 border border-gray-800/80 space-y-3 leading-relaxed text-sm text-gray-300">
+            <p><strong class="text-white">Core Insight:</strong> Karpathy demonstrates that modern LLM failures (arithmetic bugs, spelling quirks, prompt injection sensitivity) trace back not to the transformer architecture itself, but to tokenization artifacts in Byte Pair Encoding (BPE).</p>
+            <ul class="list-disc pl-5 space-y-1.5 text-gray-300">
+              <li>Why trailing whitespace breaks token merges and causes unexpected completions.</li>
+              <li>How character-level vs subword vocabularies impact sequence lengths and quadratic attention cost.</li>
+              <li>Implementing a minimal regex-based BPE tokenizer from scratch without third-party dependencies.</li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- Video Breakdown Cards -->
+        <section class="space-y-4">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span class="w-2 h-2 rounded bg-indigo-500"></span>
+            Source Videos Analyzed (2)
+          </h2>
+
+          <!-- Video 1 -->
+          <div class="p-4 rounded-xl bg-gray-900/40 border border-gray-800 hover:border-gray-700 transition space-y-3">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h3 class="text-base font-semibold text-white hover:text-indigo-400 transition">
+                  <a href="https://youtube.com/watch?v=zduSFxRajkE" target="_blank">Let's build the GPT Tokenizer from Scratch</a>
+                </h3>
+                <div class="text-xs text-gray-500 mt-1 flex items-center gap-3">
+                  <span>Published Sep 03, 2026</span>
+                  <span>·</span>
+                  <span>Duration: 2h 14m</span>
+                  <span>·</span>
+                  <a href="https://youtube.com/watch?v=zduSFxRajkE" target="_blank" class="text-indigo-400 hover:underline flex items-center gap-1">
+                    Watch on YouTube ↗
+                  </a>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-gray-400 leading-relaxed">
+              Step-by-step masterclass covering UTF-8 byte encodings, the BPE compression algorithm, Tiktoken mechanics, and why training tokenizer vocabularies independently from model weights causes catastrophic token shifts.
+            </p>
+          </div>
+
+          <!-- Video 2 -->
+          <div class="p-4 rounded-xl bg-gray-900/40 border border-gray-800 hover:border-gray-700 transition space-y-3">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h3 class="text-base font-semibold text-white hover:text-indigo-400 transition">
+                  <a href="https://youtube.com/watch?v=kCc8FmEb1nY" target="_blank">State of GPT: Training Pipelines in 2026</a>
+                </h3>
+                <div class="text-xs text-gray-500 mt-1 flex items-center gap-3">
+                  <span>Published Sep 01, 2026</span>
+                  <span>·</span>
+                  <span>Duration: 42m</span>
+                  <span>·</span>
+                  <a href="https://youtube.com/watch?v=kCc8FmEb1nY" target="_blank" class="text-indigo-400 hover:underline flex items-center gap-1">
+                    Watch on YouTube ↗
+                  </a>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-gray-400 leading-relaxed">
+              Comprehensive audit of pretraining, supervised finetuning (SFT), and reinforcement learning from human/AI feedback (RLHF/RLAIF). Focuses on synthetic data curation and evaluation benchmarks.
+            </p>
+          </div>
+        </section>
+
+      </article>
+
+    </main>
+  </div>
+</body>
+</html>

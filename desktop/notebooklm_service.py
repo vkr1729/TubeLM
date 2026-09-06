@@ -590,6 +590,11 @@ async def _get_or_create_daily_notebook(client, title: str):
     if not matches:
         logger.info("Creating notebook: %r", title)
         notebook = await client.notebooks.create(title)
+        try:
+            await client.sharing.set_public(notebook.id, True)
+            logger.info("Set notebook %s to public sharing.", notebook.id)
+        except Exception:
+            logger.warning("Could not set notebook %s to public sharing; continuing.", notebook.id)
         return notebook, []
 
     candidates = []
@@ -614,6 +619,10 @@ async def _get_or_create_daily_notebook(client, title: str):
         )
     else:
         logger.info("Resuming existing notebook %r (%s).", title, notebook.id)
+    try:
+        await client.sharing.set_public(notebook.id, True)
+    except Exception:
+        pass
     return notebook, sources
 
 

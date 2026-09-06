@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TubeLM Reader — Mock V2 (Editorial Magazine & Executive Briefing)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            serif: ['Newsreader', 'Georgia', 'serif'],
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-[#0f1115] text-[#e4e4e7] font-sans antialiased min-h-screen">
+
+  <!-- Editorial Top Masthead -->
+  <header class="border-b border-zinc-800 bg-[#14171d]/90 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-4">
+        <span class="font-serif text-2xl font-bold tracking-tight text-amber-100">TubeLM Intelligence</span>
+        <span class="hidden sm:inline-block text-[11px] font-mono uppercase tracking-widest px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Executive Briefing</span>
+      </div>
+
+      <!-- Controls -->
+      <div class="flex items-center gap-4 text-xs font-mono">
+        <div class="flex items-center bg-zinc-800/80 p-1 rounded-lg border border-zinc-700">
+          <button class="px-3 py-1 rounded bg-amber-600 text-white font-medium">Week 36 (Current)</button>
+          <button class="px-3 py-1 rounded text-zinc-400 hover:text-zinc-200">Week 35 (Prev)</button>
+        </div>
+        <a href="feed.xml" class="text-amber-400 hover:underline flex items-center gap-1">
+          <span>RSS</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Editorial Container -->
+  <main class="max-w-6xl mx-auto px-6 py-10 space-y-12">
+
+    <!-- Hero Header -->
+    <div class="border-b border-zinc-800 pb-8">
+      <div class="flex items-center gap-3 text-xs font-mono text-zinc-500 mb-2">
+        <span>CURATED INTELLIGENCE</span>
+        <span>·</span>
+        <span>37 MONITORED CHANNELS</span>
+        <span>·</span>
+        <span class="text-amber-400">2-WEEK ROLLING RETENTION</span>
+      </div>
+      <h1 class="font-serif text-4xl md:text-5xl font-bold text-white tracking-tight leading-tight">
+        The Weekly Executive Briefing
+      </h1>
+      <p class="text-base text-zinc-400 max-w-3xl mt-3 font-serif italic">
+        Grounding 48 new videos and articles into the 20 highest-signal developments across frontier artificial intelligence, clinical longevity, and macroeconomic industrial policy.
+      </p>
+    </div>
+
+    <!-- TIER 1: TOP 10 MUST-WATCH EDITOR'S PICKS -->
+    <section class="space-y-6">
+      <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div class="flex items-center gap-2">
+          <span class="w-3 h-3 bg-amber-500 rounded-sm"></span>
+          <h2 class="font-serif text-2xl font-bold text-white">Tier 1: Top 10 Must-Watch Editor's Picks</h2>
+        </div>
+        <span class="text-xs font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">Essential Watching</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        <!-- Card 1 (Asianometry) -->
+        <div class="p-6 rounded-xl bg-[#151921] border border-zinc-800 hover:border-amber-500/40 transition group relative">
+          <div class="flex items-start justify-between mb-3">
+            <span class="text-3xl font-serif font-black text-amber-500/40 group-hover:text-amber-500 transition">01</span>
+            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">Deep Explainer</span>
+          </div>
+          <h3 class="font-serif text-xl font-bold text-white group-hover:text-amber-200 transition">
+            <a href="https://youtube.com" target="_blank">ASML High-NA EUV: The $380M Physics Miracle</a>
+          </h3>
+          <p class="text-xs text-zinc-400 font-mono mt-1">Asianometry · 960K Subscribers</p>
+          <blockquote class="mt-4 pl-3 border-l-2 border-amber-500/60 text-xs text-zinc-300 italic font-serif leading-relaxed">
+            "Explains the extreme optical anamorphic magnification and pellicle thermal limits required to print 2nm nodes. Essential for understanding why chip fabrication cannot be duplicated overnight."
+          </blockquote>
+          <div class="mt-4 pt-4 border-t border-zinc-800/80 flex items-center justify-between text-xs">
+            <span class="text-zinc-500">Duration: 22m</span>
+            <a href="https://youtube.com" target="_blank" class="text-amber-400 hover:text-amber-300 font-medium">Watch Video ↗</a>
+          </div>
+        </div>
+
+        <!-- Card 2 (Peter Attia MD) -->
+        <div class="p-6 rounded-xl bg-[#151921] border border-zinc-800 hover:border-amber-500/40 transition group relative">
+          <div class="flex items-start justify-between mb-3">
+            <span class="text-3xl font-serif font-black text-amber-500/40 group-hover:text-amber-500 transition">02</span>
+            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">Health / Longevity</span>
+          </div>
+          <h3 class="font-serif text-xl font-bold text-white group-hover:text-amber-200 transition">
+            <a href="https://youtube.com" target="_blank">ApoB vs. LDL-C: Resolving the Discordance Trap in Cardiovascular Risk</a>
+          </h3>
+          <p class="text-xs text-zinc-400 font-mono mt-1">Peter Attia MD · 1.03M Subscribers</p>
+          <blockquote class="mt-4 pl-3 border-l-2 border-amber-500/60 text-xs text-zinc-300 italic font-serif leading-relaxed">
+            "Clinical breakdown demonstrating why standard lipid panels miss 30% of high-risk patients with elevated particle counts despite normal cholesterol levels. Directly applicable clinical prevention."
+          </blockquote>
+          <div class="mt-4 pt-4 border-t border-zinc-800/80 flex items-center justify-between text-xs">
+            <span class="text-zinc-500">Duration: 1h 05m</span>
+            <a href="https://youtube.com" target="_blank" class="text-amber-400 hover:text-amber-300 font-medium">Watch Video ↗</a>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TIER 2: NEXT 10 NOTABLE -->
+    <section class="space-y-4">
+      <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <h2 class="font-serif text-xl font-bold text-zinc-200">Tier 2: Next 10 Notable Developments (Ranks 11–20)</h2>
+        <span class="text-xs font-mono text-zinc-500">High Signal Secondary</span>
+      </div>
+
+      <div class="divide-y divide-zinc-800/80 bg-[#14171d] rounded-xl border border-zinc-800">
+        <!-- Item 11 -->
+        <div class="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-zinc-800/30 transition">
+          <div class="flex items-start gap-3">
+            <span class="font-mono text-sm font-bold text-zinc-500 w-6">11</span>
+            <div>
+              <h4 class="text-sm font-semibold text-white hover:text-amber-300 transition">
+                <a href="#">The Global Copper Deficit & The Grid Bottleneck</a>
+              </h4>
+              <p class="text-xs text-zinc-400 mt-0.5">PolyMatter · Explores why grid transmission investments lag renewables deployment by 7 years.</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-4 text-xs font-mono flex-shrink-0 text-zinc-400">
+            <span>Explainer</span>
+            <a href="#" class="text-amber-400 hover:underline">Watch ↗</a>
+          </div>
+        </div>
+
+        <!-- Item 12 -->
+        <div class="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-zinc-800/30 transition">
+          <div class="flex items-start gap-3">
+            <span class="font-mono text-sm font-bold text-zinc-500 w-6">12</span>
+            <div>
+              <h4 class="text-sm font-semibold text-white hover:text-amber-300 transition">
+                <a href="#">Distributed Locks with Redis & Redlock: Where it Fails</a>
+              </h4>
+              <p class="text-xs text-zinc-400 mt-0.5">ByteByteGo · Martin Kleppmann's critique and timing assumptions in asynchronous networks.</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-4 text-xs font-mono flex-shrink-0 text-zinc-400">
+            <span>Tech</span>
+            <a href="#" class="text-amber-400 hover:underline">Watch ↗</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: DETAILED CHANNEL DIGESTS WITH AUDIO OVERVIEWS -->
+    <section class="space-y-6 pt-4">
+      <div class="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <h2 class="font-serif text-2xl font-bold text-white">Channel In-Depth Summaries & Audio</h2>
+        <div class="flex items-center gap-2 text-xs font-mono">
+          <span class="text-zinc-500">Filter:</span>
+          <button class="px-2 py-0.5 rounded bg-zinc-800 text-white">All (37)</button>
+          <button class="px-2 py-0.5 rounded text-zinc-400 hover:text-white">Tech</button>
+          <button class="px-2 py-0.5 rounded text-zinc-400 hover:text-white">Health</button>
+        </div>
+      </div>
+
+      <!-- Channel Card With Audio (Physionic) -->
+      <div class="p-6 rounded-xl bg-[#14171d] border border-zinc-800 space-y-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-zinc-800/80 pb-4">
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Health</span>
+              <span class="text-xs text-zinc-500">3 Videos Analyzed · 398K Subs</span>
+            </div>
+            <h3 class="font-serif text-2xl font-bold text-white">Physionic</h3>
+          </div>
+          <a href="#" class="text-xs font-mono text-zinc-400 hover:text-white border border-zinc-700 px-3 py-1.5 rounded-lg">
+            Open Public Notebook ↗
+          </a>
+        </div>
+
+        <!-- Pinned Audio Player (ONLY for multi-video channels) -->
+        <div class="p-3.5 rounded-lg bg-zinc-900 border border-amber-500/30 flex items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <button class="w-8 h-8 rounded-full bg-amber-500 text-black flex items-center justify-center font-bold">▶</button>
+            <div>
+              <div class="text-xs font-bold text-white">NotebookLM Audio Overview: Lipidology & Cellular Mechanisms</div>
+              <div class="text-[11px] text-zinc-400 font-mono">Duration: 11:45 · Generated for 3 videos</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 text-xs font-mono text-zinc-400">
+            <span>1.0x</span>
+            <a href="#" class="hover:text-white">Download MP3</a>
+          </div>
+        </div>
+
+        <div class="text-sm text-zinc-300 font-serif leading-relaxed space-y-2">
+          <p>Detailed investigation into the molecular mechanisms of endothelial retention. Nick Verhoeven dissects four recent clinical trials evaluating PCSK9 inhibitors and ezetimibe combination therapies.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</body>
+</html>

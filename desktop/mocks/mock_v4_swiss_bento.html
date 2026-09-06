@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TubeLM Reader — Mock V4 (Swiss Bento Grid)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Plus Jakarta Sans', 'sans-serif'],
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-[#090d16] text-[#e2e8f0] font-sans antialiased min-h-screen p-4 sm:p-6 lg:p-8">
+
+  <!-- Header Container -->
+  <div class="max-w-7xl mx-auto space-y-8">
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-6">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center font-display font-extrabold text-white shadow-lg shadow-indigo-500/20">
+          TL
+        </div>
+        <div>
+          <h1 class="font-display text-xl font-bold text-white tracking-tight">TubeLM Hub</h1>
+          <p class="text-xs text-slate-400">37 Channels · 2-Week Rolling Purge · Zero Spam</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <!-- Week Selector -->
+        <div class="bg-slate-900 border border-slate-800 p-1 rounded-xl flex items-center text-xs">
+          <button class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium shadow">Current (Sep 01–07)</button>
+          <button class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white">Previous (Aug 25–31)</button>
+        </div>
+        <a href="feed.xml" class="px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-mono font-medium hover:bg-amber-500/20">
+          RSS
+        </a>
+      </div>
+    </header>
+
+    <!-- Bento Grid Section 1: Hero Cards -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Bento 1: Top 20 Executive Overview (2 Cols) -->
+      <div class="lg:col-span-2 p-6 rounded-2xl bg-[#0f172a]/80 border border-slate-800/80 shadow-xl space-y-6 relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-400 text-xs font-mono font-semibold border border-indigo-500/30">Executive Ranking</span>
+            <span class="text-xs text-slate-400">Selected by Gemini 3.8 Flash (High)</span>
+          </div>
+          <span class="text-xs font-mono text-emerald-400">20 Items Ranked</span>
+        </div>
+
+        <div>
+          <h2 class="font-display text-2xl font-bold text-white">This Week's Top 10 Must-Watch</h2>
+          <p class="text-xs text-slate-400 mt-1">High-consequence breakthroughs filtered from 48 candidate videos.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Item 1 -->
+          <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 transition group space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-mono font-bold text-indigo-400">#01 · Deep Explainer</span>
+              <span class="text-[10px] text-slate-500">Asianometry</span>
+            </div>
+            <h3 class="font-display font-bold text-white text-sm group-hover:text-indigo-300 transition">
+              ASML High-NA EUV Optics: The 2nm Chokepoint
+            </h3>
+            <p class="text-xs text-slate-400 line-clamp-2">
+              Why anamorphic mirrors and extreme numerical aperture optics prevent silicon competitors from bypassing TSMC.
+            </p>
+          </div>
+
+          <!-- Item 2 -->
+          <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 transition group space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-mono font-bold text-indigo-400">#02 · Health</span>
+              <span class="text-[10px] text-slate-500">Physionic</span>
+            </div>
+            <h3 class="font-display font-bold text-white text-sm group-hover:text-indigo-300 transition">
+              ApoB & Endothelial Penetration: The RCT Evidence
+            </h3>
+            <p class="text-xs text-slate-400 line-clamp-2">
+              Dissection of arterial wall particle retention mechanisms comparing statin, ezetimibe, and PCSK9i trials.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bento 2: Weekly Audio Hub (1 Col) -->
+      <div class="p-6 rounded-2xl bg-gradient-to-br from-violet-950/40 to-slate-900 border border-violet-500/30 shadow-xl flex flex-col justify-between space-y-4">
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="px-2.5 py-1 rounded-lg bg-violet-500/20 text-violet-300 text-xs font-mono font-semibold border border-violet-500/30">Audio Overviews</span>
+            <span class="w-2 h-2 rounded-full bg-violet-400 animate-pulse"></span>
+          </div>
+          <h2 class="font-display text-lg font-bold text-white">NotebookLM Deep Dives</h2>
+          <p class="text-xs text-slate-400 mt-1">Generated exclusively for channels with multiple weekly uploads.</p>
+        </div>
+
+        <!-- Mini Audio List -->
+        <div class="space-y-2">
+          <div class="p-3 rounded-xl bg-slate-950/80 border border-violet-500/40 flex items-center justify-between gap-3">
+            <button class="w-8 h-8 rounded-full bg-violet-600 text-white flex items-center justify-center shadow">▶</button>
+            <div class="flex-1 min-w-0">
+              <div class="text-xs font-bold text-white truncate">Andrej Karpathy (14m)</div>
+              <div class="text-[10px] text-slate-400">Tokenizers & LLM Pre-training</div>
+            </div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-950/50 border border-slate-800 flex items-center justify-between gap-3">
+            <button class="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center">▶</button>
+            <div class="flex-1 min-w-0">
+              <div class="text-xs font-bold text-white truncate">Physionic (11m)</div>
+              <div class="text-[10px] text-slate-400">Arterial Particle Infiltration</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-[11px] font-mono text-slate-400 text-center pt-2 border-t border-slate-800/80">
+          Stream directly in browser · Public links
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Bento Grid Section 2: Channel Cards Grid -->
+    <div class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <button class="px-3 py-1 rounded-lg bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-medium">All Sources (37)</button>
+          <button class="px-3 py-1 rounded-lg bg-slate-900 text-slate-400 text-xs hover:text-white">Tech (11)</button>
+          <button class="px-3 py-1 rounded-lg bg-slate-900 text-slate-400 text-xs hover:text-white">Health (10)</button>
+          <button class="px-3 py-1 rounded-lg bg-slate-900 text-slate-400 text-xs hover:text-white">Explainer (16)</button>
+        </div>
+        <input type="text" placeholder="Search digests..." class="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Channel Bento Card -->
+        <div class="p-5 rounded-2xl bg-[#0f172a] border border-slate-800 hover:border-slate-700 transition space-y-3">
+          <div class="flex items-center justify-between text-xs">
+            <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono font-medium">Health</span>
+            <span class="text-[10px] text-slate-500">350K Subs</span>
+          </div>
+          <h3 class="font-display font-bold text-white text-base">Dr Brad Stanfield</h3>
+          <p class="text-xs text-slate-400 leading-relaxed line-clamp-3">
+            Analyzing the latest Rapamycin human safety trials and exercise timing for visceral fat mobilization.
+          </p>
+          <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+            <span class="text-slate-500 text-[11px]">1 Video</span>
+            <a href="#" class="text-indigo-400 hover:underline">Read Briefing →</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

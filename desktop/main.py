@@ -689,8 +689,13 @@ async def async_main(
                             handler.state_key(), result, top10_run_date
                         )
 
-                    if skip_email:
-                        logger.info("[%s] Email delivery skipped by configuration.", handler.name)
+                    if skip_email or not getattr(cfg, "send_channel_emails", False):
+                        logger.info(
+                            "[%s] Channel email skipped (send_channel_emails=%s, skip_email=%s).",
+                            handler.name,
+                            getattr(cfg, "send_channel_emails", False),
+                            skip_email,
+                        )
                     else:
                         send_channel_email(result, cfg)
                 except Exception:
@@ -823,6 +828,24 @@ async def async_main(
     except Exception:
         logger.exception("Error finishing background studio artifacts.")
         artifacts_ok = False
+
+    if not dry_run and successful_keys:
+        try:
+            from web_reader import build_reader_site, deploy_to_gh_pages
+            logger.info("Building static web reader site from latest digests...")
+            compress_audio = getattr(cfg, "compress_audio", False)
+            build_reader_site(
+                paths.get_summaries_dir(),
+                paths.get_audio_dir(),
+                paths.get_site_dir(),
+                cfg.sources_file,
+                compress_audio=compress_audio,
+            )
+            if getattr(cfg, "deploy_to_gh_pages", True):
+                logger.info("Deploying web reader to GitHub Pages...")
+                deploy_to_gh_pages(paths.get_site_dir())
+        except Exception:
+            logger.exception("Failed to build or deploy web reader site.")
 
     if active_handlers or not artifacts_ok or quota_deferred_until:
         logger.warning(

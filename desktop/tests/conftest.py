@@ -1,6 +1,13 @@
 import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+@pytest.fixture(autouse=True)
+def prevent_gh_pages_deploy_in_tests(monkeypatch):
+    """Safety guard: prevent any automated test from accidentally pushing to GitHub Pages."""
+    import web_reader
+    monkeypatch.setattr(web_reader, "deploy_to_gh_pages", lambda *args, **kwargs: True)
 
 
 @pytest.fixture

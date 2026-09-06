@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TubeLM Reader — Mock V5 (Focused Zen Reader)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            serif: ['Lora', 'Georgia', 'serif'],
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-[#101216] text-[#e2e4e9] font-serif antialiased min-h-screen pb-24">
+
+  <!-- Zen Top Navigation -->
+  <header class="border-b border-zinc-800/80 sticky top-0 bg-[#101216]/90 backdrop-blur z-20">
+    <div class="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between font-sans text-xs">
+      <div class="flex items-center gap-2 font-bold text-white tracking-tight">
+        <span>TubeLM Zen</span>
+        <span class="text-zinc-500 font-normal">· Week of Sep 01</span>
+      </div>
+
+      <!-- Quick Controls -->
+      <div class="flex items-center gap-3">
+        <button class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:text-white">Week Switcher</button>
+        <button class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:text-white">A- / A+</button>
+        <a href="feed.xml" class="text-amber-400">RSS</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Clean Reading Stream -->
+  <main class="max-w-3xl mx-auto px-6 py-10 space-y-12">
+
+    <!-- Executive Briefing Hero (Collapsible Minimalist Box) -->
+    <section class="p-6 rounded-2xl bg-[#16181f] border border-zinc-800 font-sans space-y-4">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-mono font-bold uppercase tracking-wider text-amber-400">Executive Top 20</span>
+        <span class="text-xs text-zinc-500">20 High-Signal Selections</span>
+      </div>
+      <h2 class="text-xl font-bold text-white tracking-tight font-serif">
+        This Week's Essential Discoveries
+      </h2>
+      <p class="text-xs text-zinc-400 leading-relaxed">
+        The top-ranked developments across 37 channels. Tap to expand the complete 20-video briefing or scroll down to browse individual channel digests.
+      </p>
+      <div class="pt-2 flex items-center gap-3 text-xs">
+        <button class="px-3 py-1.5 rounded-lg bg-amber-500 text-black font-semibold">View Top 20 Rankings ↓</button>
+        <span class="text-zinc-500">Purges automatically after 2 weeks</span>
+      </div>
+    </section>
+
+    <!-- Source Article 1 (Andrej Karpathy) -->
+    <article class="space-y-6 border-b border-zinc-800/80 pb-12">
+      <div class="font-sans space-y-1">
+        <div class="flex items-center gap-2 text-xs text-zinc-500 font-mono">
+          <span class="text-indigo-400 font-medium">Tech & AI</span>
+          <span>·</span>
+          <span>2 Videos</span>
+          <span>·</span>
+          <span>1.68M Subs</span>
+        </div>
+        <h2 class="text-3xl font-bold text-white tracking-tight font-serif">Andrej Karpathy</h2>
+      </div>
+
+      <!-- In-line Zen Audio Bar (Shown ONLY for multi-video channels) -->
+      <div class="p-3.5 rounded-xl bg-[#181a22] border border-indigo-500/30 font-sans flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <button class="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold">▶</button>
+          <div>
+            <div class="text-xs font-bold text-white">Audio Overview · 14m 32s</div>
+            <div class="text-[11px] text-zinc-400">Tokenizers & LLM Pre-training Grounded Briefing</div>
+          </div>
+        </div>
+        <a href="#" class="text-xs text-indigo-400 hover:underline">Download MP3</a>
+      </div>
+
+      <!-- Markdown Prose Reading Body -->
+      <div class="text-base text-zinc-300 leading-relaxed space-y-4">
+        <p class="first-letter:text-4xl first-letter:font-bold first-letter:float-left first-letter:mr-2 first-letter:text-indigo-400">
+          Karpathy provides a rigorous mechanical walkthrough of why tokenization remains the most treacherous abstraction layer in modern machine learning. While attention mechanisms operate on floating-point vectors, the discrete vocabulary mapping creates silent failure modes across language modeling benchmarks.
+        </p>
+        <p>
+          In his two-hour implementation from bare Python bytes, he highlights how whitespace handling in regular expression splits alters token merge sequences, and why small changes in tokenizer pre-tokenization regexes can trigger catastrophic performance degradation.
+        </p>
+      </div>
+
+      <div class="font-sans text-xs flex items-center justify-between pt-2">
+        <a href="https://youtube.com" target="_blank" class="text-indigo-400 hover:underline">Watch original videos on YouTube ↗</a>
+        <button class="text-zinc-500 hover:text-zinc-300 flex items-center gap-1">
+          <input type="checkbox" class="rounded bg-zinc-800 border-zinc-700"> Mark as read
+        </button>
+      </div>
+    </article>
+
+  </main>
+
+  <!-- Floating Bottom Sticky Audio Player -->
+  <aside class="fixed bottom-4 left-1/2 -translate-x-1/2 max-w-xl w-[92%] bg-[#1c1f26]/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl shadow-2xl p-3 flex items-center justify-between gap-4 font-sans z-30">
+    <button class="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 shadow">▶</button>
+    <div class="flex-1 min-w-0">
+      <div class="text-xs font-bold text-white truncate">Playing: Andrej Karpathy — Tokenizers & Pre-training</div>
+      <div class="w-full bg-zinc-800 h-1 rounded-full mt-1.5 overflow-hidden">
+        <div class="bg-indigo-500 h-full w-[25%]"></div>
+      </div>
+    </div>
+    <div class="text-xs font-mono text-zinc-400 flex items-center gap-2 flex-shrink-0">
+      <span>03:45 / 14:32</span>
+      <button class="hover:text-white px-1.5 py-0.5 rounded bg-zinc-800">1.25x</button>
+    </div>
+  </aside>
+
+</body>
+</html>

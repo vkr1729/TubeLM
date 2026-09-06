@@ -30,8 +30,10 @@ async def test_each_channel_is_checkpointed_before_the_next_is_processed(tmp_pat
         recipient_email="to@example.com",
         sources_file=tmp_path / "sources.json",
         state_file=tmp_path / "state.json",
+        deploy_to_gh_pages=False,
     )
 
+    monkeypatch.setattr(main.paths, "get_site_dir", lambda: tmp_path / "site")
     monkeypatch.setattr(main, "load_config", lambda: cfg)
     monkeypatch.setattr(main, "load_sources", lambda _: ["first", "second"])
     monkeypatch.setattr(main, "create_handler", lambda source, _: handlers[0] if source == "first" else handlers[1])
@@ -123,8 +125,10 @@ async def test_interim_top10_triggered_at_seventy_percent_and_final_after_fast_r
         sources_file=tmp_path / "sources.json",
         state_file=tmp_path / "state.json",
         generate_top10_digest=True,
+        deploy_to_gh_pages=False,
     )
 
+    monkeypatch.setattr(main.paths, "get_site_dir", lambda: tmp_path / "site")
     import email_service
     monkeypatch.setattr(email_service, "verify_smtp_connection", lambda _: None)
     monkeypatch.setattr(main, "send_channel_email", lambda *_: None)

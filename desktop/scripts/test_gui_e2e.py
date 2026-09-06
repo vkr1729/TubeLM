@@ -113,6 +113,13 @@ try:
     assert "artifacts" in digests
     print("✅ OK")
 
+    # F. Audit /reader
+    print(" -> GET /reader ... ", end="")
+    resp = requests.get(f"{BASE_URL}/reader", timeout=10)
+    resp.raise_for_status()
+    assert "TubeLM" in resp.text
+    print("✅ OK")
+
 except Exception as e:
     print(f"❌ FAILED: API verification error: {e}")
     try:

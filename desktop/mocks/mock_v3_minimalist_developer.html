@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TubeLM Reader — Mock V3 (Minimalist Developer Console)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            mono: ['JetBrains Mono', 'monospace'],
+            sans: ['Inter', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-[#050505] text-[#d4d4d8] font-mono antialiased min-h-screen flex flex-col text-xs">
+
+  <!-- Status Bar Header -->
+  <header class="border-b border-zinc-800 bg-[#09090b] px-4 py-2 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="font-bold text-cyan-400 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-cyan-500 animate-ping"></span>
+        TUBELM_CONSOLE v4.0
+      </span>
+      <span class="text-zinc-600">|</span>
+      <span class="text-zinc-400">[WEEK 36 · CURRENT]</span>
+      <span class="text-zinc-600">|</span>
+      <span class="text-emerald-400">STATUS: 37 SOURCES SYNCED · 2-WK PURGE ACTIVE</span>
+    </div>
+
+    <div class="flex items-center gap-3 text-[11px]">
+      <span class="text-zinc-500">SHORTCUTS: <kbd class="px-1 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300">/</kbd> SEARCH <kbd class="px-1 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300">J/K</kbd> NAV</span>
+      <a href="feed.xml" class="text-cyan-400 hover:underline">[RSS_XML]</a>
+    </div>
+  </header>
+
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- Left Navigation Index (Terminal Tree Style) -->
+    <aside class="w-80 border-r border-zinc-800 bg-[#070709] flex flex-col">
+      <div class="p-2 border-b border-zinc-800">
+        <input type="text" placeholder="grep sources... [/]" class="w-full bg-[#121215] border border-zinc-800 rounded px-2 py-1 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-cyan-500">
+      </div>
+
+      <div class="p-2 overflow-y-auto flex-1 space-y-1">
+        <div class="px-2 py-1 font-bold text-cyan-400 flex items-center justify-between">
+          <span>> 00_EXECUTIVE_TOP_20</span>
+          <span class="text-[10px] text-zinc-500">[RANKINGS]</span>
+        </div>
+
+        <div class="pt-2 pb-1 px-2 text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">// CATEGORIES: TECH (11)</div>
+        <div class="pl-2 space-y-0.5">
+          <div class="p-1.5 rounded bg-cyan-950/30 border border-cyan-500/30 text-cyan-300 flex items-center justify-between cursor-pointer">
+            <span>Andrej Karpathy</span>
+            <span class="text-[10px] text-purple-400">[AUDIO:14m]</span>
+          </div>
+          <div class="p-1.5 rounded hover:bg-zinc-900 text-zinc-400 hover:text-zinc-200 flex items-center justify-between cursor-pointer">
+            <span>ByteByteGo</span>
+            <span class="text-[10px] text-zinc-600">[1-VID]</span>
+          </div>
+          <div class="p-1.5 rounded hover:bg-zinc-900 text-zinc-400 hover:text-zinc-200 flex items-center justify-between cursor-pointer">
+            <span>Machine Learning Street Talk</span>
+            <span class="text-[10px] text-zinc-600">[1-VID]</span>
+          </div>
+        </div>
+
+        <div class="pt-2 pb-1 px-2 text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">// CATEGORIES: HEALTH (10)</div>
+        <div class="pl-2 space-y-0.5">
+          <div class="p-1.5 rounded hover:bg-zinc-900 text-zinc-400 hover:text-zinc-200 flex items-center justify-between cursor-pointer">
+            <span>Physionic</span>
+            <span class="text-[10px] text-purple-400">[AUDIO:11m]</span>
+          </div>
+          <div class="p-1.5 rounded hover:bg-zinc-900 text-zinc-400 hover:text-zinc-200 flex items-center justify-between cursor-pointer">
+            <span>Peter Attia MD</span>
+            <span class="text-[10px] text-zinc-600">[1-VID]</span>
+          </div>
+          <div class="p-1.5 rounded hover:bg-zinc-900 text-zinc-400 hover:text-zinc-200 flex items-center justify-between cursor-pointer">
+            <span>Nutrition Made Simple!</span>
+            <span class="text-[10px] text-zinc-600">[1-VID]</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right Pane: Terminal Display Canvas -->
+    <main class="flex-1 overflow-y-auto p-6 space-y-6">
+
+      <div class="border border-zinc-800 p-4 rounded bg-[#09090c]">
+        <div class="flex items-center justify-between border-b border-zinc-800 pb-2 mb-3">
+          <span class="text-zinc-400 font-bold">SOURCE: Andrej Karpathy (ID: UCXUPKJO5MZQN11PqgIvyuvQ)</span>
+          <span class="text-emerald-400">[NOTEBOOKLM_PUBLIC: TRUE]</span>
+        </div>
+
+        <!-- CLI Audio Player (Only when multi-video audio is generated) -->
+        <div class="p-3 bg-black border border-purple-500/40 rounded mb-4">
+          <div class="flex items-center justify-between text-[11px] mb-2">
+            <span class="text-purple-400 font-bold">[AUDIO_OVERVIEW: TOKENIZERS_AND_PRETRAINING]</span>
+            <span class="text-zinc-500">14:32 // 1.25x SPEED</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <button class="px-2 py-0.5 bg-purple-600 text-white rounded font-bold hover:bg-purple-500">[PLAY]</button>
+            <span class="text-zinc-400 text-[10px]">04:15 [=========>-------------------------] 14:32</span>
+            <button class="text-zinc-400 hover:text-white ml-auto">[DOWNLOAD_MP3]</button>
+          </div>
+        </div>
+
+        <div class="space-y-3 font-sans text-xs leading-relaxed text-zinc-300">
+          <div class="font-mono text-cyan-400 font-bold text-xs">== GROUNDED BRIEFING NOTES ==</div>
+          <p>Karpathy examines the mechanical boundary between Unicode text encoding and transformer embedding matrices. He demonstrates that common LLM anomalies—including inability to spell words in reverse, arithmetic degradation on long numbers, and token sensitivity—originate entirely within the BPE compression algorithm rather than transformer attention.</p>
+        </div>
+      </div>
+
+    </main>
+
+  </div>
+</body>
+</html>

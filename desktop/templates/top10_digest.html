@@ -45,6 +45,9 @@
                 </span>
               </div>
               <h1 class="hero-title" style="margin:18px 0 0;color:#f8f8f4;font-size:48px;line-height:49px;letter-spacing:-.05em;font-weight:780;">The Editor's<br>Top {{ selection['items'] | length }}</h1>
+              <div style="margin-top:24px;">
+                <a class="cta" href="https://vkr1729.github.io/TubeLM/" target="_blank" style="display:inline-block;padding:13px 22px;background:#6366f1;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;line-height:18px;font-weight:800;letter-spacing:.02em;">Open Full Web Reader &amp; Audio Overviews &nbsp;→</a>
+              </div>
             </td>
           </tr>
 
@@ -52,7 +55,7 @@
             <td style="padding:18px 44px;background:#22231f;border-top:1px solid #32332e;border-bottom:1px solid #32332e;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td style="color:#f8f8f4;font-size:13px;line-height:19px;font-weight:750;">{{ selection['items'] | length }} essential picks</td>
+                  <td style="color:#f8f8f4;font-size:13px;line-height:19px;font-weight:750;">{{ selection['items'] | length }} essential picks · Tiered Ranking</td>
                   <td align="right" style="color:#8d8f86;font-size:12px;line-height:19px;">
                     {% if selection.is_interim %}
                       from {{ selection.candidate_count }} items (Early Edition)
@@ -68,6 +71,15 @@
           <tr>
             <td class="content-pad" style="padding:36px 34px 42px;">
               {% for item in selection['items'] %}
+              {% if loop.index == 1 %}
+              <div style="margin:0 0 16px;padding:8px 12px;background:#eef2ff;border-left:4px solid #6366f1;color:#3730a3;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">
+                Tier 1: Top 10 Must-Watch Editor's Picks
+              </div>
+              {% elif loop.index == 11 %}
+              <div style="margin:28px 0 16px;padding:8px 12px;background:#f3f4f6;border-left:4px solid #9ca3af;color:#374151;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">
+                Tier 2: Next 10 Notable Developments
+              </div>
+              {% endif %}
               {% set is_top_pick = loop.index == 1 %}
               {% set is_video = item.source_type == 'youtube' %}
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;background:{% if is_top_pick %}#f1f8d8{% else %}#ffffff{% endif %};border:1px solid {% if is_top_pick %}#b8ca77{% else %}#dcddd6{% endif %};border-radius:10px;overflow:hidden;">

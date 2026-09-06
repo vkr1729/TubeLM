@@ -127,6 +127,19 @@ async def _start_or_poll_audio(client, entry: dict) -> str:
         entry["artifact_title"] = (artifact.title or "").strip()
         if artifact.is_completed:
             entry["state"] = "completed"
+            try:
+                audio_dir = paths.get_audio_dir()
+                audio_dir.mkdir(parents=True, exist_ok=True)
+                safe_name = paths.safe_channel_name(entry.get("source_name", "source"))
+                week_key = entry.get("week_start") or "current"
+                audio_filename = f"{week_key}_{safe_name}.mp3"
+                audio_path = audio_dir / audio_filename
+                if not audio_path.exists():
+                    logger.info("Downloading completed Audio Overview for %s...", safe_name)
+                    await client.artifacts.download_audio(entry["notebook_id"], str(audio_path), artifact.id)
+                entry["audio_file"] = audio_filename
+            except Exception:
+                logger.warning("Could not download audio overview for %s", entry.get("source_name"), exc_info=True)
             return "completed"
         entry["state"] = "processing"
         return "processing"
