@@ -563,6 +563,7 @@ def schedule_artifacts_after_delivery(
             channel_order=channel_order,
             source_ids=result.get("source_ids", []),
             instructions=result.get("audio_instructions", ""),
+            run_date=result.get("run_date") or date.today().isoformat(),
         )
     else:
         result["audio_status"] = "skipped_single_source"
@@ -578,6 +579,33 @@ def schedule_artifacts_after_delivery(
             audio_instructions=result.get("audio_instructions", ""),
             not_before=datetime.now(timezone.utc),
         )
+
+
+_DIGEST_TITLE = re.compile(r"^(?P<name>.+) Digest — (?P<date>\d{4}-\d{2}-\d{2})$")
+
+
+async def prune_stale_digest_notebooks(client, max_age_days: int = 14) -> int:
+    cutoff = date.today() - timedelta(days=max_age_days)
+    deleted = 0
+    try:
+        notebooks = await client.notebooks.list()
+    except Exception:
+        logger.exception("Could not list notebooks for stale prune.")
+        return 0
+    for nb in notebooks:
+        m = _DIGEST_TITLE.match(nb.title or "")
+        if m:
+            try:
+                nb_date = date.fromisoformat(m.group("date"))
+            except ValueError:
+                continue
+            if nb_date < cutoff:
+                try:
+                    await client.notebooks.delete(nb.id)
+                    deleted += 1
+                except Exception:
+                    logger.warning("Could not delete stale notebook %s", nb.id)
+    return deleted
 
 
 def _source_identity(title: str | None, url: str | None) -> tuple[str, str]:
@@ -721,6 +749,7 @@ async def process_source_items(
 
     result: dict = {
         "channel_name": source_name,
+        "run_date": today,
         "source_type": handler.source_type,
         "notebook_url": "",
         "notebook_id": "",

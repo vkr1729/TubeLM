@@ -23,7 +23,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
   <script>
     (() => {
       let savedTheme = null;
@@ -56,6 +55,18 @@
       --scrollbar-thumb: rgba(243, 243, 236, 0.14);
       --scrollbar-track: #11120f;
       --soft-hover: rgba(255, 255, 255, 0.04);
+      --summary-font-size: 15px;
+      --summary-line-height: 1.65;
+    }
+
+    :root[data-font="small"] {
+      --summary-font-size: 13px;
+      --summary-line-height: 1.6;
+    }
+
+    :root[data-font="large"] {
+      --summary-font-size: 17px;
+      --summary-line-height: 1.7;
     }
 
     :root[data-theme="light"] {
@@ -159,34 +170,40 @@
     .week-switcher {
       display: flex;
       align-items: center;
+      background: transparent;
+    }
+
+    .week-select {
       background: var(--card-bg);
+      color: var(--text-primary);
       border: 1px solid var(--border-color);
       border-radius: 8px;
-      padding: 2px;
-    }
-
-    .week-btn {
-      padding: 5px 12px;
-      border-radius: 6px;
-      border: none;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      background: transparent;
-      color: var(--text-secondary);
-      font-family: inherit;
-      transition: all 0.16s ease;
-    }
-
-    .week-btn.active {
-      background: var(--accent);
-      color: var(--accent-text);
+      padding: 5px 24px 5px 9px;
+      font-size: 11px;
       font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 7px center;
+      transition: all 0.16s ease;
+      max-width: 130px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      overflow: hidden;
     }
 
-    :root[data-theme="light"] .week-btn.active {
-      background: #171815;
-      color: #d9ff63;
+    .week-select:hover, .week-select:focus {
+      border-color: var(--text-muted);
+      background-color: var(--card-bg-hover);
+    }
+
+    :root[data-theme="light"] .week-select {
+      background-color: #ffffff;
+      color: #171815;
     }
 
     /* Theme Toggle */
@@ -489,9 +506,9 @@
     }
 
     .editorial-quote {
-      font-size: 12px;
+      font-size: var(--summary-font-size, 15px);
       color: var(--text-secondary);
-      line-height: 1.5;
+      line-height: var(--summary-line-height, 1.65);
       border-left: 2px solid var(--accent);
       padding-left: 10px;
       font-style: italic;
@@ -837,8 +854,8 @@
       border-top: 1px solid var(--border-color);
       padding-top: 12px;
       margin-top: 12px;
-      font-size: 13px;
-      line-height: 1.6;
+      font-size: var(--summary-font-size, 15px);
+      line-height: var(--summary-line-height, 1.65);
       color: var(--text-secondary);
     }
 
@@ -976,6 +993,60 @@
       border: none !important;
       background: #000000 !important;
     }
+    /* --- utilities formerly from Tailwind Play CDN --- */
+    .hidden{display:none!important}.flex{display:flex}.inline-flex{display:inline-flex}.block{display:block}
+    .flex-1{flex:1 1 0%}.flex-col{flex-direction:column}.items-center{align-items:center}.items-baseline{align-items:baseline}
+    .justify-between{justify-content:space-between}.justify-center{justify-content:center}.flex-shrink-0{flex-shrink:0}
+    .gap-1{gap:4px}.gap-1\.5{gap:6px}.gap-2{gap:8px}.gap-4{gap:16px}
+    .space-y-1>*+*{margin-top:4px}.space-y-2>*+*{margin-top:8px}.space-y-4>*+*{margin-top:16px}.space-y-6>*+*{margin-top:24px}
+    .p-2{padding:8px}.p-3{padding:12px}.p-4{padding:16px}.px-2{padding-left:8px;padding-right:8px}.px-4{padding-left:16px;padding-right:16px}
+    .py-1{padding-top:4px;padding-bottom:4px}.py-3{padding-top:12px;padding-bottom:12px}.py-6{padding-top:24px;padding-bottom:24px}.py-20{padding-top:80px;padding-bottom:80px}
+    .pt-2{padding-top:8px}.pb-0\.5{padding-bottom:2px}.pb-1{padding-bottom:4px}.pb-2{padding-bottom:8px}.pb-4{padding-bottom:16px}
+    .mb-1{margin-bottom:4px}.mb-1\.5{margin-bottom:6px}.mb-4{margin-bottom:16px}.mt-1{margin-top:4px}.mx-auto{margin-left:auto;margin-right:auto}
+    .w-full{width:100%}.w-px{width:1px}.h-4{height:16px}.h-full{height:100%}.max-w-4xl{max-width:56rem}.max-w-\[75\%\]{max-width:75%}
+    .overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.overflow-x-auto{overflow-x:auto}.relative{position:relative}.fixed{position:fixed}.inset-0{inset:0}.z-50{z-index:50}
+    .rounded-xl{border-radius:12px}.border{border-width:1px;border-style:solid}.border-b{border-bottom:1px solid}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .text-xs{font-size:12px;line-height:16px}.text-sm{font-size:14px;line-height:20px}.text-2xl{font-size:24px;line-height:32px}.text-\[10px\]{font-size:10px}.text-\[11px\]{font-size:11px}
+    .font-mono{font-family:'JetBrains Mono',ui-monospace,monospace}.font-semibold{font-weight:600}.font-bold{font-weight:700}.uppercase{text-transform:uppercase}.tracking-tight{letter-spacing:-.025em}.tracking-wider{letter-spacing:.05em}
+    .text-center{text-align:center}.text-white{color:#fff}.text-gray-400{color:#9ca3af}.text-amber-400{color:#fbbf24}
+    .aspect-video{aspect-ratio:16/9}.bg-black{background:#000}.bg-black\/80{background:rgba(0,0,0,.8)}.backdrop-blur-sm{backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}.shadow-2xl{box-shadow:0 25px 50px -12px rgba(0,0,0,.5)}
+    .w-3\.5{width:14px}.h-3\.5{height:14px}.w-72{width:18rem}.w-80{width:20rem}
+    .text-\[var\(--text-muted\)\]{color:var(--text-muted)}.text-\[var\(--text-primary\)\]{color:var(--text-primary)}.text-\[var\(--success\)\]{color:var(--success)}
+    .border-\[var\(--border-color\)\]{border-color:var(--border-color)}.bg-\[\#11120f\]{background:#11120f}.bg-\[\#171815\]{background:#171815}
+    .hover\:text-white:hover{color:#fff}
+    @media(min-width:640px){.sm\:inline{display:inline}.sm\:block{display:block}.sm\:flex-row{flex-direction:row}.sm\:items-center{align-items:center}.sm\:gap-3{gap:12px}}
+    @media(min-width:768px){.md\:block{display:block}.md\:hidden{display:none!important}.md\:w-72{width:18rem}}
+    @media(min-width:1024px){.lg\:w-80{width:20rem}}
+    /* --- feature: mini-player, brief mode, seen/sinking --- */
+    .opacity-60{opacity:.6}
+    .mini-player{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;align-items:center;gap:10px;
+      height:calc(56px + env(safe-area-inset-bottom, 0px));padding:0 12px env(safe-area-inset-bottom, 0px);
+      background:var(--sidebar-bg);border-top:1px solid var(--border-color)}
+    .mini-progress{position:absolute;top:0;left:0;height:3px;width:0%;background:var(--accent)}
+    .mini-art{width:36px;height:36px;border-radius:8px;background:var(--accent);color:#171815;font-weight:800;
+      display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer}
+    .mini-meta{flex:1 1 0%;min-width:0;cursor:pointer}
+    .mini-title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .mini-sub{font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',ui-monospace,monospace}
+    .mini-btn{background:none;border:none;color:var(--text-primary);font-size:18px;cursor:pointer;padding:6px;flex-shrink:0}
+    .mini-speed{font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;border:1px solid var(--border-color);
+      border-radius:8px;padding:4px 8px;background:none;color:var(--text-primary);cursor:pointer;flex-shrink:0}
+    body.mini-visible #reading-pane,body.mini-visible #sidebar-list{padding-bottom:72px}
+    .btn-play-all{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
+      padding:3px 8px;color:var(--text-primary);cursor:pointer;white-space:nowrap}
+    .btn-play-all:hover{border-color:var(--border-focus)}
+    .heard-badge{font-size:10px;color:var(--accent-ink)}
+    .pill-mins{font-size:10px;color:var(--text-muted);margin-left:2px}
+    .cat-pill.active-mode{border-color:var(--border-focus);color:var(--accent-ink)}
+    .brief-section{border:1px solid var(--border-color);border-radius:12px;padding:14px 16px;background:var(--card-bg)}
+    .brief-lead{font-size:var(--summary-font-size, 15px);line-height:var(--summary-line-height, 1.65);color:var(--text-secondary);margin-top:6px}
+    .brief-full{margin-top:8px}
+    .brief-sticky{position:sticky;bottom:0;padding:12px 0 4px;background:linear-gradient(transparent,var(--bg-dark) 40%)}
+    .seen-tag{font-size:10px;color:var(--success);border:1px solid var(--border-color);border-radius:6px;padding:1px 6px}
+    .btn-seen{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
+      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
+    .pref-chip{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
+      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
   </style>
 </head>
 <body>
@@ -988,22 +1059,21 @@
     </div>
 
     <!-- Controls -->
-    <div class="flex items-center gap-2 sm:gap-3">
+    <div class="flex items-center gap-1.5 sm:gap-2">
       <div class="week-switcher">
-        <button id="btn-week-current" onclick="switchWeek('current')" class="week-btn active">
-          Current Week
-        </button>
-        <button id="btn-week-prev" onclick="switchWeek('prev')" class="week-btn">
-          Previous Week
-        </button>
+        <select id="week-selector" onchange="switchWeek(this.value)" class="week-select" title="Select digest week">
+          <option value="current" selected>Current Week</option>
+          <option value="prev">Previous Week</option>
+        </select>
+        <button id="btn-week-current" onclick="switchWeek('current')" style="display:none" class="week-btn active"></button>
+        <button id="btn-week-prev" onclick="switchWeek('prev')" style="display:none" class="week-btn"></button>
       </div>
 
-      <div class="h-4 w-px hidden sm:block" style="background: var(--border-color);"></div>
-
-      <a href="feed.xml" target="_blank" class="btn-secondary text-xs !py-1 !px-2.5" title="RSS Feed">
+      <a href="feed.xml" target="_blank" class="theme-toggle-btn" title="RSS Feed">
         <svg class="w-3.5 h-3.5 text-amber-400" fill="currentColor" viewBox="0 0 24 24"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83c0-8.59-6.97-15.56-15.56-15.56zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg>
-        <span class="hidden sm:inline">RSS</span>
       </a>
+
+      <button id="btn-font-size" onclick="cycleFontSize()" class="theme-toggle-btn text-xs font-semibold" title="Adjust text size">Aa</button>
 
       <button id="theme-toggle" onclick="toggleTheme()" class="theme-toggle-btn" title="Toggle theme">
         <svg id="theme-icon-sun" class="hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 9h-1m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
@@ -1034,6 +1104,7 @@
           <button onclick="setCategory('tech')" id="cat-tech" class="cat-pill">Tech</button>
           <button onclick="setCategory('health')" id="cat-health" class="cat-pill">Health</button>
           <button onclick="setCategory('deep_explainer')" id="cat-deep_explainer" class="cat-pill">Explainer</button>
+          <button onclick="toggleBriefMode()" id="mode-brief" class="cat-pill" title="5-minute brief">Brief</button>
         </div>
       </div>
 
@@ -1056,6 +1127,10 @@
           <span>Sources (<span id="visible-channels-count">0</span>)</span>
           <span id="unread-count" class="font-semibold" style="color: var(--accent-ink);"></span>
         </div>
+        <div class="px-2 pb-1 flex items-center justify-between gap-2">
+          <span id="unread-summary" class="text-[10px] font-mono text-[var(--text-muted)]"></span>
+          <button id="btn-play-all" onclick="playAllUnheard()" class="btn-play-all" title="Play all unheard overviews">▶ Play all unheard</button>
+        </div>
 
         <div id="channels-container" class="space-y-1">
           <!-- Populated from JS -->
@@ -1070,6 +1145,20 @@
 
   </div>
 
+  <!-- Mini Player Bar -->
+  <div id="miniPlayer" class="mini-player hidden">
+    <div id="mini-progress" class="mini-progress"></div>
+    <div class="mini-art" onclick="openMiniTrack()" title="Open channel">TL</div>
+    <div class="mini-meta" onclick="openMiniTrack()">
+      <div id="mini-title" class="mini-title">—</div>
+      <div id="mini-sub" class="mini-sub">—</div>
+    </div>
+    <button class="mini-btn" onclick="queuePrev()" title="Previous">⏮</button>
+    <button class="mini-btn" id="mini-play" onclick="toggleMiniPlay()" title="Play / Pause">⏯</button>
+    <button class="mini-btn" onclick="queueNext()" title="Next">⏭</button>
+    <button class="mini-speed" id="mini-speed" onclick="cyclePlayerSpeed()" title="Playback speed">1x</button>
+  </div>
+
   <!-- Global Audio Element -->
   <audio id="global-audio-element" preload="none"></audio>
 
@@ -1080,6 +1169,7 @@
     let currentCategoryId = 'all';
     let selectedItemId = 'top20';
     let isAudioPlaying = false;
+    function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
     let readIds = new Set([
       ...(SITE_DATA.read_ids || []),
       ...JSON.parse(localStorage.getItem('tubelm_read_ids') || '[]')
@@ -1134,13 +1224,17 @@
       }
       saveReadState(canonicalKey, nowRead);
       renderSidebar();
-      renderActiveView();
+      const btn = document.querySelector('[data-role="read-toggle"]'); if (btn) btn.textContent = nowRead ? 'Mark as Unread' : 'Mark as Read ✓';
     }
 
     function switchWeek(weekKey) {
       currentWeekKey = weekKey;
-      document.getElementById('btn-week-current').className = weekKey === 'current' ? 'week-btn active' : 'week-btn';
-      document.getElementById('btn-week-prev').className = weekKey === 'prev' ? 'week-btn active' : 'week-btn';
+      const sel = document.getElementById('week-selector');
+      if (sel && sel.value !== weekKey) sel.value = weekKey;
+      const bCurr = document.getElementById('btn-week-current');
+      if (bCurr) bCurr.className = weekKey === 'current' ? 'week-btn active' : 'week-btn';
+      const bPrev = document.getElementById('btn-week-prev');
+      if (bPrev) bPrev.className = weekKey === 'prev' ? 'week-btn active' : 'week-btn';
       renderSidebar();
       selectTop20();
     }
@@ -1195,6 +1289,7 @@
     });
 
     function selectTop20() {
+      if (briefMode) setBriefMode(false);
       selectedItemId = 'top20';
       document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
       const top20Btn = document.getElementById('item-top20');
@@ -1206,6 +1301,7 @@
     }
 
     function selectChannel(chId) {
+      if (briefMode) setBriefMode(false);
       selectedItemId = chId;
       document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
       const chBtn = document.getElementById(`item-${chId}`);
@@ -1216,59 +1312,101 @@
       showReadingPaneMobile();
     }
 
-    function renderSidebar() {
-      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [], top20: { items: [] } };
+    function filteredChannels() {
+      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
       const channels = weekData.channels || [];
       const query = (document.getElementById('filter-search').value || '').toLowerCase().trim();
+      return channels.filter(ch =>
+        (currentCategoryId === 'all' || ch.category === currentCategoryId) &&
+        (!query || (ch.name || '').toLowerCase().includes(query))
+      );
+    }
 
+    function renderSidebar() {
       const container = document.getElementById('channels-container');
       container.innerHTML = '';
 
-      let visibleCount = 0;
-      let unreadCount = 0;
+      const filtered = filteredChannels();
+      const unreadChannels = filtered.filter(ch => !isChannelRead(ch.id));
+      const readChannels = filtered.filter(ch => isChannelRead(ch.id));
+      const sortedChannels = [...unreadChannels, ...readChannels];
 
-      channels.forEach(ch => {
-        const matchesCategory = (currentCategoryId === 'all' || ch.category === currentCategoryId);
-        const matchesSearch = !query || ch.name.toLowerCase().includes(query);
-
-        if (matchesCategory && matchesSearch) {
-          visibleCount++;
-          const isRead = isChannelRead(ch.id);
-          if (!isRead) unreadCount++;
-
-          const btn = document.createElement('button');
-          btn.id = `item-${ch.id}`;
-          const isSelected = selectedItemId === ch.id;
-          btn.className = `sidebar-item ${isSelected ? 'active' : ''} ${isRead ? 'is-read' : ''}`;
-          btn.onclick = () => selectChannel(ch.id);
-
-          const audioBadge = ch.has_audio ? `<span class="badge-audio">Audio</span>` : '';
-          const readIndicator = isRead 
-            ? `<span class="text-[10px] text-[var(--success)]">✓</span>` 
-            : `<span class="unread-dot"></span>`;
-
-          btn.innerHTML = `
-            <div class="sidebar-item-header">
-              <span class="sidebar-item-name">${ch.name}</span>
-              <div class="flex items-center gap-1.5 flex-shrink-0">
-                ${audioBadge}
-                ${readIndicator}
-              </div>
-            </div>
-            <div class="sidebar-item-meta">
-              <span>${ch.video_count || 1} video${(ch.video_count || 1) > 1 ? 's' : ''}</span>
-              <span>${ch.subscribers || ''}</span>
-            </div>
-          `;
-          container.appendChild(btn);
-        }
+      let unreadReadMin = 0;
+      let unreadAudioSec = 0;
+      unreadChannels.forEach(ch => {
+        unreadReadMin += (ch.read_minutes || 0);
+        unreadAudioSec += (ch.audio_seconds || ch.summary_audio_seconds || 0);
       });
 
-      document.getElementById('visible-channels-count').textContent = visibleCount;
-      document.getElementById('unread-count').textContent = unreadCount > 0 ? `${unreadCount} unread` : 'All read ✓';
+      sortedChannels.forEach(ch => {
+        const isRead = isChannelRead(ch.id);
+        const btn = document.createElement('button');
+        btn.id = `item-${ch.id}`;
+        const isSelected = selectedItemId === ch.id;
+        btn.className = `sidebar-item ${isSelected ? 'active' : ''} ${isRead ? 'is-read' : ''}`;
+        btn.onclick = () => selectChannel(ch.id);
+
+        const audioBadge = ch.has_audio
+          ? `<span class="badge-audio">Audio</span>`
+          : (ch.summary_audio_url ? `<span class="badge-audio" style="opacity:0.85">TTS</span>` : '');
+        const trackSrc = ch.audio_url || ch.summary_audio_url;
+        const heardBadge = (trackSrc && isHeard(trackSrc)) ? `<span class="heard-badge">♪ heard</span>` : '';
+        const readIndicator = isRead
+          ? `<span class="text-[10px] text-[var(--success)]">✓</span>`
+          : `<span class="unread-dot"></span>`;
+        const readMin = ch.read_minutes ? `~${ch.read_minutes} min` : '';
+        const effSec = ch.audio_seconds || ch.summary_audio_seconds || 0;
+        const audioMin = effSec ? `· ${Math.max(1, Math.round(effSec / 60))}m audio` : '';
+
+        btn.innerHTML = `
+          <div class="sidebar-item-header">
+            <span class="sidebar-item-name">${esc(ch.name)}</span>
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              ${audioBadge}
+              ${heardBadge}
+              ${readIndicator}
+            </div>
+          </div>
+          <div class="sidebar-item-meta">
+            <span>${ch.video_count || 1} video${(ch.video_count || 1) > 1 ? 's' : ''}</span>
+            ${readMin ? `<span>${readMin}</span>` : ''}
+            ${audioMin ? `<span>${audioMin}</span>` : ''}
+            <span>${esc(ch.subscribers || '')}</span>
+          </div>
+        `;
+        container.appendChild(btn);
+      });
+
+      document.getElementById('visible-channels-count').textContent = filtered.length;
+      document.getElementById('unread-count').textContent = unreadChannels.length > 0 ? `${unreadChannels.length} unread` : 'All read ✓';
+      const sumEl = document.getElementById('unread-summary');
+      if (sumEl) {
+        sumEl.textContent = unreadChannels.length > 0
+          ? `Unread: ${unreadChannels.length} channels · ${unreadReadMin} min · ${fmtAudioDur(unreadAudioSec)} audio`
+          : '';
+      }
+      updatePillMinutes();
+      updateBriefButton();
+      updateMiniPlayer();
+    }
+
+    function updatePillMinutes() {
+      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
+      const channels = weekData.channels || [];
+      const base = { all: 'All', tech: 'Tech', health: 'Health', deep_explainer: 'Explainer' };
+      Object.keys(base).forEach(cat => {
+        const btn = document.getElementById(`cat-${cat}`);
+        if (!btn) return;
+        let mins = 0;
+        channels.forEach(ch => {
+          if ((cat === 'all' || ch.category === cat) && !isChannelRead(ch.id)) mins += (ch.read_minutes || 0);
+        });
+        btn.innerHTML = mins > 0 ? `${esc(base[cat])}<span class="pill-mins">${mins}m</span>` : esc(base[cat]);
+      });
     }
 
     function renderActiveView() {
+      activePlayerWrapper = null;
       const pane = document.getElementById('reading-pane');
       const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [], top20: { items: [] } };
 
@@ -1281,46 +1419,61 @@
         </div>
       `;
 
+      if (briefMode) {
+        pane.innerHTML = renderBriefView(weekData, mobileBackNav);
+        return;
+      }
       if (selectedItemId === 'top20') {
         const top20 = weekData.top20 || { items: [] };
         const items = top20.items || [];
-        const top10 = items.slice(0, 10);
-        const next10 = items.slice(10, 20);
+        const unreadPicks = items.filter(it => !isTopItemRead(it.video_id || it.url));
+        const readPicks = items.filter(it => isTopItemRead(it.video_id || it.url));
+        const sortedPicks = hideSeen ? unreadPicks : [...unreadPicks, ...readPicks];
+        const seenCount = readPicks.length;
+        const weekLine = `This week: ${weekData.total_read_minutes || 0} min · ${fmtAudioDur(weekData.total_audio_seconds || 0)} audio`;
 
         let html = `
           <article class="max-w-4xl mx-auto space-y-6">
             ${mobileBackNav}
-            <div class="border-b border-[var(--border-color)] pb-4 flex items-baseline justify-between">
-              <h1 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">Editorial Picks</h1>
-              <span class="text-xs font-mono text-[var(--text-muted)]">${weekData.run_date || ''}</span>
+            <div class="border-b border-[var(--border-color)] pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">Editorial Picks</h1>
+                <div class="text-xs text-[var(--text-muted)] mt-1">${esc(weekLine)} · <span>${esc(weekData.run_date || '')}</span></div>
+              </div>
+              <div class="flex items-center gap-2 flex-shrink-0">
+                ${seenCount > 0 ? `<button onclick="toggleHideSeen()" class="btn-secondary text-xs">${hideSeen ? `Show Seen (${seenCount})` : `Hide Seen (${seenCount})`}</button>` : ''}
+              </div>
             </div>
 
-            <!-- Top 10 Cards Grid -->
             <div class="editorial-grid">
         `;
 
-        top10.forEach(item => {
+        sortedPicks.forEach(item => {
           const isVideo = item.source_type === 'youtube';
           const hasVideoId = isVideo && item.video_id;
+          const seen = isTopItemRead(item.video_id || item.url);
+          const key = escapeQuotes(item.video_id || item.url);
           html += `
-            <div class="editorial-card">
+            <div class="editorial-card ${seen ? 'opacity-60' : ''}">
               <div>
                 <div class="flex items-center justify-between text-xs mb-1.5">
                   <span class="editorial-rank">#${String(item.rank).padStart(2, '0')}</span>
-                  <span class="editorial-source">${item.source_name}</span>
+                  <span class="editorial-source">${esc(item.source_name)}</span>
                 </div>
                 <h3 class="editorial-title">
-                  <a href="${item.url}" target="_blank">${item.title}</a>
+                  <a href="${item.url}" target="_blank">${esc(item.title)}</a>
                 </h3>
                 <div class="editorial-quote">
-                  "${item.why_it_matters}"
+                  "${esc(item.why_it_matters)}"
                 </div>
               </div>
               <div class="editorial-footer">
-                <span class="date">${item.published || ''}</span>
+                <span class="date">${esc(item.published || '')}</span>
                 <div class="flex items-center gap-2">
+                  ${seen ? `<span class="seen-tag">✓ Seen</span>` : ''}
+                  <button onclick="toggleTopItemRead('${key}')" class="btn-seen" title="Toggle seen">${seen ? 'Seen ✓' : '✓ Mark Seen'}</button>
                   ${hasVideoId ? `
-                    <button onclick="openVideoModal('${item.video_id}', '${escapeQuotes(item.title)}')" class="btn-play" title="Play Video">
+                    <button onclick="playVideo('${item.video_id}', '${escapeQuotes(item.title)}')" class="btn-play" title="Play Video">
                       Play ▶
                     </button>
                   ` : ''}
@@ -1335,46 +1488,7 @@
 
         html += `
             </div>
-        `;
-
-        if (next10.length > 0) {
-          html += `
-            <!-- Next 10 Compact List -->
-            <div class="compact-list">
-          `;
-
-          next10.forEach(item => {
-            const isVideo = item.source_type === 'youtube';
-            const hasVideoId = isVideo && item.video_id;
-            html += `
-              <div class="compact-row">
-                <span class="compact-rank">#${String(item.rank).padStart(2, '0')}</span>
-                <div class="compact-body">
-                  <div class="compact-title">
-                    <a href="${item.url}" target="_blank">${item.title}</a>
-                  </div>
-                  <div class="compact-desc">${item.source_name} · ${item.why_it_matters}</div>
-                </div>
-                <div class="flex items-center gap-2 flex-shrink-0">
-                  ${hasVideoId ? `
-                    <button onclick="openVideoModal('${item.video_id}', '${escapeQuotes(item.title)}')" class="btn-play" title="Play Video">
-                      Play ▶
-                    </button>
-                  ` : ''}
-                  <a href="${item.url}" target="_blank" class="compact-link">
-                    Open ↗
-                  </a>
-                </div>
-              </div>
-            `;
-          });
-
-          html += `
-            </div>
-          `;
-        }
-
-        html += `</article>`;
+          </article>`;
         pane.innerHTML = html;
       } else {
         // Render Single Channel Digest
@@ -1399,16 +1513,17 @@
               </div>
 
               <div class="audio-controls">
-                <button onclick="toggleAudio('${ch.audio_url}', this)" class="audio-play-btn" title="Play / Pause">
-                  <svg id="play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                <button onclick="playChannelAudio('${ch.id}')" class="audio-play-btn" title="Play / Pause">
+                  <svg id="play-icon" viewBox="0 0 24 24"><path d="${(typeof isAudioPlaying !== 'undefined' && isAudioPlaying && typeof currentAudioSrc !== 'undefined' && currentAudioSrc === ch.audio_url) ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z'}"/></svg>
                 </button>
+                ${(typeof player !== 'undefined' && player.queue.some(t => t.src === ch.audio_url)) ? '' : `<button onclick="enqueueChannel('${ch.id}')" class="btn-seen" title="Add to queue">＋ Queue</button>`}
                 <div class="audio-progress-container">
                   <div class="audio-time-row">
                     <span id="audio-time-current">00:00</span>
-                    <span class="audio-track-title">${ch.name}</span>
+                    <span class="audio-track-title">${esc(ch.name)}</span>
                     <span id="audio-time-duration">--:--</span>
                   </div>
-                  <div class="audio-progress-bar-bg" onclick="seekAudio(event)">
+                  <div class="audio-progress-bar-bg" onclick="seekAudio(event)" data-audio-src="${ch.audio_url}">
                     <div id="audio-progress-bar" class="audio-progress-bar-fill"></div>
                   </div>
                 </div>
@@ -1432,10 +1547,10 @@
               <div class="video-card-header">
                 <div class="w-full">
                   <h3 class="video-card-title">
-                    <a href="${v.url}" target="_blank">${v.title}</a>
+                    <a href="${v.url}" target="_blank">${esc(v.title)}</a>
                   </h3>
                   <div class="video-card-meta">
-                    <span>${v.published || ''}</span>
+                    <span>${esc(v.published || '')}</span>
                     <span>·</span>
                     <a href="${v.url}" target="_blank">Watch on YouTube ↗</a>
                   </div>
@@ -1444,7 +1559,7 @@
 
               ${v.video_id ? `
                 <div id="${playerId}" class="video-player-wrapper">
-                  <div class="video-thumb-cover" style="background-image: url('https://img.youtube.com/vi/${v.video_id}/hqdefault.jpg');" onclick="toggleVideoPlayer('${playerId}', '${v.video_id}', '${safeTitle}')">
+                  <div class="video-thumb-cover" style="background-image: url('https://img.youtube.com/vi/${v.video_id}/hqdefault.jpg');" onclick="playVideo('${v.video_id}', '${safeTitle}')">
                     <div class="video-play-btn-overlay" title="Play Video">
                       <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                     </div>
@@ -1468,17 +1583,18 @@
             ${mobileBackNav}
             <div class="border-b border-[var(--border-color)] pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h1 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">${ch.name}</h1>
+                <h1 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">${esc(ch.name)}</h1>
                 <div class="flex items-center gap-2 mt-1 text-xs text-[var(--text-muted)]">
                   <span>${weekData.run_date}</span>
                   <span>·</span>
                   <span>${ch.videos ? ch.videos.length : 0} videos</span>
-                  ${ch.subscribers ? `<span>·</span><span>${ch.subscribers}</span>` : ''}
+                  ${ch.subscribers ? `<span>·</span><span>${esc(ch.subscribers)}</span>` : ''}
                 </div>
               </div>
 
               <div class="flex items-center gap-2 flex-shrink-0">
-                <button onclick="toggleRead('${ch.id}')" class="btn-secondary">
+                ${ch.summary_audio_url ? `<button onclick="playSummaryAudio('${ch.id}')" class="btn-secondary text-xs" title="Listen to spoken summary">🔊 Listen to Summary</button>` : ''}
+                <button onclick="toggleRead('${ch.id}')" class="btn-secondary" data-role="read-toggle">
                   <span>${isRead ? 'Mark as Unread' : 'Mark as Read ✓'}</span>
                 </button>
                 ${notebookLinkBtn}
@@ -1497,19 +1613,492 @@
       }
     }
 
+    // Shared format helpers
+    function fmtClock(secs) {
+      const s = Math.max(0, Math.floor(Number(secs) || 0));
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    }
+    function fmtAudioDur(sec) {
+      const s = Math.max(0, Math.round(Number(sec) || 0));
+      const h = Math.floor(s / 3600);
+      const m = Math.round((s % 3600) / 60);
+      return h > 0 ? `${h} h ${m}` : `${m} min`;
+    }
+
+    // Heard store (audio tracks listened to 90%+)
+    function heardKey(src) { return 'tubelm_heard:' + src; }
+    function isHeard(src) {
+      if (!src) return false;
+      try { return localStorage.getItem(heardKey(src)) === '1'; } catch (_) { return false; }
+    }
+    function markHeard(src) {
+      if (!src || isHeard(src)) return;
+      try { localStorage.setItem(heardKey(src), '1'); } catch (_) {}
+      renderSidebar();
+    }
+
+    // Top-20 seen store
+    let top20Read = new Set();
+    try { top20Read = new Set(JSON.parse(localStorage.getItem('tubelm_top20_read') || '[]')); }
+    catch (_) { top20Read = new Set(); }
+    let hideSeen = false;
+    try { hideSeen = localStorage.getItem('tubelm_hide_seen') === '1'; } catch (_) {}
+    function saveTop20Read() {
+      try { localStorage.setItem('tubelm_top20_read', JSON.stringify(Array.from(top20Read))); } catch (_) {}
+    }
+    function topItemKey(item) { return item.video_id || item.url; }
+    function isTopItemRead(id) { return top20Read.has(id); }
+    function markTopSeen(id) {
+      if (!id || top20Read.has(id)) return;
+      top20Read.add(id);
+      saveTop20Read();
+    }
+    function toggleTopItemRead(id) {
+      if (top20Read.has(id)) top20Read.delete(id); else top20Read.add(id);
+      saveTop20Read();
+      if (selectedItemId === 'top20' && !briefMode) renderActiveView();
+    }
+    function toggleHideSeen() {
+      hideSeen = !hideSeen;
+      try { localStorage.setItem('tubelm_hide_seen', hideSeen ? '1' : '0'); } catch (_) {}
+      renderActiveView();
+    }
+
+    // Brief mode
+    let briefMode = false;
+    try { briefMode = localStorage.getItem('tubelm_mode') === 'brief'; } catch (_) {}
+    function setBriefMode(on) {
+      briefMode = !!on;
+      try { localStorage.setItem('tubelm_mode', briefMode ? 'brief' : 'full'); } catch (_) {}
+      updateBriefButton();
+      renderActiveView();
+    }
+    function toggleBriefMode() { setBriefMode(!briefMode); }
+    function updateBriefButton() {
+      const btn = document.getElementById('mode-brief');
+      if (btn) btn.classList.toggle('active-mode', briefMode);
+    }
+    function renderBriefView(weekData, mobileBackNav) {
+      const list = filteredChannels().filter(ch => !isChannelRead(ch.id));
+      let sections = '';
+      list.forEach(ch => {
+        const items = (ch.brief && ch.brief.length)
+          ? ch.brief
+          : (ch.videos || []).map(v => ({ title: v.title, url: v.url, video_id: v.video_id, lead: v.lead || '' }));
+        let itemsHtml = '';
+        items.forEach((b, bi) => {
+          itemsHtml += `
+            <div class="mt-3">
+              <a href="${b.url}" target="_blank" style="font-size:14px;font-weight:600">${esc(b.title)}</a>
+              ${b.lead ? `<p class="brief-lead">${esc(b.lead)}</p>` : ''}
+              <button onclick="toggleBriefItem('${ch.id}', ${bi})" class="btn-seen mt-1" id="brief-btn-${ch.id}-${bi}">Read full ↓</button>
+              <div id="brief-full-${ch.id}-${bi}" class="brief-full hidden"></div>
+            </div>`;
+        });
+        const audioBit = (ch.has_audio && ch.audio_seconds) ? ` · ${Math.max(1, Math.round(ch.audio_seconds / 60))}m audio` : '';
+        sections += `
+          <section class="brief-section">
+            <button onclick="selectChannel('${ch.id}')" style="background:none;border:none;cursor:pointer;font-size:15px;font-weight:700;text-align:left;color:var(--text-primary);padding:0">${esc(ch.name)}</button>
+            <div class="text-xs text-[var(--text-muted)] mt-1">~${ch.read_minutes || 1} min${audioBit}
+              ${ch.summary_audio_url ? `<button onclick="playSummaryAudio('${ch.id}')" class="btn-seen" title="Listen to spoken summary">🔊 Listen</button>` : ''}
+            </div>
+            ${itemsHtml}
+          </section>`;
+      });
+      return `
+        <article id="briefView" class="max-w-4xl mx-auto space-y-4">
+          ${mobileBackNav}
+          <div class="border-b border-[var(--border-color)] pb-4">
+            <h1 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">5-Minute Brief</h1>
+            <div class="text-xs text-[var(--text-muted)] mt-1">${list.length} unread channel${list.length === 1 ? '' : 's'}</div>
+          </div>
+          ${sections || `<div class="text-sm text-[var(--text-muted)] py-6">All caught up. ✓</div>`}
+          ${list.length ? `<div class="brief-sticky"><button onclick="markBriefAllRead()" class="btn-primary w-full">Mark all above as read</button></div>` : ''}
+        </article>`;
+    }
+    function toggleBriefItem(chId, bi) {
+      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
+      const ch = (weekData.channels || []).find(c => c.id === chId);
+      const box = document.getElementById(`brief-full-${chId}-${bi}`);
+      const btn = document.getElementById(`brief-btn-${chId}-${bi}`);
+      if (!box || !ch) return;
+      if (box.classList.contains('hidden')) {
+        if (!box.dataset.filled) {
+          const items = (ch.brief && ch.brief.length) ? ch.brief : [];
+          const b = items[bi] || {};
+          const full = (ch.videos || []).find(v => v.url && b.url && v.url === b.url);
+          box.innerHTML = `<div class="summary-content">${(full && full.summary_html) || ''}</div>`;
+          box.dataset.filled = '1';
+        }
+        box.classList.remove('hidden');
+        if (btn) btn.textContent = 'Show less ↑';
+      } else {
+        box.classList.add('hidden');
+        if (btn) btn.textContent = 'Read full ↓';
+      }
+    }
+    function markBriefAllRead() {
+      filteredChannels().forEach(ch => { if (!isChannelRead(ch.id)) toggleRead(ch.id); });
+      renderSidebar();
+      renderActiveView();
+    }
+
+    // Video player preference + unified dispatcher
+    function isMobileDevice() { return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || ''); }
+    function playerPref() {
+      try {
+        const p = localStorage.getItem('tubelm_player_pref');
+        if (p === 'app' || p === 'inline') return p;
+      } catch (_) {}
+      return isMobileDevice() ? 'app' : 'inline';
+    }
+    function setPlayerPref(p) {
+      try { localStorage.setItem('tubelm_player_pref', p); } catch (_) {}
+      updatePlayerPrefChips();
+    }
+    function togglePlayerPref() { setPlayerPref(playerPref() === 'app' ? 'inline' : 'app'); }
+    function prefChipHtml() {
+      return '';
+    }
+    function updatePlayerPrefChips() {
+      try { document.documentElement.setAttribute('data-player-pref', playerPref()); } catch (_) {}
+    }
+    function playVideo(videoId, title, opts) {
+      opts = opts || {};
+      try { markTopSeen(videoId); } catch (_) {}
+      if (isAudioPlaying && globalAudio && !globalAudio.paused) {
+        globalAudio.pause();
+        isAudioPlaying = false;
+        updatePlayIcon();
+        updateMiniPlayer();
+      }
+      const pref = opts.preferInline ? 'inline' : playerPref();
+      if (pref === 'app' && isMobileDevice() && videoId) {
+        let appOpened = false;
+        const onDeactivate = () => {
+          appOpened = true;
+          window.removeEventListener('pagehide', onDeactivate);
+          window.removeEventListener('blur', onDeactivate);
+        };
+        window.addEventListener('pagehide', onDeactivate);
+        window.addEventListener('blur', onDeactivate);
+        window.location.href = 'youtube://watch?v=' + encodeURIComponent(videoId);
+        setTimeout(() => {
+          window.removeEventListener('pagehide', onDeactivate);
+          window.removeEventListener('blur', onDeactivate);
+          if (!appOpened && document.visibilityState === 'visible') openVideoModal(videoId, title);
+        }, 600);
+        return;
+      }
+      openVideoModal(videoId, title);
+    }
+
+    // Playlist queue + mini-player
+    const CATEGORY_ORDER = ['tech', 'deep_explainer', 'health', 'news_feed'];
+    const PLAYER_SPEEDS = [1.0, 1.25, 1.5, 1.75, 2.0];
+    const player = { queue: [], index: -1, speed: 1.0 };
+    function savePlayer() {
+      try {
+        localStorage.setItem('tubelm_player', JSON.stringify({ queue: player.queue, index: player.index, speed: player.speed }));
+      } catch (_) {}
+    }
+    function loadPlayer() {
+      try {
+        const raw = JSON.parse(localStorage.getItem('tubelm_player') || 'null');
+        if (raw && Array.isArray(raw.queue)) {
+          player.queue = raw.queue.filter(t => t && t.src);
+          player.index = Number(raw.index);
+          if (!(player.index >= 0 && player.index < player.queue.length)) player.index = player.queue.length ? 0 : -1;
+          if (PLAYER_SPEEDS.includes(Number(raw.speed))) player.speed = Number(raw.speed);
+        }
+      } catch (_) {}
+      if (!player.queue.length) player.index = -1;
+      try { globalAudio.playbackRate = player.speed || 1.0; } catch (_) {}
+    }
+    function findChannel(weekKey, chId) {
+      const wData = SITE_DATA.weeks[weekKey] || {};
+      return ((wData.channels || []).find(c => c.id === chId)) || null;
+    }
+    function buildQueue(weekKey, opts) {
+      const unheardOnly = !opts || opts.unheardOnly !== false;
+      const weekData = SITE_DATA.weeks[weekKey || currentWeekKey] || { channels: [] };
+      const list = (weekData.channels || []).map(ch => {
+        const src = ch.audio_url || ch.summary_audio_url;
+        const isSummary = !ch.audio_url && !!ch.summary_audio_url;
+        return { ch, src, isSummary };
+      }).filter(item =>
+        item.src &&
+        (currentCategoryId === 'all' || item.ch.category === currentCategoryId) &&
+        (!unheardOnly || !isHeard(item.src))
+      );
+      list.sort((a, b) => {
+        const ca = CATEGORY_ORDER.indexOf(a.ch.category);
+        const cb = CATEGORY_ORDER.indexOf(b.ch.category);
+        const ra = ca < 0 ? 99 : ca;
+        const rb = cb < 0 ? 99 : cb;
+        if (ra !== rb) return ra - rb;
+        return String(a.ch.name || '').localeCompare(String(b.ch.name || ''));
+      });
+      player.queue = list.map(item => ({
+        chId: item.ch.id,
+        weekKey: weekKey || currentWeekKey,
+        src: item.src,
+        title: item.ch.name + (item.isSummary ? ' (Summary)' : ''),
+        category: item.ch.category,
+        summary: item.isSummary,
+      }));
+      player.index = -1;
+      savePlayer();
+      updateMiniPlayer();
+    }
+    function playIndex(i) {
+      if (i < 0 || i >= player.queue.length) return;
+      player.index = i;
+      const t = player.queue[i];
+      currentAudioSrc = t.src;
+      savePlayer();
+      try { globalAudio.playbackRate = player.speed || 1.0; } catch (_) {}
+      let started = false;
+      const begin = () => {
+        globalAudio.play().then(() => { started = true; setMediaSessionMeta(); }).catch(() => {});
+      };
+      globalAudio.addEventListener('loadedmetadata', function once() {
+        globalAudio.removeEventListener('loadedmetadata', once);
+        try {
+          const saved = parseFloat(localStorage.getItem('tubelm_pos:' + t.src) || '0');
+          if (saved > 0 && saved < (globalAudio.duration || Infinity)) globalAudio.currentTime = saved;
+        } catch (_) {}
+        updatePositionState();
+        if (!started) begin();
+      });
+      globalAudio.src = t.src;
+      begin();
+      isAudioPlaying = true;
+      updatePlayIcon();
+      updateMiniPlayer();
+    }
+    function queueNext() {
+      let i = player.index + 1;
+      while (i < player.queue.length && isHeard(player.queue[i].src)) i++;
+      if (i >= player.queue.length) {
+        isAudioPlaying = false;
+        try { if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'; } catch (_) {}
+        updatePlayIcon();
+        updateMiniPlayer();
+        return;
+      }
+      playIndex(i);
+    }
+    function queuePrev() {
+      if (player.index > 0) playIndex(player.index - 1);
+    }
+    function playAllUnheard() {
+      buildQueue(currentWeekKey, { unheardOnly: true });
+      if (!player.queue.length) {
+        buildQueue(currentWeekKey, { unheardOnly: false });
+      }
+      if (!player.queue.length) return;
+      playIndex(0);
+    }
+    function playChannelAudio(chId) {
+      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
+      const ch = (weekData.channels || []).find(c => c.id === chId);
+      if (!ch || !ch.audio_url) return;
+      const idx = player.queue.findIndex(t => t.src === ch.audio_url);
+      if (idx >= 0 && idx === player.index) {
+        if (globalAudio.paused) {
+          globalAudio.play().catch(() => {});
+          isAudioPlaying = true;
+        } else {
+          globalAudio.pause();
+          isAudioPlaying = false;
+        }
+        updatePlayIcon();
+        updateMiniPlayer();
+        return;
+      }
+      if (idx >= 0) { playIndex(idx); return; }
+      player.queue.splice(player.index + 1, 0,
+        { chId: ch.id, weekKey: currentWeekKey, src: ch.audio_url, title: ch.name, category: ch.category });
+      playIndex(player.index + 1);
+    }
+    function enqueueChannel(chId) {
+      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
+      const ch = (weekData.channels || []).find(c => c.id === chId);
+      if (!ch || !ch.audio_url) return;
+      if (!player.queue.some(t => t.src === ch.audio_url)) {
+        player.queue.push({ chId: ch.id, weekKey: currentWeekKey, src: ch.audio_url, title: ch.name, category: ch.category });
+        savePlayer();
+      }
+      updateMiniPlayer();
+    }
+    function openMiniTrack() {
+      const t = player.queue[player.index];
+      if (!t) return;
+      if (t.weekKey && t.weekKey !== currentWeekKey && SITE_DATA.weeks[t.weekKey]) switchWeek(t.weekKey);
+      selectChannel(t.chId);
+    }
+    function playSummaryAudio(chId) {
+      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
+      const ch = (weekData.channels || []).find(c => c.id === chId);
+      if (!ch || !ch.summary_audio_url) return;
+      const idx = player.queue.findIndex(t => t.src === ch.summary_audio_url);
+      if (idx >= 0 && idx === player.index) {
+        if (globalAudio.paused) {
+          globalAudio.play().catch(() => {});
+          isAudioPlaying = true;
+        } else {
+          globalAudio.pause();
+          isAudioPlaying = false;
+        }
+        updatePlayIcon();
+        updateMiniPlayer();
+        return;
+      }
+      if (idx >= 0) { playIndex(idx); return; }
+      player.queue.splice(player.index + 1, 0,
+        { chId: ch.id, weekKey: currentWeekKey, src: ch.summary_audio_url,
+          title: ch.name + ' (Summary)', category: ch.category, summary: true });
+      playIndex(player.index + 1);
+    }
+    function toggleMiniPlay() {
+      if (!player.queue.length || player.index < 0) return;
+      const t = player.queue[player.index];
+      if (globalAudio.paused) {
+        if (currentAudioSrc !== t.src) { playIndex(player.index); return; }
+        globalAudio.play().catch(() => {});
+        isAudioPlaying = true;
+      } else {
+        globalAudio.pause();
+        isAudioPlaying = false;
+      }
+      updatePlayIcon();
+      updateMiniPlayer();
+    }
+    function cyclePlayerSpeed() {
+      const cur = player.speed || 1.0;
+      player.speed = PLAYER_SPEEDS[(PLAYER_SPEEDS.indexOf(cur) + 1) % PLAYER_SPEEDS.length];
+      try { globalAudio.playbackRate = player.speed; } catch (_) {}
+      savePlayer();
+      updateMiniPlayer();
+      updatePositionState();
+    }
+    function updateMiniPlayer() {
+      const bar = document.getElementById('miniPlayer');
+      if (!bar) return;
+      const hasQueue = player.queue.length > 0 && player.index >= 0 && !!player.queue[player.index];
+      bar.classList.toggle('hidden', !hasQueue);
+      document.body.classList.toggle('mini-visible', hasQueue);
+      try {
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = isAudioPlaying ? 'playing' : 'paused';
+      } catch (_) {}
+      if (!hasQueue) return;
+      const t = player.queue[player.index];
+      const ch = findChannel(t.weekKey, t.chId) || {};
+      const titleEl = document.getElementById('mini-title');
+      const subEl = document.getElementById('mini-sub');
+      const playEl = document.getElementById('mini-play');
+      const speedEl = document.getElementById('mini-speed');
+      const progEl = document.getElementById('mini-progress');
+      if (titleEl) titleEl.textContent = ch.name || t.title || 'TubeLM';
+      const sameSrc = currentAudioSrc === t.src;
+      let cur = 0;
+      let dur = 0;
+      try {
+        if (sameSrc && isFinite(globalAudio.currentTime)) cur = globalAudio.currentTime;
+        else cur = parseFloat(localStorage.getItem('tubelm_pos:' + t.src) || '0') || 0;
+        if (sameSrc && isFinite(globalAudio.duration) && globalAudio.duration) dur = globalAudio.duration;
+      } catch (_) {}
+      if (subEl) subEl.textContent = `${ch.category || t.category || ''} · ${fmtClock(cur)} / ${dur ? fmtClock(dur) : '--:--'}`;
+      if (playEl) playEl.textContent = (isAudioPlaying && !globalAudio.paused) ? '⏸' : '⏯';
+      if (speedEl) speedEl.textContent = `${player.speed || 1.0}x`;
+      if (progEl) progEl.style.width = dur > 0 ? `${(cur / dur) * 100}%` : '0%';
+    }
+
+    // MediaSession integration
+    function setupMediaSessionHandlers() {
+      if (!('mediaSession' in navigator)) return;
+      const wrap = (action, fn) => { try { navigator.mediaSession.setActionHandler(action, fn); } catch (_) {} };
+      wrap('play', () => toggleMiniPlay());
+      wrap('pause', () => { if (!globalAudio.paused) toggleMiniPlay(); });
+      wrap('previoustrack', () => queuePrev());
+      wrap('nexttrack', () => queueNext());
+      wrap('seekbackward', (d) => {
+        const off = (d && d.seekOffset) || 15;
+        try { globalAudio.currentTime = Math.max(0, globalAudio.currentTime - off); } catch (_) {}
+      });
+      wrap('seekforward', (d) => {
+        const off = (d && d.seekOffset) || 30;
+        try { globalAudio.currentTime = Math.min(globalAudio.duration || Infinity, globalAudio.currentTime + off); } catch (_) {}
+      });
+      wrap('seekto', (d) => {
+        if (!d || typeof d.seekTime !== 'number') return;
+        try {
+          if (d.fastSeek && globalAudio.fastSeek) globalAudio.fastSeek(d.seekTime);
+          else globalAudio.currentTime = d.seekTime;
+        } catch (_) {}
+      });
+      wrap('stop', () => {
+        try { globalAudio.pause(); } catch (_) {}
+        isAudioPlaying = false;
+        updatePlayIcon();
+        updateMiniPlayer();
+      });
+    }
+    function setMediaSessionMeta() {
+      if (!('mediaSession' in navigator)) return;
+      const t = player.queue[player.index];
+      if (!t) return;
+      const ch = findChannel(t.weekKey, t.chId) || {};
+      const wData = SITE_DATA.weeks[t.weekKey] || {};
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: t.title || ch.name || 'TubeLM',
+          artist: 'TubeLM · ' + (ch.category || t.category || ''),
+          album: 'Week of ' + (wData.run_date || ''),
+          artwork: [
+            { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+            { src: 'icon-192.png', sizes: '192x192', type: 'image/png' }
+          ]
+        });
+        navigator.mediaSession.playbackState = 'playing';
+      } catch (_) {}
+    }
+    function updatePositionState() {
+      if (!('mediaSession' in navigator)) return;
+      try {
+        const d = globalAudio.duration;
+        if (!isFinite(d) || !d) return;
+        navigator.mediaSession.setPositionState({
+          duration: d,
+          playbackRate: globalAudio.playbackRate || 1,
+          position: Math.min(globalAudio.currentTime || 0, d)
+        });
+      } catch (_) {}
+    }
+
     // Audio Controller Helpers
     const globalAudio = document.getElementById('global-audio-element');
     let currentAudioSrc = '';
 
+    let lastAudioProgressAt = 0;
     function toggleAudio(src, btn) {
       if (currentAudioSrc !== src) {
-        globalAudio.src = src;
         currentAudioSrc = src;
-        globalAudio.play();
+        globalAudio.src = src;
+        globalAudio.addEventListener('loadedmetadata', function once() {
+          globalAudio.removeEventListener('loadedmetadata', once);
+          try {
+            const saved = parseFloat(localStorage.getItem('tubelm_pos:' + src) || '0');
+            if (saved > 0 && saved < (globalAudio.duration || Infinity)) globalAudio.currentTime = saved;
+          } catch (_) {}
+          globalAudio.play().catch(() => {});
+        });
+        globalAudio.load();
         isAudioPlaying = true;
       } else {
         if (globalAudio.paused) {
-          globalAudio.play();
+          globalAudio.play().catch(() => {});
           isAudioPlaying = true;
         } else {
           globalAudio.pause();
@@ -1522,14 +2111,27 @@
     function updatePlayIcon() {
       const icon = document.getElementById('play-icon');
       if (!icon) return;
-      if (isAudioPlaying) {
+      const activeCh = (SITE_DATA.weeks[currentWeekKey]?.channels || []).find(c => c.id === selectedItemId);
+      const matchesCurrent = activeCh && activeCh.audio_url && activeCh.audio_url === currentAudioSrc;
+      if (isAudioPlaying && matchesCurrent) {
         icon.innerHTML = `<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>`;
       } else {
         icon.innerHTML = `<path d="M8 5v14l11-7z"/>`;
       }
     }
 
-    globalAudio.ontimeupdate = () => {
+    globalAudio.addEventListener('timeupdate', () => {
+      lastAudioProgressAt = performance.now();
+      try { localStorage.setItem('tubelm_pos:' + currentAudioSrc, String(globalAudio.currentTime)); } catch (_) {}
+      try {
+        const d = globalAudio.duration;
+        if (currentAudioSrc && d && isFinite(d) && d > 0 && !isHeard(currentAudioSrc) &&
+            globalAudio.currentTime / d >= 0.9) {
+          markHeard(currentAudioSrc);
+        }
+      } catch (_) {}
+      updateMiniPlayer();
+      if (document.querySelector('[data-audio-src]')?.dataset.audioSrc !== currentAudioSrc && !document.getElementById('audio-progress-bar')) return;
       const cur = document.getElementById('audio-time-current');
       const dur = document.getElementById('audio-time-duration');
       const bar = document.getElementById('audio-progress-bar');
@@ -1538,15 +2140,22 @@
       if (bar && !isNaN(globalAudio.duration) && globalAudio.duration > 0) {
         bar.style.width = `${(globalAudio.currentTime / globalAudio.duration) * 100}%`;
       }
-    };
+    });
 
     globalAudio.onended = () => {
+      if (player.queue.length > 0 && player.index >= 0) { queueNext(); return; }
       isAudioPlaying = false;
       updatePlayIcon();
+      updateMiniPlayer();
     };
+    globalAudio.addEventListener('seeked', updatePositionState);
+    globalAudio.addEventListener('ratechange', updatePositionState);
+    globalAudio.addEventListener('playing', updatePositionState);
+    setInterval(() => {
+      if (isAudioPlaying && !globalAudio.paused) updatePositionState();
+    }, 5000);
 
     // Resilient Audio Stream Event Handlers
-    let audioReconnectTimer = null;
     let isAudioRecovering = false;
 
     function setAudioBuffering(isBuffering) {
@@ -1562,49 +2171,26 @@
       }
     }
 
-    globalAudio.addEventListener('waiting', () => {
-      setAudioBuffering(true);
-    });
-
-    globalAudio.addEventListener('playing', () => {
-      setAudioBuffering(false);
-      isAudioRecovering = false;
-      if (audioReconnectTimer) {
-        clearTimeout(audioReconnectTimer);
-        audioReconnectTimer = null;
-      }
-    });
-
-    globalAudio.addEventListener('stalled', () => {
-      if (isAudioPlaying && !globalAudio.paused && !isAudioRecovering) {
-        setAudioBuffering(true);
-        tryRecoverAudio();
-      }
-    });
-
-    globalAudio.addEventListener('error', () => {
-      if (isAudioPlaying && !isAudioRecovering) {
-        tryRecoverAudio();
-      }
-    });
+    globalAudio.addEventListener('waiting', () => setAudioBuffering(true));
+    globalAudio.addEventListener('playing', () => { setAudioBuffering(false); isAudioRecovering = false; });
+    globalAudio.addEventListener('error', () => { if (isAudioPlaying) tryRecoverAudio(); });
+    setInterval(() => {
+      if (!isAudioPlaying || globalAudio.paused || isAudioRecovering) return;
+      if (performance.now() - lastAudioProgressAt > 12000 && globalAudio.readyState < 3) tryRecoverAudio();
+    }, 3000);
 
     function tryRecoverAudio() {
       if (!currentAudioSrc || isAudioRecovering) return;
       isAudioRecovering = true;
-      const lastTime = globalAudio.currentTime || 0;
-      if (audioReconnectTimer) clearTimeout(audioReconnectTimer);
-      audioReconnectTimer = setTimeout(() => {
-        if (!isAudioPlaying) return;
-        const currentSrc = currentAudioSrc;
-        globalAudio.src = currentSrc;
-        globalAudio.currentTime = lastTime;
-        globalAudio.play().then(() => {
-          isAudioRecovering = false;
-          setAudioBuffering(false);
-        }).catch(() => {
-          isAudioRecovering = false;
-        });
-      }, 1500);
+      const resumeAt = globalAudio.currentTime || 0;
+      const src = currentAudioSrc;
+      globalAudio.addEventListener('loadedmetadata', function once() {
+        globalAudio.removeEventListener('loadedmetadata', once);
+        if (resumeAt > 0 && resumeAt < globalAudio.duration) globalAudio.currentTime = resumeAt;
+        globalAudio.play().catch(() => {}).finally(() => { isAudioRecovering = false; });
+      });
+      globalAudio.src = src + (src.includes('?') ? '&' : '?') + 'r=' + Date.now();
+      globalAudio.load();
     }
 
     function formatTime(secs) {
@@ -1622,11 +2208,16 @@
     }
 
     function cycleAudioSpeed(btn) {
-      const speeds = [1.0, 1.25, 1.5, 2.0];
+      const speeds = [1.0, 1.25, 1.5, 1.75, 2.0];
       const cur = globalAudio.playbackRate || 1.0;
       const next = speeds[(speeds.indexOf(cur) + 1) % speeds.length];
       globalAudio.playbackRate = next;
+      player.speed = next;
+      savePlayer();
       btn.textContent = `${next}x`;
+      const miniSpeed = document.getElementById('mini-speed');
+      if (miniSpeed) miniSpeed.textContent = `${next}x`;
+      updatePositionState();
     }
 
     // Video Player & Fullscreen Controller Helpers
@@ -1634,28 +2225,32 @@
       return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
     }
 
+    let activePlayerWrapper = null;
+    function unmountPlayer(wrapper) {
+      if (!wrapper || !wrapper.dataset.facade) return;
+      wrapper.innerHTML = wrapper.dataset.facade;
+    }
     function toggleVideoPlayer(wrapperId, videoId, title) {
       const wrapper = document.getElementById(wrapperId);
       if (!wrapper) return;
-
-      // Pause audio overview if playing to avoid audio clashes
       if (isAudioPlaying && globalAudio && !globalAudio.paused) {
         globalAudio.pause();
         isAudioPlaying = false;
         updatePlayIcon();
       }
-
-      const isMounted = wrapper.querySelector('iframe');
-      if (!isMounted) {
+      if (activePlayerWrapper && activePlayerWrapper !== wrapper) unmountPlayer(activePlayerWrapper);
+      if (!wrapper.querySelector('iframe')) {
+        wrapper.dataset.facade = wrapper.innerHTML;
         wrapper.innerHTML = `
           <iframe
-            src="https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&playsinline=1"
-            title="${title}"
+            src="https://www.youtube-nocookie.com/embed/${videoId}?playsinline=1&rel=0"
+            title="${esc(title)}"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
             allowfullscreen
             class="video-player-iframe"
           ></iframe>
         `;
+        activePlayerWrapper = wrapper;
       }
     }
 
@@ -1697,16 +2292,17 @@
       modal.innerHTML = `
         <div class="relative w-full max-w-4xl bg-[#11120f] border border-[var(--border-color)] rounded-xl overflow-hidden shadow-2xl" onclick="event.stopPropagation()">
           <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] bg-[#171815]">
-            <h4 class="text-sm font-bold text-white truncate max-w-[75%]">${title}</h4>
+            <h4 class="text-sm font-bold text-white truncate max-w-[75%]">${esc(title)}</h4>
             <div class="flex items-center gap-2">
+              <a href="https://www.youtube.com/watch?v=${esc(videoId)}" target="_blank" rel="noopener" class="btn-fullscreen" title="Open in YouTube">Open in YouTube ↗</a>
               <button onclick="requestModalFullscreen()" class="btn-fullscreen" title="Full Screen">Full Screen ⛶</button>
               <button onclick="closeVideoModal()" class="text-gray-400 hover:text-white px-2 py-1 text-sm font-bold" title="Close">✕</button>
             </div>
           </div>
           <div id="modal-player-container" class="relative w-full aspect-video bg-black">
             <iframe
-              src="https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&playsinline=1"
-              title="${title}"
+              src="https://www.youtube-nocookie.com/embed/${videoId}?playsinline=1&rel=0"
+              title="${esc(title)}"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowfullscreen
               class="w-full h-full border-0"
@@ -1723,6 +2319,7 @@
         modal.innerHTML = '';
         modal.style.display = 'none';
       }
+      activePlayerWrapper = null;
     }
 
     function requestModalFullscreen() {
@@ -1743,6 +2340,26 @@
         localStorage.setItem('tubelm-theme', next);
       } catch (_) {}
       updateThemeIcons(next);
+    }
+
+    // Commute font-size stepper: small 13px / medium 15px / large 17px
+    const FONT_SIZES = ['small', 'medium', 'large'];
+    function applyFontSize(level) {
+      const idx = FONT_SIZES.indexOf(level);
+      const resolved = idx >= 0 ? FONT_SIZES[idx] : 'medium';
+      document.documentElement.dataset.font = resolved;
+      try { localStorage.setItem('tubelm_font_size', resolved); } catch (_) {}
+      const btn = document.getElementById('btn-font-size');
+      if (btn) btn.textContent = resolved === 'small' ? 'Aa' : (resolved === 'large' ? 'AA' : 'Aa+');
+    }
+    function cycleFontSize() {
+      const cur = FONT_SIZES.indexOf(document.documentElement.dataset.font || 'medium');
+      applyFontSize(FONT_SIZES[(cur + 1) % FONT_SIZES.length]);
+    }
+    function restoreFontSize() {
+      let saved = null;
+      try { saved = localStorage.getItem('tubelm_font_size'); } catch (_) {}
+      applyFontSize(FONT_SIZES.includes(saved) ? saved : 'medium');
     }
 
     function updateThemeIcons(theme) {
@@ -1774,6 +2391,10 @@
     // Initial Render
     function initApp() {
       updateThemeIcons(document.documentElement.dataset.theme || 'light');
+      restoreFontSize();
+      loadPlayer();
+      setupMediaSessionHandlers();
+      updateBriefButton();
       renderSidebar();
       selectTop20();
       if (window.innerWidth < 768) {

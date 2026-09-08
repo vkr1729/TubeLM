@@ -22,6 +22,12 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 import paths
 from sources_loader import load_sources
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(paths.get_env_file())
+except Exception:
+    pass
+
 logger = logging.getLogger("TubeLM-WebReader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -34,7 +40,7 @@ def purge_old_digests_and_audio(summaries_dir: Path, audio_dir: Path, max_age_da
 
     if summaries_dir.exists():
         for f in summaries_dir.iterdir():
-            if f.is_file() and f.name.endswith((".html", ".md", ".png", ".jpg")):
+            if f.is_file() and f.name.endswith((".html", ".json", ".md", ".png", ".jpg")):
                 match = re.match(r"^(\d{4}-\d{2}-\d{2})_", f.name)
                 if match:
                     try:
@@ -187,6 +193,150 @@ def parse_top20_digest(top20_file: Path) -> dict[str, Any]:
     }
 
 
+_WORD_RE = re.compile(r"\w+")
+
+
+def _read_minutes_for(text: str) -> tuple[int, int]:
+    """Return (word_count, read_minutes) for plain text at 230 wpm, minimum 1 minute."""
+    words = len(_WORD_RE.findall(text or ""))
+    return words, max(1, round(words / 230))
+
+
+def _lead_for(text: str, max_words: int = 60) -> str:
+    """First max_words of plain text, ending with … when truncated."""
+    parts = (text or "").split()
+    if len(parts) <= max_words:
+        return " ".join(parts)
+    return " ".join(parts[:max_words]) + "…"
+
+
+def _audio_seconds_for(audio_path: str | None) -> int:
+    """MP3 duration in seconds: mutagen when available, else size estimate at 128 kbps."""
+    if not audio_path:
+        return 0
+    p = Path(audio_path)
+    try:
+        if not p.exists() or p.stat().st_size == 0:
+            return 0
+    except OSError:
+        return 0
+    try:
+        from mutagen.mp3 import MP3
+        length = MP3(str(p)).info.length or 0
+        return int(length)
+    except Exception:
+        pass
+    try:
+        return int(p.stat().st_size * 8 / 128_000)
+    except OSError:
+        return 0
+
+
+def _load_audio_manifest(audio_dir: Path) -> dict[str, Any]:
+    path = audio_dir / "manifest.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], audio_dir: Path) -> dict[str, Any] | None:
+    """Build reader dict from structured sidecar JSON without HTML scraping."""
+    try:
+        data = json.loads(json_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    channel_name = str(data.get("channel_name") or json_file.stem)
+    run_date = str(data.get("run_date") or "")
+    safe_name = paths.safe_channel_name(channel_name)
+    src_info = sources_map.get(channel_name) or sources_map.get(safe_name) or {}
+    category = data.get("category") or src_info.get("category", "tech")
+    subscribers = src_info.get("subscribers", "")
+    notebook_url = str(data.get("notebook_url") or "")
+    items = data.get("items") or []
+    summary_text = str(data.get("summary_text") or "")
+    videos = []
+    try:
+        from email_service import _split_markdown_summary_by_videos, _strip_citations
+        from markdown_it import MarkdownIt
+        _md = MarkdownIt("commonmark", {"html": False})
+        per_item = _split_markdown_summary_by_videos(_strip_citations(summary_text), items, channel_name)
+    except Exception:
+        per_item = {}
+        _md = None
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        url = str(it.get("url") or "")
+        title = str(it.get("title") or "")
+        summary_html = ""
+        if _md is not None:
+            try:
+                summary_html = _md.render(per_item.get(url, ""))
+            except Exception:
+                summary_html = ""
+        videos.append({
+            "title": title,
+            "url": url,
+            "video_id": str(it.get("video_id") or extract_youtube_video_id(url)),
+            "published": str(it.get("published") or ""),
+            "summary_html": summary_html,
+            "lead": _lead_for(BeautifulSoup(summary_html, "html.parser").get_text(" ", strip=True) if summary_html else ""),
+        })
+    full_summary_html = "".join(v.get("summary_html", "") for v in videos)
+    summary_preview = ""
+    if summary_text:
+        summary_preview = summary_text.strip().replace("\n", " ")[:140] + "…"
+    if videos and all(not v.get("lead") for v in videos) and summary_text.strip():
+        first_para = re.split(r"\n\s*\n", summary_text.strip(), maxsplit=1)[0]
+        videos[0]["lead"] = _lead_for(re.sub(r"[#>*`]", "", first_para))
+    word_count, read_minutes = _read_minutes_for(summary_text)
+    has_audio = False
+    audio_filename = None
+    audio_path = None
+    audio_url = None
+    if len(videos) > 1 and audio_dir.exists():
+        manifest = _load_audio_manifest(audio_dir)
+        hit = manifest.get(f"{run_date}|{safe_name}")
+        if hit and isinstance(hit, dict):
+            p = audio_dir / str(hit.get("file", ""))
+            if p.name and p.exists() and p.stat().st_size > 0:
+                has_audio, audio_path, audio_filename = True, p, p.name
+        if not has_audio:
+            p = audio_dir / f"{run_date}_{safe_name}.mp3"
+            if p.exists() and p.stat().st_size > 0:
+                has_audio, audio_path, audio_filename = True, p, p.name
+        if has_audio and audio_filename:
+            audio_url = f"audio/{audio_filename}"
+    audio_seconds = _audio_seconds_for(str(audio_path)) if has_audio else 0
+    return {
+        "id": safe_name,
+        "name": channel_name,
+        "category": category,
+        "subscribers": subscribers,
+        "notebook_url": notebook_url,
+        "video_count": len(videos),
+        "videos": videos,
+        "full_summary_html": full_summary_html,
+        "summary_preview": summary_preview,
+        "has_audio": has_audio,
+        "audio_filename": audio_filename,
+        "audio_path": str(audio_path) if audio_path else None,
+        "audio_url": audio_url,
+        "word_count": word_count,
+        "read_minutes": read_minutes,
+        "audio_seconds": audio_seconds,
+        "brief": [
+            {"title": v.get("title", ""), "url": v.get("url", ""),
+             "video_id": v.get("video_id", ""), "lead": v.get("lead", "")}
+            for v in videos
+        ],
+    }
+
+
 def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_dir: Path, run_date: str) -> dict[str, Any] | None:
     """Parse single channel digest HTML into structured reader dictionary."""
     content = html_file.read_text(encoding="utf-8", errors="replace")
@@ -219,6 +369,7 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
 
         summary_div = card.find(class_="summary-html")
         summary_html = str(summary_div) if summary_div else ""
+        card_text = summary_div.get_text(" ", strip=True) if summary_div else ""
 
         videos.append({
             "title": title,
@@ -226,15 +377,20 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
             "video_id": video_id,
             "published": published,
             "summary_html": summary_html,
+            "lead": _lead_for(card_text),
         })
 
     summary_blocks = soup.find_all(class_="summary-html")
     full_summary_html = "".join(str(b) for b in summary_blocks) if summary_blocks else ""
+    full_summary_text = " ".join(b.get_text(" ", strip=True) for b in summary_blocks)
 
     summary_preview = ""
     first_p = soup.find("p", class_=None) or (summary_blocks[0].find("p") if summary_blocks else None)
     if first_p:
         summary_preview = first_p.get_text(" ", strip=True)[:140] + "…"
+    if videos and all(not v.get("lead") for v in videos) and full_summary_text.strip():
+        videos[0]["lead"] = _lead_for(full_summary_text)
+    word_count, read_minutes = _read_minutes_for(full_summary_text)
 
     # Audio Overview Condition:
     has_audio = False
@@ -242,26 +398,19 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
     audio_path = None
 
     if len(videos) > 1 and audio_dir.exists():
-        candidate_audio_files = [
-            audio_dir / f"{run_date}_{safe_name}.mp3",
-            audio_dir / f"{safe_name}.mp3",
-            audio_dir / f"{safe_name}_{run_date}.mp3",
-        ]
-        for p in candidate_audio_files:
-            if p.exists() and p.stat().st_size > 0:
-                has_audio = True
-                audio_path = p
-                audio_filename = p.name
-                break
-
+        manifest = _load_audio_manifest(audio_dir)
+        hit = manifest.get(f"{run_date}|{safe_name}")
+        if hit and isinstance(hit, dict):
+            p = audio_dir / str(hit.get("file", ""))
+            if p.name and p.exists() and p.stat().st_size > 0:
+                has_audio, audio_path, audio_filename = True, p, p.name
+        # fallback ONLY for legacy files: exact run_date prefix, never a glob
         if not has_audio:
-            for p in sorted(audio_dir.glob(f"*{safe_name}*.mp3")):
-                if p.is_file() and p.stat().st_size > 0:
-                    has_audio = True
-                    audio_path = p
-                    audio_filename = p.name
-                    break
+            p = audio_dir / f"{run_date}_{safe_name}.mp3"
+            if p.exists() and p.stat().st_size > 0:
+                has_audio, audio_path, audio_filename = True, p, p.name
 
+    audio_seconds = _audio_seconds_for(str(audio_path)) if has_audio else 0
     return {
         "id": safe_name,
         "name": channel_name,
@@ -276,12 +425,33 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
         "audio_filename": audio_filename,
         "audio_path": str(audio_path) if audio_path else None,
         "audio_url": f"audio/{audio_filename}" if audio_filename else None,
+        "word_count": word_count,
+        "read_minutes": read_minutes,
+        "audio_seconds": audio_seconds,
+        "brief": [
+            {"title": v.get("title", ""), "url": v.get("url", ""),
+             "video_id": v.get("video_id", ""), "lead": v.get("lead", "")}
+            for v in videos
+        ],
     }
 
 
 def generate_rss_feed(site_data: dict[str, Any], output_path: Path, base_url: str = "https://vkr1729.github.io/TubeLM/") -> None:
     """Generate valid RSS 2.0 feed containing the 2-week rolling digests."""
+    from xml.sax.saxutils import escape as xml_escape
+
+    def _cdata(s: str) -> str:
+        return "<![CDATA[" + (s or "").replace("]]>", "]]]]><![CDATA[>") + "]]>"
+
+    def _pub_date(run_date: str) -> str:
+        try:
+            dt = datetime.strptime(run_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            return dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+        except (ValueError, TypeError):
+            return datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+
     current_week = site_data.get("weeks", {}).get("current", {})
+    run_date = str(current_week.get("run_date") or "")
     channels = current_week.get("channels", [])
     top20_items = current_week.get("top20", {}).get("items", [])
 
@@ -291,11 +461,11 @@ def generate_rss_feed(site_data: dict[str, Any], output_path: Path, base_url: st
         desc = "<ul>" + "".join(f"<li><strong>#{it['rank']} {it['title']}</strong> ({it['source_name']}): {it['why_it_matters']}</li>" for it in top20_items[:10]) + "</ul>"
         rss_items.append(f"""
     <item>
-      <title>TubeLM Executive Top 20 · Week of {current_week.get('run_date', '')}</title>
-      <link>{base_url}</link>
-      <guid>{base_url}#top20-{current_week.get('run_date', '')}</guid>
-      <pubDate>{datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate>
-      <description><![CDATA[{desc}]]></description>
+      <title>{xml_escape(f"TubeLM Executive Top 20 · Week of {run_date}")}</title>
+      <link>{xml_escape(base_url)}</link>
+      <guid isPermaLink="false">{xml_escape(f"{base_url}#top20-{run_date}")}</guid>
+      <pubDate>{_pub_date(run_date)}</pubDate>
+      <description>{_cdata(desc)}</description>
     </item>""")
 
     for ch in channels:
@@ -303,18 +473,18 @@ def generate_rss_feed(site_data: dict[str, Any], output_path: Path, base_url: st
         link = ch.get("notebook_url") or base_url
         rss_items.append(f"""
     <item>
-      <title>[{ch.get('category', 'Digest').upper()}] {ch.get('name', 'Source')} — TubeLM Briefing</title>
-      <link>{link}</link>
-      <guid>{base_url}#{ch.get('id')}-{current_week.get('run_date', '')}</guid>
-      <pubDate>{datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate>
-      <description><![CDATA[{desc}]]></description>
+      <title>{xml_escape(f"[{ch.get('category', 'Digest').upper()}] {ch.get('name', 'Source')} — TubeLM Briefing")}</title>
+      <link>{xml_escape(link)}</link>
+      <guid isPermaLink="false">{xml_escape(f"{base_url}#{ch.get('id')}-{run_date}")}</guid>
+      <pubDate>{_pub_date(run_date)}</pubDate>
+      <description>{_cdata(desc)}</description>
     </item>""")
 
     rss_content = f"""<?xml version="1.0" encoding="UTF-8" ?>
 <rss version="2.0">
   <channel>
     <title>TubeLM High-Signal Intelligence</title>
-    <link>{base_url}</link>
+    <link>{xml_escape(base_url)}</link>
     <description>Personal 2-week rolling NotebookLM intelligence digests across 37 curated channels.</description>
     <lastBuildDate>{datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S +0000')}</lastBuildDate>
     <generator>TubeLM v4.0</generator>
@@ -421,6 +591,7 @@ def build_reader_site(
     site_dir: Path,
     sources_file: Path,
     compress_audio: bool = False,
+    generate_tts: bool = True,
 ) -> Path:
     """Build the complete static Web Reader site from 2-week rolling digests."""
     site_dir.mkdir(parents=True, exist_ok=True)
@@ -434,42 +605,52 @@ def build_reader_site(
 
     logger.info("Building Web Reader site (compress_audio=%s)...", compress_audio)
 
-    # 1. Purge older than 14 days
-    purge_old_digests_and_audio(summaries_dir, audio_dir, max_age_days=14)
-
-    # 2. Map channels
+    # Pure build: no destructive purge here (main.py purges post-deploy).
+    # 1. Map channels
     sources = load_sources(sources_file)
     sources_map = {s["name"]: s for s in sources}
     for s in sources:
         sources_map[paths.safe_channel_name(s["name"])] = s
 
-    # 3. Discover dates and group into Current Week and Previous Week
-    files = [f for f in summaries_dir.iterdir() if f.is_file() and f.name.endswith(".html")]
+    # 2. Discover dates and bucket by ISO calendar week (no drift).
+    files = [f for f in summaries_dir.iterdir() if f.is_file() and f.name.endswith(".html")] if summaries_dir.exists() else []
     date_map: dict[datetime.date, list[Path]] = {}
     for f in files:
         m = re.match(r"^(\d{4}-\d{2}-\d{2})_", f.name)
         if m:
-            d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+            try:
+                d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+            except ValueError:
+                continue
             date_map.setdefault(d, []).append(f)
 
-    sorted_dates = sorted(date_map.keys(), reverse=True)
-    if not sorted_dates:
-        sorted_dates = [datetime.now(timezone.utc).date()]
-        date_map[sorted_dates[0]] = []
-
-    latest_date = sorted_dates[0]
-    # Current batch: all runs within 4 days of latest
-    current_dates = [d for d in sorted_dates if (latest_date - d).days <= 4]
-    # Previous batch: runs between 5 and 14 days
-    prev_dates = [d for d in sorted_dates if 5 <= (latest_date - d).days <= 14]
+    week_buckets: dict[tuple[int, int], list] = {}
+    for d, flist in date_map.items():
+        week_buckets.setdefault(d.isocalendar()[:2], []).append(d)
+    sorted_weeks = sorted(week_buckets.keys(), reverse=True)
+    if not sorted_weeks:
+        today = datetime.now(timezone.utc).date()
+        sorted_weeks = [today.isocalendar()[:2]]
+        week_buckets[sorted_weeks[0]] = []
+        date_map[today] = []
+    current_week_key = sorted_weeks[0]
+    prev_week_key = sorted_weeks[1] if len(sorted_weeks) > 1 else None
+    current_dates = sorted(week_buckets.get(current_week_key, []), reverse=True)
+    prev_dates = sorted(week_buckets.get(prev_week_key, []), reverse=True) if prev_week_key else []
 
     logger.info("Partitioning into Current Week (%s) and Previous Week (%s)...", current_dates, prev_dates)
 
     weeks_data: dict[str, Any] = {}
 
+    try:
+        import audio_storage as _audio_storage
+    except ImportError:  # pragma: no cover
+        _audio_storage = None  # type: ignore
+
     for week_key, dates_list in [("current", current_dates), ("prev", prev_dates)]:
         if not dates_list:
-            weeks_data[week_key] = {"run_date": "None", "channels": [], "top20": {"items": []}}
+            weeks_data[week_key] = {"run_date": "None", "channels": [], "top20": {"items": []},
+                                    "total_read_minutes": 0, "total_audio_seconds": 0, "channel_count": 0}
             continue
 
         channels = []
@@ -482,23 +663,63 @@ def build_reader_site(
             for f in sorted(date_map.get(d, [])):
                 if "Top_20" in f.name or "Top_10" in f.name:
                     if not top20_data.get("items"):
+                        sidecar_top = f.with_suffix(".json")
+                        if sidecar_top.exists():
+                            try:
+                                tdata = json.loads(sidecar_top.read_text(encoding="utf-8"))
+                                if isinstance(tdata, dict) and tdata.get("items"):
+                                    top20_data = {"items": tdata["items"], "candidate_count": tdata.get("candidate_count", len(tdata["items"]))}
+                                    continue
+                            except (OSError, json.JSONDecodeError):
+                                pass
                         top20_data = parse_top20_digest(f)
                 else:
-                    ch_data = parse_channel_digest(f, sources_map, audio_dir, d_str)
+                    ch_data = None
+                    sidecar = f.with_suffix(".json")
+                    if sidecar.exists():
+                        ch_data = parse_channel_digest_json(sidecar, sources_map, audio_dir)
+                    if ch_data is None:
+                        ch_data = parse_channel_digest(f, sources_map, audio_dir, d_str)
                     if ch_data and ch_data["name"] not in seen_channels:
                         seen_channels.add(ch_data["name"])
+                        tts_filename = f"summary_{d_str}_{ch_data['id']}.mp3"
+                        tts_path = audio_dir / tts_filename
+                        if generate_tts and not os.environ.get("PYTEST_CURRENT_TEST"):
+                            try:
+                                from tts_service import generate_summary_tts
+                                # Build-time backfill: synthesize missing summary audio from existing text.
+                                if not tts_path.exists() or tts_path.stat().st_size == 0:
+                                    summary_text = ch_data.get("full_summary_html") or ch_data.get("summary_preview") or ""
+                                    generate_summary_tts(summary_text, tts_path)
+                            except Exception:
+                                logger.exception("Summary TTS backfill failed for %s.", ch_data.get("name"))
+                        if tts_path.exists() and tts_path.stat().st_size > 0:
+                            remote = (_audio_storage.upload_audio(tts_path, d_str) if (_audio_storage is not None and _audio_storage.is_configured()) else "")
+                            if remote:
+                                ch_data["summary_audio_url"] = remote
+                                (site_audio_dir / tts_filename).unlink(missing_ok=True)
+                            else:
+                                dest_tts = site_audio_dir / tts_filename
+                                shutil.copy(tts_path, dest_tts)
+                                ch_data["summary_audio_url"] = f"audio/{tts_filename}"
+                            ch_data["summary_audio_seconds"] = _audio_seconds_for(str(tts_path))
                         if ch_data.get("audio_path") and Path(ch_data["audio_path"]).exists():
                             src_audio = Path(ch_data["audio_path"])
-                            dest_audio = site_audio_dir / src_audio.name
-                            if compress_audio:
-                                if not dest_audio.exists() or dest_audio.stat().st_size > 15 * 1024 * 1024:
-                                    optimize_audio_for_web(src_audio, dest_audio)
+                            remote = (_audio_storage.upload_audio(src_audio, d_str) if (_audio_storage is not None and _audio_storage.is_configured()) else "")
+                            if remote:
+                                ch_data["audio_url"] = remote
+                                (site_audio_dir / src_audio.name).unlink(missing_ok=True)
                             else:
-                                # Retain original audio quality without lossy compression
-                                if not dest_audio.exists() or dest_audio.stat().st_size != src_audio.stat().st_size:
-                                    shutil.copy(src_audio, dest_audio)
-                                    logger.info("Retained original uncompressed audio: %s (%d KB)",
-                                                dest_audio.name, src_audio.stat().st_size // 1024)
+                                dest_audio = site_audio_dir / src_audio.name
+                                if compress_audio:
+                                    if not dest_audio.exists() or dest_audio.stat().st_size > 15 * 1024 * 1024:
+                                        optimize_audio_for_web(src_audio, dest_audio)
+                                else:
+                                    if not dest_audio.exists() or dest_audio.stat().st_size != src_audio.stat().st_size:
+                                        shutil.copy(src_audio, dest_audio)
+                                        logger.info("Retained original uncompressed audio: %s (%d KB)",
+                                                    dest_audio.name, src_audio.stat().st_size // 1024)
+                                ch_data["audio_url"] = f"audio/{src_audio.name}"
                         channels.append(ch_data)
 
         channels.sort(key=lambda c: c["name"])
@@ -507,6 +728,9 @@ def build_reader_site(
             "run_date": run_date_label,
             "channels": channels,
             "top20": top20_data,
+            "total_read_minutes": sum(int(ch.get("read_minutes") or 0) for ch in channels),
+            "total_audio_seconds": sum(int(ch.get("audio_seconds") or ch.get("summary_audio_seconds") or 0) for ch in channels),
+            "channel_count": len(channels),
         }
 
     read_state_file = paths.get_read_state_file()
@@ -530,8 +754,9 @@ def build_reader_site(
         autoescape=select_autoescape(["html"]),
     )
     template = env.get_template("reader.html")
+    site_data_json = json.dumps(site_data, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
     rendered_html = template.render(
-        site_data_json=json.dumps(site_data, ensure_ascii=False),
+        site_data_json=site_data_json,
         site_data=site_data,
     )
 
@@ -546,6 +771,12 @@ def build_reader_site(
     # Write .nojekyll
     (site_dir / ".nojekyll").write_text("", encoding="utf-8")
 
+    if _audio_storage is not None and _audio_storage.is_configured() and site_audio_dir.exists():
+        for f in site_audio_dir.iterdir():
+            if f.is_file() and f.stat().st_size > 5 * 1024 * 1024:
+                logger.info("Cleaning up large file from site/audio as R2 is active: %s", f.name)
+                f.unlink(missing_ok=True)
+
     return index_path
 
 
@@ -555,6 +786,12 @@ def deploy_to_gh_pages(site_dir: Path, repo_url: str = "https://github.com/vkr17
 
     if not shutil.which("git"):
         logger.error("Git is not installed or not in PATH; skipping gh-pages deploy.")
+        return False
+
+    big = [p for p in site_dir.rglob("*") if p.is_file() and p.stat().st_size > 5 * 1024 * 1024]
+    if big:
+        logger.error("Refusing to deploy: %d file(s) over 5 MB in site dir (binary assets belong on R2): %s",
+                     len(big), ", ".join(p.name for p in big[:5]))
         return False
 
     temp_git_dir = site_dir / ".git"

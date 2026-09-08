@@ -264,7 +264,7 @@ def load_candidates_from_html_digests(
 
 
 def _selection_prompt(candidates: list[dict[str, str]], target_count: int) -> str:
-    max_summary_per_candidate = max(250, min(800, 80_000 // max(len(candidates), 1)))
+    max_summary_per_candidate = max(250, min(800, 60_000 // max(len(candidates), 1)))
     candidate_payload = []
     for item in candidates:
         summary_raw = item.get("summary", "").strip()
@@ -392,7 +392,7 @@ def rank_top10_candidates(
     command = [
         agy_bin,
         "-p",
-        prompt,
+        "-",
         "--model",
         AGY_MODEL,
         "--json-schema",
@@ -412,6 +412,7 @@ def rank_top10_candidates(
     try:
         completed = subprocess.run(
             command,
+            input=prompt,
             cwd=paths.get_data_dir(),
             check=False,
             capture_output=True,
@@ -559,6 +560,10 @@ def _rank_render_and_send(
     )
     output_path.write_text(_render_top10_html(selection), encoding="utf-8")
     logger.info("Local Top %d HTML digest saved to %s", item_count, output_path)
+    try:
+        output_path.with_suffix(".json").write_text(json.dumps(selection, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        logger.exception("Failed to write Top digest sidecar.")
     send_top10_email(selection, cfg)
     if getattr(cfg, "download_top10_videos", False):
         try:
@@ -568,6 +573,7 @@ def _rank_render_and_send(
                     dest_dir=getattr(cfg, "top10_download_dir", None),
                     prev_dir=getattr(cfg, "top10_prev_dir", None),
                     rotate=rotate_downloads,
+                    generate_article_videos=bool(getattr(cfg, "generate_top_article_videos", False)),
                 )
             except TypeError:
                 download_top10_videos(

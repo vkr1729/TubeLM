@@ -232,6 +232,7 @@ def download_top10_videos(
     yt_dlp_bin: str | None = None,
     dry_run: bool = False,
     rotate: bool = True,
+    generate_article_videos: bool = False,
 ) -> dict[str, Any]:
     """Filter YouTube items from the Top 10 digest, rotate folders, and download videos."""
     items = selection.get("items", [])
@@ -268,13 +269,14 @@ def download_top10_videos(
             "title": title,
         })
 
-    # Register any non-YouTube article items for NotebookLM Cinematic Video generation
+    # Register non-YouTube articles for Cinematic Video only when explicitly opted in.
     queued_articles = []
-    try:
-        from top_article_video_service import register_top_article_videos
-        queued_articles = register_top_article_videos(selection)
-    except Exception as exc:
-        logger.warning("Could not register top article videos: %s", exc)
+    if generate_article_videos:
+        try:
+            from top_article_video_service import register_top_article_videos
+            queued_articles = register_top_article_videos(selection)
+        except Exception as exc:
+            logger.warning("Could not register top article videos: %s", exc)
 
     if not download_tasks:
         logger.info("No YouTube videos found in the Top list; skipping folder rotation and download.")

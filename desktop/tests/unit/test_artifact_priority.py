@@ -119,6 +119,7 @@ async def test_audio_and_video_queues_advance_independently(monkeypatch):
 
     monkeypatch.setattr(main, "pending_weekly_audio_count", lambda: 1)
     monkeypatch.setattr(main, "pending_weekly_video_count", lambda: 1)
+    monkeypatch.setattr(main, "pending_top_article_video_count", lambda: 0)
     monkeypatch.setattr(main, "resume_weekly_audio_batches", resume_audio)
     monkeypatch.setattr(main, "resume_weekly_video_batches", resume_video)
     monkeypatch.setattr(main, "resume_deferred_artifacts", no_deferred)
@@ -133,7 +134,8 @@ async def test_audio_and_video_queues_advance_independently(monkeypatch):
         SimpleNamespace(generate_infographics=False), seal_video_batch=False
     )
 
-    assert completed is False
+    ok, _new_audio = completed
+    assert ok is False
     assert events == ["audio", "video"]
 
 

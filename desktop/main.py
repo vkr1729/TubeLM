@@ -353,10 +353,36 @@ def write_markdown_digest(sources_data: list[dict], run_date: str) -> Path:
 
 # ── Main orchestration ─────────────────────────────────────────────────────────
 
+def _audio_inventory() -> set[str]:
+    d = paths.get_audio_dir()
+    try:
+        return {p.name for p in d.glob("*.mp3")} if d.exists() else set()
+    except OSError:
+        return set()
+
+
+def _build_and_deploy_reader(cfg) -> None:
+    from web_reader import build_reader_site, deploy_to_gh_pages, purge_old_digests_and_audio
+    build_reader_site(paths.get_summaries_dir(), paths.get_audio_dir(), paths.get_site_dir(),
+                      cfg.sources_file, compress_audio=getattr(cfg, "compress_audio", False))
+    deployed = True
+    if getattr(cfg, "deploy_to_gh_pages", True):
+        deployed = deploy_to_gh_pages(paths.get_site_dir())
+    if deployed:
+        try:
+            purge_old_digests_and_audio(paths.get_summaries_dir(), paths.get_audio_dir(), max_age_days=14)
+            import audio_storage
+            if audio_storage.is_configured():
+                audio_storage.purge_audio(max_age_days=14)
+        except Exception:
+            logger.exception("Post-deploy purge failed.")
+
+
 async def _finish_background_artifacts(
     cfg, *, seal_video_batch: bool, send_completion_emails: bool = True
-) -> bool:
+) -> tuple[bool, bool]:
     """Advance independent Audio, Video, and optional infographic queues."""
+    before = _audio_inventory()
     if seal_video_batch:
         seal_weekly_video_batch()
         seal_weekly_audio_batch()
@@ -450,8 +476,10 @@ async def _finish_background_artifacts(
             deferred_until,
             "Background artifacts or their completion email are waiting to resume.",
         )
-        return False
-    return True
+        new_audio = bool(_audio_inventory() - before)
+        return (False, new_audio)
+    new_audio = bool(_audio_inventory() - before)
+    return (True, new_audio)
 
 
 async def async_main(
@@ -513,13 +541,26 @@ async def async_main(
                 sys.exit(2)
             logger.info("Authentication verified after cookie refresh.")
 
+        try:
+            from notebooklm_service import prune_stale_digest_notebooks
+            async with NotebookLMClient.from_storage(keepalive=15) as _prune_client:
+                await prune_stale_digest_notebooks(_prune_client, max_age_days=14)
+        except Exception:
+            logger.exception("Notebook retention sweep failed.")
+
         if artifacts_only:
             logger.info("Resuming Studio artifacts only; source discovery is skipped.")
-            return await _finish_background_artifacts(
+            ok, new_audio = await _finish_background_artifacts(
                 cfg,
                 seal_video_batch=False,
                 send_completion_emails=completion_emails_enabled,
             )
+            if new_audio:
+                try:
+                    _build_and_deploy_reader(cfg)
+                except Exception:
+                    logger.exception("Reader rebuild after audio completion failed.")
+            return ok
 
     # ── Load sources and state ────────────────────────────────────────────
     sources = load_sources(cfg.sources_file)
@@ -577,6 +618,7 @@ async def async_main(
 
     total_initial_handlers = len(handlers)
     completed_source_keys: set[str] = set()
+    successful_keys: list[str] = []
     interim_top10_sent = False
     active_handlers = list(handlers)
     quota_deferred_until = None
@@ -683,6 +725,26 @@ async def async_main(
                     html_path = paths.get_summaries_dir() / f"{run_date}_{safe_name}_digest.html"
                     html_path.write_text(html_body, encoding="utf-8")
                     logger.info("Local HTML digest saved to %s", html_path)
+                    try:
+                        sidecar = {
+                            "run_date": run_date,
+                            "channel_name": result.get("channel_name", ""),
+                            "source_type": result.get("source_type"),
+                            "category": handler.category,
+                            "notebook_url": result.get("notebook_url", ""),
+                            "notebook_id": result.get("notebook_id", ""),
+                            "summary_text": result.get("summary_text", ""),
+                            "items": result.get("items", []),
+                        }
+                        html_path.with_suffix(".json").write_text(json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8")
+                    except Exception:
+                        logger.exception("Failed to write channel digest sidecar for %s.", handler.name)
+                    try:
+                        from tts_service import generate_summary_tts
+                        tts_path = paths.get_audio_dir() / f"summary_{run_date}_{safe_name}.mp3"
+                        generate_summary_tts(result.get("summary_text", ""), tts_path)
+                    except Exception:
+                        logger.exception("Failed to generate summary TTS for %s.", handler.name)
 
                     if top10_enabled:
                         record_top10_source(
@@ -773,7 +835,7 @@ async def async_main(
                         "The interim Top 10 digest encountered an error; continuing with retries."
                     )
 
-        if not dry_run and successful_keys:
+        if not dry_run and completed_source_keys:
             try:
                 await _finish_background_artifacts(
                     cfg,
@@ -819,8 +881,9 @@ async def async_main(
     # Studio work starts only after every summary/email has been finalized.
     # Audio and selected Cinematic Videos then advance as independent queues.
     artifacts_ok = True
+    new_audio = False
     try:
-        artifacts_ok = await _finish_background_artifacts(
+        artifacts_ok, new_audio = await _finish_background_artifacts(
             cfg,
             seal_video_batch=True,
             send_completion_emails=completion_emails_enabled,
@@ -829,23 +892,18 @@ async def async_main(
         logger.exception("Error finishing background studio artifacts.")
         artifacts_ok = False
 
-    if not dry_run and successful_keys:
+    if not dry_run and completed_source_keys:
         try:
-            from web_reader import build_reader_site, deploy_to_gh_pages
             logger.info("Building static web reader site from latest digests...")
-            compress_audio = getattr(cfg, "compress_audio", False)
-            build_reader_site(
-                paths.get_summaries_dir(),
-                paths.get_audio_dir(),
-                paths.get_site_dir(),
-                cfg.sources_file,
-                compress_audio=compress_audio,
-            )
-            if getattr(cfg, "deploy_to_gh_pages", True):
-                logger.info("Deploying web reader to GitHub Pages...")
-                deploy_to_gh_pages(paths.get_site_dir())
+            _build_and_deploy_reader(cfg)
         except Exception:
             logger.exception("Failed to build or deploy web reader site.")
+    elif new_audio:
+        try:
+            logger.info("New audio landed; rebuilding static web reader site...")
+            _build_and_deploy_reader(cfg)
+        except Exception:
+            logger.exception("Reader rebuild after audio completion failed.")
 
     if active_handlers or not artifacts_ok or quota_deferred_until:
         logger.warning(

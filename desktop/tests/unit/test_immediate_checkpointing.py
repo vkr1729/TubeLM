@@ -51,8 +51,11 @@ async def test_each_channel_is_checkpointed_before_the_next_is_processed(tmp_pat
     monkeypatch.setattr(main, "seal_weekly_audio_batch", lambda: None)
     monkeypatch.setattr(main, "pending_weekly_video_count", lambda: 0)
     monkeypatch.setattr(main, "pending_weekly_audio_count", lambda: 0)
+    monkeypatch.setattr(main, "pending_top_article_video_count", lambda: 0)
     monkeypatch.setattr(main, "unnotified_completed_audio_batches", lambda: [])
     monkeypatch.setattr(main, "unnotified_completed_video_batches", lambda: [])
+    import tts_service
+    monkeypatch.setattr(tts_service, "generate_summary_tts", lambda *_, **__: False)
     monkeypatch.setattr(main, "save_state", lambda _, keys: events.append(("checkpoint", keys[0])))
     monkeypatch.setattr(main, "write_markdown_digest", lambda *_: tmp_path / "digest.md")
     monkeypatch.setattr(main.paths, "get_summaries_dir", lambda: tmp_path)
@@ -73,6 +76,10 @@ async def test_each_channel_is_checkpointed_before_the_next_is_processed(tmp_pat
 
 async def _true():
     return True
+
+
+async def _true_tuple():
+    return (True, False)
 
 
 async def _discover(handlers, item):
@@ -139,7 +146,7 @@ async def test_interim_top10_triggered_at_seventy_percent_and_final_after_fast_r
     monkeypatch.setattr(main, "materialize_source_checkpoints", lambda *_: None)
     monkeypatch.setattr(main, "verify_notebooklm_auth", lambda: _true())
     monkeypatch.setattr(main, "resume_deferred_artifacts", _no_deferred_artifacts)
-    monkeypatch.setattr(main, "_finish_background_artifacts", lambda *_, **__: _true())
+    monkeypatch.setattr(main, "_finish_background_artifacts", lambda *_, **__: _true_tuple())
     monkeypatch.setattr(main, "discover_sources", lambda selected, _: _discover(selected, item))
 
     attempt_counts = {}
@@ -162,8 +169,12 @@ async def test_interim_top10_triggered_at_seventy_percent_and_final_after_fast_r
     monkeypatch.setattr(main, "process_source_items", _mock_process)
     monkeypatch.setattr(main, "schedule_artifacts_after_delivery", lambda *_, **__: None)
     monkeypatch.setattr(main, "save_state", lambda *_: None)
+    import tts_service
+    monkeypatch.setattr(tts_service, "generate_summary_tts", lambda *_, **__: False)
     monkeypatch.setattr(main, "write_markdown_digest", lambda *_: tmp_path / "digest.md")
     monkeypatch.setattr(main.paths, "get_summaries_dir", lambda: tmp_path)
+    # Isolate the durable Top-10 batch: never touch the real ~/.tubelm queue.
+    monkeypatch.setattr(main.paths, "get_top10_digest_batch_file", lambda: tmp_path / "top10_batch.json")
 
     sleep_delays = []
     async def _record_sleep(duration):

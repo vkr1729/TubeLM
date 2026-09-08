@@ -250,7 +250,9 @@ class TestGenerateRSS:
 
 
 class TestBuildReaderSite:
-    def test_build_reader_site_end_to_end(self, tmp_path):
+    def test_build_reader_site_end_to_end(self, tmp_path, monkeypatch):
+        for _k in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_DOMAIN"):
+            monkeypatch.delenv(_k, raising=False)
         summaries_dir = tmp_path / "summaries"
         audio_dir = tmp_path / "audio"
         site_dir = tmp_path / "site"
@@ -399,7 +401,9 @@ class TestVideoExtractionAndOptimization:
         optimize_audio_for_web(src, dest)
         assert dest.exists()
 
-    def test_build_reader_site_retains_original_audio_by_default(self, tmp_path):
+    def test_build_reader_site_retains_original_audio_by_default(self, tmp_path, monkeypatch):
+        for _k in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_DOMAIN"):
+            monkeypatch.delenv(_k, raising=False)
         summaries_dir = tmp_path / "summaries"
         audio_dir = tmp_path / "audio"
         site_dir = tmp_path / "site"
@@ -431,6 +435,8 @@ class TestVideoExtractionAndOptimization:
         assert dest_audio.read_bytes() == original_bytes
 
     def test_build_reader_site_compress_audio_flag(self, tmp_path, monkeypatch):
+        for _k in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_DOMAIN"):
+            monkeypatch.delenv(_k, raising=False)
         from unittest.mock import MagicMock
         import web_reader
 

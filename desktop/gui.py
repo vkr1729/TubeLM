@@ -660,8 +660,7 @@ def serve_reader():
     site_dir = paths.get_site_dir()
     index_file = site_dir / "index.html"
     if not index_file.exists():
-        from web_reader import build_reader_site
-        build_reader_site(paths.get_summaries_dir(), paths.get_audio_dir(), site_dir, paths.get_sources_file())
+        return "Reader has not been built yet. Use POST /api/reader/build to build it.", 404
     return send_from_directory(str(site_dir), "index.html")
 
 @app.route("/reader/<path:filename>")

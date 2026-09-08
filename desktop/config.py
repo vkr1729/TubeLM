@@ -131,7 +131,10 @@ class Config:
     send_channel_emails: bool = False
     deploy_to_gh_pages: bool = True
     gh_pages_url: str = "https://vkr1729.github.io/TubeLM/"
-    compress_audio: bool = False
+    compress_audio: bool = True
+
+    # Cinematic video generation for top RSS/web articles (strictly opt-in).
+    generate_top_article_videos: bool = False
 
     # Default browser for NotebookLM extraction (chrome, edge, safari, firefox, opera, etc.)
     notebooklm_browser: str = "chrome"
@@ -210,6 +213,7 @@ def load_config() -> Config:
         send_channel_emails=_get_bool("SEND_CHANNEL_EMAILS", False),
         deploy_to_gh_pages=_get_bool("DEPLOY_TO_GH_PAGES", True),
         gh_pages_url=_get_optional("GH_PAGES_URL", "https://vkr1729.github.io/TubeLM/"),
-        compress_audio=_get_bool("COMPRESS_AUDIO", False),
+        compress_audio=_get_bool("COMPRESS_AUDIO", True),
+        generate_top_article_videos=_get_bool("GENERATE_TOP_ARTICLE_VIDEOS", False),
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
     )

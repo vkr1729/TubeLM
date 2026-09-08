@@ -42,6 +42,31 @@ def _save_batches(batches: list[dict]) -> None:
         temp_path.unlink(missing_ok=True)
 
 
+def _record_audio_manifest(run_date: str, notebook_id: str, source_name: str, filename: str) -> None:
+    from pathlib import Path as _Path
+    path = paths.get_audio_dir() / "manifest.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data[f"{run_date}|{paths.safe_channel_name(source_name)}"] = {"notebook_id": notebook_id, "file": filename}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _load_audio_manifest() -> dict:
+    path = paths.get_audio_dir() / "manifest.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def register_weekly_audio(
     *,
     notebook_id: str,
@@ -50,6 +75,7 @@ def register_weekly_audio(
     channel_order: int,
     source_ids: list[str],
     instructions: str,
+    run_date: str | None = None,
     week_start: str | None = None,
 ) -> None:
     """Idempotently add one eligible notebook to its weekly Audio batch."""
@@ -78,6 +104,8 @@ def register_weekly_audio(
             "instructions": instructions,
         }
     )
+    if run_date:
+        entry["run_date"] = run_date
     batch["sealed"] = False
     batch["completed"] = False
     _save_batches(batches)
@@ -128,16 +156,19 @@ async def _start_or_poll_audio(client, entry: dict) -> str:
         if artifact.is_completed:
             entry["state"] = "completed"
             try:
+                from datetime import date as _date
                 audio_dir = paths.get_audio_dir()
                 audio_dir.mkdir(parents=True, exist_ok=True)
                 safe_name = paths.safe_channel_name(entry.get("source_name", "source"))
-                week_key = entry.get("week_start") or "current"
-                audio_filename = f"{week_key}_{safe_name}.mp3"
+                run_date = entry.get("run_date") or entry.get("week_start") or _date.today().isoformat()
+                entry["run_date"] = run_date
+                audio_filename = f"{run_date}_{safe_name}.mp3"
                 audio_path = audio_dir / audio_filename
                 if not audio_path.exists():
                     logger.info("Downloading completed Audio Overview for %s...", safe_name)
                     await client.artifacts.download_audio(entry["notebook_id"], str(audio_path), artifact.id)
                 entry["audio_file"] = audio_filename
+                _record_audio_manifest(run_date, entry["notebook_id"], entry.get("source_name", ""), audio_filename)
             except Exception:
                 logger.warning("Could not download audio overview for %s", entry.get("source_name"), exc_info=True)
             return "completed"
