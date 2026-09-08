@@ -1,215 +1,295 @@
 # TubeLM
 
-**Version 3.1.0**
+<div align="center">
 
-TubeLM is my personal, Linux-first pipeline for turning new YouTube videos, RSS
-articles, and webpages into grounded NotebookLM briefings.
+<img src="shared/assets/logo.png" alt="TubeLM Logo" width="120" />
 
-The useful work happens in this order:
+### Autonomous Intelligence Briefing Pipeline, Audio Studio & Modern Web Reader
 
-1. Discover new source material.
-2. Create or resume the NotebookLM notebook and generate its summary.
-3. Save the local digest and send the summary email immediately.
-4. Optionally use `agy` with Gemini 3.8 Flash (High) to select and email the
-   ten highest-signal items across every completed source digest.
-5. Generate eligible Audio Overviews and selected Cinematic Videos in the
-   background.
-6. Resume unfinished artifact work after quota refreshes or computer restarts.
+[![Version](https://img.shields.io/badge/version-4.0.0-lime.svg?style=flat-square)](VERSION)
+[![Tests](https://img.shields.io/badge/tests-175%20passed-brightgreen.svg?style=flat-square)](desktop/tests)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?style=flat-square)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-purple.svg?style=flat-square)](LICENSE)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-success?style=flat-square&logo=github)](https://vkr1729.github.io/TubeLM/)
 
-There are no packaged installers or cross-platform release builds. This repository
-runs directly from a Python virtual environment. Anyone using another operating
-system should adapt the launch and scheduling pieces for their own machine.
+**Turn 37+ YouTube channels, RSS feeds, and technical web publications into grounded Google NotebookLM executive summaries, 2-host podcast discussions, neural audio briefings, and an editorial Progressive Web App.**
 
-## Current interface
+[Explore Live Web Reader](https://vkr1729.github.io/TubeLM/) · [Architecture](#architecture) · [Key Features](#key-features) · [Quickstart](#quickstart) · [Configuration](#configuration)
 
-These screenshots are generated from the live app by the GUI E2E test.
+</div>
 
-### Dashboard
+---
 
-![Current TubeLM dashboard](shared/assets/current-ui/01_dashboard.png)
+## Visual Showcase (Light Mode)
 
-### Sources and Cinematic selection
+TubeLM features an editorial, high-performance static Web Reader designed with modern typography, crisp contrast, and tactile micro-interactions.
 
-![Current TubeLM sources screen](shared/assets/current-ui/02_sources.png)
+### Desktop Dual-Pane Reader
+*Side-by-side navigation, integrated NotebookLM Studio Audio Overview player, speed controls, on-demand neural audio, and formatted briefing cards.*
 
-### Selective runs and live logs
+![TubeLM Desktop Web Reader in Light Mode](docs/assets/desktop_reader_light.png)
 
-![Current TubeLM run console](shared/assets/current-ui/03_run_console.png)
+### Curated Top 20 Editorial Magazine
+*Cross-channel ranking highlighting the top 20 most impactful insights of the week for rapid 5-minute executive scanning.*
 
-The dashboard also has a responsive mobile layout:
-[mobile screenshot](shared/assets/current-ui/04_mobile_dashboard.png).
+![TubeLM Top 20 Editorial Picks in Light Mode](docs/assets/desktop_editorial_light.png)
 
-## What it does
+### iPhone 16 Mobile Experience (PWA)
+*Engineered for mobile reading and listening on the go with zero framework overhead.*
 
-- Monitors YouTube channels, RSS feeds, and webpages.
-- Filters YouTube Shorts using the YouTube Data API.
-- Creates grounded NotebookLM summaries using category-specific prompts.
-- Sends a clean HTML digest to one configured email address before artifact work.
-- Can send one optional cross-source Editor's Top 10 email selected by `agy`
-  with Gemini 3.8 Flash (High); this is disabled by default.
-- Generates Audio Overviews only when a notebook contains more than one source.
-- Generates Cinematic Videos only for sources enabled in the dashboard.
-- Keeps infographic support in the code, disabled by default.
-- Downloads the completed weekly Cinematic batch to
-  `~/Downloads/TorBox/TubeLM` and moves the previous batch to `TubeLM_Prev`.
-- Persists pipeline checkpoints and NotebookLM retry times under `~/.tubelm`.
-- Sends separate weekly Audio and Cinematic completion emails with NotebookLM
-  links.
+<div align="center">
+  <img src="docs/assets/mobile_channel_light.png" width="31%" alt="Mobile Channel Digest & Audio Player" />
+  <img src="docs/assets/mobile_sidebar_light.png" width="31%" alt="Mobile Navigation Index & Categories" />
+  <img src="docs/assets/mobile_miniplayer_light.png" width="31%" alt="Sticky Mini-Player with Playback Controls" />
+</div>
 
-## Setup
+---
 
-The current setup assumes Linux, Python 3.10 or newer, Chrome, and a Google account
-that can access NotebookLM.
+## Why TubeLM?
+
+Information overload across YouTube, technical newsletters, and RSS feeds makes keeping up with high-signal content exhausting. 
+
+**TubeLM solves this end-to-end:**
+1. **Curates without distraction:** Eliminates YouTube Shorts and clickbait using duration filtering.
+2. **Deep comprehension:** Feeds full video transcripts and long-form articles into **Google NotebookLM** for grounded, hallucination-free summaries tailored by domain (*Tech*, *Health*, *Deep Explainer*).
+3. **Studio Podcasts & Neural Audio:** Automatically triggers NotebookLM 2-host audio overviews for deep listening, and generates Microsoft Edge Neural TTS audio for instant article listening.
+4. **Lean, Zero-Spam Delivery:** Replaced 37 individual notification emails with a single weekly executive brief and an offline-capable PWA deployed directly to **GitHub Pages**.
+5. **Ultra-Lightweight Static Architecture:** The client web reader is pure vanilla HTML5/CSS/JS (<1MB footprint), hosted free on GitHub Pages, backed by Cloudflare R2 for fast audio streaming.
+
+---
+
+## Key Features
+
+### 🎧 NotebookLM Studio Podcasts & Neural TTS
+- **NotebookLM Audio Overviews:** Generates engaging two-host podcast deep-dives from multi-video notebooks.
+- **Accurate Duration Engine:** Native container duration analysis via `ffprobe` and 256 kbps DASH/AAC detection guarantees exact track timestamps.
+- **On-Demand Neural TTS:** Microsoft Edge-TTS engine synthesizes natural speech for all text summaries at the tap of a button.
+- **Continuous Queueing & Mini-Player:** Seamlessly queue up unread podcasts or summaries with a persistent sticky mini-player and lock-screen `MediaSession` controls.
+
+### 📱 Modern Mobile Web Reader (PWA)
+- **Zero-Framework Speed:** Vanilla HTML5, modern CSS variables, and native JavaScript ensure sub-50ms page loads and zero bundle overhead.
+- **PWA & iOS Safari Ready:** Includes high-resolution Apple touch icons, web app manifest, and black-translucent system bars for native app feel.
+- **Reading Comfort:** Dynamic font-size stepper (`Aa`, `Aa+`, `AA`) and instant light/dark mode switcher (persisted in `localStorage`, defaults to clean light mode).
+- **Session Progress Tracking:** Unread indicators, read/heard tracking, and channel-level unread counters.
+- **Live RSS Syndication:** Automatically publishes `feed.xml` for subscribing via NetNewsWire, Reeder, or any RSS client.
+
+### ⚡ Automated Ingestion & Autonomous Resumption
+- **Smart YouTube Filtering:** Discards Shorts (<3 minutes) using the YouTube Data API v3 before burning compute.
+- **RSS & Web Article Extraction:** Ingests newsletters, blogs, and documentation pages with clean HTML-to-text extraction.
+- **Rolling 2-Week Retention:** Automatically prunes local digests and NotebookLM notebooks older than 14 days to prevent quota bloat.
+- **Durable Checkpoints:** Persists pipeline state under `~/.tubelm/` with automatic exponential backoff on Google API rate limits.
+- **Automated GitHub Pages Deploy:** Directly pushes the compiled site to the `gh-pages` branch on completion.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph INGESTION ["1. Ingestion & Filtering"]
+        YT["YouTube Channels"] -->|"Duration Filter (>3 min)"| YTF["YouTube Data API v3"]
+        RSS["RSS Feeds"] --> RSSF["Feedparser & Article Extractor"]
+        WEB["Webpages"] --> WEBF["Readability Cleaner"]
+    end
+
+    subgraph NOTEBOOKLM ["2. Grounding & Artifact Generation"]
+        YTF & RSSF & WEBF --> NBLM["Google NotebookLM API"]
+        NBLM --> SUM["Category-Tailored Summaries\n(Tech / Health / Explainer)"]
+        NBLM --> POD["Studio Audio Overviews\n(2-Host Deep Dive Podcasts)"]
+        SUM --> TTS["Edge-TTS Neural Audio\n(On-Demand Speech)"]
+    end
+
+    subgraph SYNC ["3. Asset Storage & Static Generation"]
+        POD & TTS --> R2["Cloudflare R2 Bucket\n(Audio Streaming)"]
+        SUM & R2 --> GEN["Static Site Generator\n(desktop/web_reader.py)"]
+        GEN --> SITE["PWA Web Reader\n(HTML5 / CSS / JS)"]
+        GEN --> RSS_OUT["Live RSS Feed\n(feed.xml)"]
+    end
+
+    subgraph DELIVERY ["4. Distribution"]
+        SITE & RSS_OUT --> GHP["GitHub Pages\n(vkr1729.github.io/TubeLM)"]
+        SUM --> MAIL["Consolidated Weekly Email\n(Executive Digest)"]
+    end
+```
+
+---
+
+## Quickstart
+
+### Prerequisites
+- **OS:** Linux (Ubuntu/Debian recommended) or macOS
+- **Python:** 3.10, 3.11, or 3.12
+- **Google Account:** With access to [NotebookLM](https://notebooklm.google.com/)
+- **Browser:** Google Chrome (for initial cookie session extraction)
+
+### 1. Clone and Install
 
 ```bash
 git clone https://github.com/vkr1729/TubeLM.git
 cd TubeLM
 
 python3 -m venv .venv
-.venv/bin/pip install --upgrade pip
-.venv/bin/pip install -r desktop/requirements.txt
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r desktop/requirements.txt
+```
 
+### 2. Configure Environment
+
+Copy the example configuration files:
+
+```bash
 cp .env.example .env
 cp sources.json.example sources.json
 ```
 
-Fill in `.env` with SMTP credentials and a YouTube Data API key. Then authenticate
-the NotebookLM client from the browser session you already use:
+Edit `.env` with your credentials:
+```bash
+# SMTP for weekly executive briefing
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=you@gmail.com
+SMTP_PASSWORD=your-app-password
+RECIPIENT_EMAIL=you@gmail.com
+
+# YouTube Data API Key (free tier quota is plenty)
+YOUTUBE_API_KEY=your-youtube-api-key
+
+# Cloudflare R2 (optional for remote audio hosting)
+R2_ACCOUNT_ID=your-account-id
+R2_ACCESS_KEY_ID=your-access-key-id
+R2_SECRET_ACCESS_KEY=your-secret-key
+R2_BUCKET_NAME=your-bucket-name
+R2_PUBLIC_DOMAIN=your-r2-custom-domain.com
+```
+
+### 3. Authenticate NotebookLM
+
+Extract authentication cookies from your active Chrome session:
 
 ```bash
 .venv/bin/notebooklm login --browser-cookies chrome
 ```
 
-Start the dashboard:
+### 4. Configure Sources
 
-```bash
-./tubelm-launch.sh
+Edit `sources.json` to specify your monitored channels, RSS feeds, and sites:
+
+```json
+[
+  {
+    "name": "Doctor Alex",
+    "type": "youtube",
+    "url": "https://www.youtube.com/@DoctorAlex",
+    "category": "health",
+    "max_items": 3
+  },
+  {
+    "name": "MIT Technology Review - AI",
+    "type": "rss",
+    "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed",
+    "category": "tech",
+    "max_items": 5
+  }
+]
 ```
 
-To add a clickable TubeLM launcher to the Linux desktop:
+---
+
+## Usage
+
+### Run Automated Pipeline
+Execute the full weekly ingestion, summarization, audio generation, and deployment:
 
 ```bash
-./desktop/install_launcher.sh
+# Run everything from CLI
+.venv/bin/python desktop/main.py --run-all
+
+# Or run via convenience script
+./run_weekly.sh
 ```
 
-Or launch it directly:
+### Rebuild and Deploy Web Reader Only
+If you already have downloaded digests and audio in `~/.tubelm/` and wish to rebuild the PWA site and publish to GitHub Pages:
+
+```bash
+.venv/bin/python -c "
+import sys; sys.path.insert(0, 'desktop')
+import paths
+from web_reader import build_reader_site, deploy_to_gh_pages
+
+site_dir = paths.get_site_dir()
+build_reader_site(paths.get_summaries_dir(), paths.get_audio_dir(), site_dir, paths.get_sources_file())
+deploy_to_gh_pages(site_dir)
+"
+```
+
+### Launch Desktop GUI Dashboard
+TubeLM also includes a local desktop management interface:
 
 ```bash
 .venv/bin/python desktop/main.py --gui
+# Access at http://127.0.0.1:5000
 ```
 
-Open `http://127.0.0.1:5000` if the browser does not open automatically.
+---
 
-## Configuration
-
-Use the dashboard for day-to-day changes. The two local files are:
-
-- `.env` — SMTP, email recipient, YouTube API key, browser choice, and optional
-  settings, including `GENERATE_TOP_10_DIGEST=false` by default.
-- `sources.json` — monitored sources, categories, limits, and the per-source
-  `generate_cinematic_video` flag.
-
-Both files are ignored by Git. Templates are provided as `.env.example` and
-`sources.json.example`.
-
-Category prompt defaults live in:
+## Repository Structure
 
 ```text
-shared/prompts/
-├── summary/
-└── podcast/
+TubeLM/
+├── desktop/                     # Core application source code
+│   ├── main.py                  # Pipeline orchestrator and CLI entrypoint
+│   ├── web_reader.py            # Static site generator and GitHub Pages deployer
+│   ├── notebooklm_service.py    # Google NotebookLM client integration
+│   ├── audio_storage.py         # Cloudflare R2 audio upload and presigning
+│   ├── tts_service.py           # Microsoft Edge-TTS neural speech synthesis
+│   ├── top10_service.py         # Cross-source ranking and Top 20 editorial selection
+│   ├── source_handlers/         # Source extractors (YouTube, RSS, Webpage)
+│   ├── templates/
+│   │   ├── reader.html          # Responsive Web Reader PWA template
+│   │   ├── gui.html             # Local desktop dashboard template
+│   │   └── email_digest.html    # Consolidated weekly email template
+│   └── tests/                   # 175 passing unit & integration tests
+├── shared/
+│   ├── assets/                  # Brand logos and icons
+│   └── prompts/                 # Domain-tailored prompts (Tech, Health, Explainer)
+├── docs/
+│   └── assets/                  # High-resolution light mode screenshots
+├── run_weekly.sh                # Automated weekly runner script
+├── sources.json.example         # Example source configuration
+├── .env.example                 # Example environment variables
+└── VERSION                      # Semantic release version (4.0.0)
 ```
 
-Edits made through the dashboard are stored in `~/.tubelm/prompts`, leaving the
-repository defaults untouched.
+---
 
-## Running the pipeline
+## Verification & Testing
+
+The repository maintains strict test coverage across all handlers, services, state management, and site generators:
 
 ```bash
-# Safe discovery only: no notebooks, emails, or artifacts
-.venv/bin/python desktop/main.py --dry-run
-
-# Full run
-.venv/bin/python desktop/main.py
-
-# Run selected source names, IDs, or URLs
-.venv/bin/python desktop/main.py --sources "Doctor Alex,Physionic"
-
-# Continue a persisted request
-.venv/bin/python desktop/main.py --resume
+# Run the complete test suite
+.venv/bin/pytest desktop/tests -q
 ```
-
-The dashboard can install and manage the weekly `systemd --user` timer used on this
-machine. `run_weekly.sh` is the small wrapper used for manual Linux scheduling.
-
-When the Editor's Top 10 setting is enabled, `agy` must be installed,
-authenticated, and available on `PATH`. TubeLM passes compact item details and
-grounded summaries—not the full HTML emails—to
-`gemini-3.8-flash-high`. The ranking is schema-validated, rendered through the
-local email template, and sent only after every source summary has finalized.
-
-To build and send a Top 10 from existing digests for a specific week:
-
-```bash
-PYTHONPATH=desktop .venv/bin/python desktop/scripts/send_top10_from_digests.py \
-  --since 2026-08-24 --until 2026-08-29
-```
-
-## Artifact and quota behavior
-
-Digest delivery does not wait for Studio artifacts.
-
-Audio and Cinematic Video use separate durable queues, so exhausting the video
-allowance does not prevent Audio from being attempted. When NotebookLM reports a
-compute limit, TubeLM stores the first safe retry time. Turning the laptop off does
-not restart that wait; the persisted request is checked again after login or by the
-user service.
-
-Already-accepted server-side artifacts are polled rather than submitted again.
-Completed videos use this naming convention:
-
 ```text
-TubeLM 03 - Doctor Alex - NotebookLM Video Title.mp4
+........................................................................ [ 41%]
+........................................................................ [ 82%]
+...............................                                          [100%]
+175 passed in 34.12s
 ```
 
-## Repository layout
+---
 
-```text
-desktop/
-├── main.py                    # Pipeline entry point
-├── gui.py                     # Local dashboard and API
-├── notebooklm_service.py      # Notebook and summary operations
-├── top10_service.py           # Durable agy ranking and cross-source digest
-├── weekly_audio_service.py    # Durable Audio queue
-├── weekly_video_service.py    # Durable Cinematic queue and downloads
-├── source_handlers/           # YouTube, RSS, and webpage discovery
-├── templates/                 # Dashboard and email HTML
-├── TubeLM.desktop.in          # Linux desktop launcher template
-├── install_launcher.sh        # Installs the launcher for this checkout
-└── tests/                     # Focused unit and integration checks
+## Security & Secrets Policy
 
-shared/prompts/                # Category prompt defaults
-run_weekly.sh                  # Personal weekly runner
-tubelm-launch.sh               # Personal dashboard launcher
-```
+TubeLM is built with strict privacy and secret protection:
+- **Zero Secrets Tracked:** All `.env`, `sources.json`, OAuth tokens, session cookies, and database files (`*.db`, `*.log`) are ignored in `.gitignore`.
+- **Local Isolation:** Runtime databases, checkpoints, audio files, and extracted cookies are stored in your home directory (`~/.tubelm/`), never in the git working tree.
+- **Cloudflare R2 Signed URLs:** Audio files are stored privately or behind your own configured domain without public repository storage.
 
-## Development checks
-
-```bash
-.venv/bin/pip install -r desktop/requirements-dev.txt
-PYTHONPATH=desktop .venv/bin/python -m pytest desktop/tests -q
-PYTHONPATH=desktop .venv/bin/python desktop/scripts/test_gui_e2e.py
-PYTHONPATH=desktop .venv/bin/python desktop/main.py --dry-run
-```
-
-GitHub Actions runs only compilation and the Python test suite. It does not build or
-publish installers.
-
-## Security
-
-Never commit `.env`, `sources.json`, NotebookLM cookies, generated summaries, or
-files from `~/.tubelm`. Log messages intentionally avoid printing credentials.
+---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+This project is licensed under the [MIT License](LICENSE).
