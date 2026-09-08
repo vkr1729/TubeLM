@@ -211,7 +211,7 @@ def _lead_for(text: str, max_words: int = 60) -> str:
 
 
 def _audio_seconds_for(audio_path: str | None) -> int:
-    """MP3 duration in seconds: mutagen when available, else size estimate at 128 kbps."""
+    """MP3/M4A duration in seconds: accurate ffprobe, mutagen, or container bitrate estimate."""
     if not audio_path:
         return 0
     p = Path(audio_path)
@@ -220,13 +220,35 @@ def _audio_seconds_for(audio_path: str | None) -> int:
             return 0
     except OSError:
         return 0
+    # 1. Primary: ffprobe for exact container duration (handles DASH/AAC containers output by NotebookLM)
     try:
-        from mutagen.mp3 import MP3
-        length = MP3(str(p)).info.length or 0
-        return int(length)
+        import subprocess
+        res = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(p)],
+            capture_output=True, text=True, timeout=3
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            import json as _json
+            data = _json.loads(res.stdout)
+            dur = float(data.get("format", {}).get("duration", 0))
+            if dur > 0:
+                return int(round(dur))
     except Exception:
         pass
+    # 2. Mutagen inspection
     try:
+        import mutagen
+        f = mutagen.File(str(p))
+        if f and hasattr(f, "info") and getattr(f.info, "length", 0) > 0:
+            return int(round(f.info.length))
+    except Exception:
+        pass
+    # 3. Size-based fallback: check if MPEG-4 DASH container (~256 kbps) or standard MP3 (~128 kbps)
+    try:
+        with open(p, "rb") as fp:
+            hdr = fp.read(16)
+        if b"ftyp" in hdr:
+            return int(round(p.stat().st_size * 8 / 256_000))
         return int(p.stat().st_size * 8 / 128_000)
     except OSError:
         return 0

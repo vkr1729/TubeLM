@@ -232,6 +232,12 @@
       height: 15px;
     }
 
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     /* Sidebar */
     .sidebar-pane {
       background: var(--sidebar-bg);
@@ -240,6 +246,30 @@
       flex-direction: column;
       flex-shrink: 0;
       z-index: 10;
+    }
+
+    .sidebar-filters-box {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .search-box-wrapper {
+      position: relative;
+      width: 100%;
+      display: flex;
+      align-items: center;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      width: 14px;
+      height: 14px;
+      color: var(--text-muted);
+      pointer-events: none;
     }
 
     .search-input {
@@ -261,6 +291,66 @@
 
     .search-input::placeholder {
       color: var(--text-muted);
+    }
+
+    .filters-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    .category-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .category-bar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .sources-header-row {
+      padding: 8px 8px 2px;
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .sources-unread-pill {
+      color: var(--accent-ink);
+      font-weight: 700;
+    }
+
+    .sources-sub-row {
+      padding: 2px 8px 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .unread-summary-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+      min-width: 0;
     }
 
     .cat-pill {
@@ -334,10 +424,11 @@
     .sidebar-item-meta {
       font-size: 11px;
       color: var(--text-muted);
-      margin-top: 2px;
+      margin-top: 3px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 5px;
+      flex-wrap: wrap;
     }
 
     .badge-audio {
@@ -1235,27 +1326,18 @@
       <span class="brand-name">TubeLM</span>
     </div>
 
-    <!-- Controls -->
-    <div class="flex items-center gap-1.5 sm:gap-2">
-      <div class="week-switcher">
-        <select id="week-selector" onchange="switchWeek(this.value)" class="week-select" title="Select digest week">
-          <option value="current" selected>Current Week</option>
-          <option value="prev">Previous Week</option>
-        </select>
-        <button id="btn-week-current" onclick="switchWeek('current')" style="display:none" class="week-btn active"></button>
-        <button id="btn-week-prev" onclick="switchWeek('prev')" style="display:none" class="week-btn"></button>
-      </div>
-
-      <a href="feed.xml" target="_blank" class="theme-toggle-btn" title="RSS Feed">
-        <svg class="w-3.5 h-3.5 text-amber-400" fill="currentColor" viewBox="0 0 24 24"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83c0-8.59-6.97-15.56-15.56-15.56zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg>
-      </a>
-
+    <!-- Global Controls -->
+    <div class="header-controls">
       <button id="btn-font-size" onclick="cycleFontSize()" class="theme-toggle-btn text-xs font-semibold" title="Adjust text size">Aa</button>
 
       <button id="theme-toggle" onclick="toggleTheme()" class="theme-toggle-btn" title="Toggle theme">
         <svg id="theme-icon-sun" class="hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 9h-1m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
         <svg id="theme-icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
       </button>
+
+      <a href="feed.xml" target="_blank" class="theme-toggle-btn" title="RSS Feed">
+        <svg class="w-3.5 h-3.5 text-amber-400" fill="currentColor" viewBox="0 0 24 24"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83c0-8.59-6.97-15.56-15.56-15.56zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg>
+      </a>
 
       <button id="mobile-sidebar-toggle" onclick="toggleSidebarMobile()" class="md:hidden theme-toggle-btn" title="Toggle sources">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -1270,18 +1352,29 @@
     <aside id="sidebar-pane" class="sidebar-pane w-full md:w-72 lg:w-80">
       
       <!-- Search & Filters -->
-      <div class="p-3 border-b border-[var(--border-color)] space-y-2">
-        <div class="relative">
+      <div class="sidebar-filters-box">
+        <div class="search-box-wrapper">
+          <svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
           <input type="text" id="filter-search" oninput="applyFilters()" placeholder="Filter channels... (/)" class="search-input">
-          <svg class="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
         </div>
 
-        <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar" id="category-bar">
-          <button onclick="setCategory('all')" id="cat-all" class="cat-pill active">All</button>
-          <button onclick="setCategory('tech')" id="cat-tech" class="cat-pill">Tech</button>
-          <button onclick="setCategory('health')" id="cat-health" class="cat-pill">Health</button>
-          <button onclick="setCategory('deep_explainer')" id="cat-deep_explainer" class="cat-pill">Explainer</button>
-          <button onclick="toggleBriefMode()" id="mode-brief" class="cat-pill" title="5-minute brief">Brief</button>
+        <div class="filters-row">
+          <div class="week-switcher">
+            <select id="week-selector" onchange="switchWeek(this.value)" class="week-select" title="Select digest week">
+              <option value="current" selected>Current Week</option>
+              <option value="prev">Previous Week</option>
+            </select>
+            <button id="btn-week-current" onclick="switchWeek('current')" style="display:none" class="week-btn active"></button>
+            <button id="btn-week-prev" onclick="switchWeek('prev')" style="display:none" class="week-btn"></button>
+          </div>
+
+          <div class="category-bar" id="category-bar">
+            <button onclick="setCategory('all')" id="cat-all" class="cat-pill active">All</button>
+            <button onclick="setCategory('tech')" id="cat-tech" class="cat-pill">Tech</button>
+            <button onclick="setCategory('health')" id="cat-health" class="cat-pill">Health</button>
+            <button onclick="setCategory('deep_explainer')" id="cat-deep_explainer" class="cat-pill">Explainer</button>
+            <button onclick="toggleBriefMode()" id="mode-brief" class="cat-pill" title="5-minute brief">Brief</button>
+          </div>
         </div>
       </div>
 
@@ -1300,12 +1393,12 @@
           </div>
         </button>
 
-        <div class="pt-2 pb-1 px-2 text-[10px] font-mono text-[var(--text-muted)] uppercase tracking-wider font-semibold flex items-center justify-between">
+        <div class="sources-header-row">
           <span>Sources (<span id="visible-channels-count">0</span>)</span>
-          <span id="unread-count" class="font-semibold" style="color: var(--accent-ink);"></span>
+          <span id="unread-count" class="sources-unread-pill"></span>
         </div>
-        <div class="px-2 pb-1 flex items-center justify-between gap-2">
-          <span id="unread-summary" class="text-[10px] font-mono text-[var(--text-muted)]"></span>
+        <div class="sources-sub-row">
+          <span id="unread-summary" class="unread-summary-text"></span>
           <button id="btn-play-all" onclick="playAllUnheard()" class="btn-play-all" title="Play all unheard overviews">▶ Play all unheard</button>
         </div>
 
@@ -1537,7 +1630,14 @@
           ? `<span class="text-[10px] text-[var(--success)]">✓</span>`
           : `<span class="unread-dot"></span>`;
         const readMin = ch.read_minutes ? `~${ch.read_minutes} min` : '';
-        const audioMin = (isPodcast && ch.audio_seconds) ? `· ${Math.max(1, Math.round(ch.audio_seconds / 60))}m podcast` : '';
+        const audioMin = (isPodcast && ch.audio_seconds) ? `${Math.max(1, Math.round(ch.audio_seconds / 60))}m audio` : '';
+
+        const metaParts = [
+          `${ch.video_count || 1} video${(ch.video_count || 1) > 1 ? 's' : ''}`,
+          readMin,
+          audioMin,
+          ch.subscribers ? esc(ch.subscribers) : ''
+        ].filter(Boolean);
 
         btn.innerHTML = `
           <div class="sidebar-item-header">
@@ -1549,10 +1649,7 @@
             </div>
           </div>
           <div class="sidebar-item-meta">
-            <span>${ch.video_count || 1} video${(ch.video_count || 1) > 1 ? 's' : ''}</span>
-            ${readMin ? `<span>${readMin}</span>` : ''}
-            ${audioMin ? `<span>${audioMin}</span>` : ''}
-            <span>${esc(ch.subscribers || '')}</span>
+            ${metaParts.join(' · ')}
           </div>
         `;
         container.appendChild(btn);
@@ -1562,10 +1659,10 @@
       document.getElementById('unread-count').textContent = unreadChannels.length > 0 ? `${unreadChannels.length} unread` : 'All read ✓';
       const sumEl = document.getElementById('unread-summary');
       if (sumEl) {
-        const podcastPart = unreadPodcastCount > 0 ? ` · ${unreadPodcastCount} podcast${unreadPodcastCount > 1 ? 's' : ''} (${fmtAudioDur(unreadPodcastSec)})` : '';
+        const podcastPart = unreadPodcastCount > 0 ? ` · ${unreadPodcastCount} podcasts (${fmtAudioDur(unreadPodcastSec)})` : '';
         sumEl.textContent = unreadChannels.length > 0
-          ? `Unread: ${unreadChannels.length} channels · ${unreadReadMin} min read${podcastPart}`
-          : 'All channels read ✓';
+          ? `${unreadReadMin}m read${podcastPart}`
+          : 'All caught up ✓';
       }
       const playBtn = document.getElementById('btn-play-all');
       if (playBtn) {
@@ -2231,9 +2328,10 @@
         if (sameSrc && isFinite(globalAudio.currentTime)) cur = globalAudio.currentTime;
         else cur = parseFloat(localStorage.getItem('tubelm_pos:' + t.src) || '0') || 0;
         if (sameSrc && isFinite(globalAudio.duration) && globalAudio.duration) dur = globalAudio.duration;
+        if (!dur && ch.audio_seconds) dur = ch.audio_seconds;
       } catch (_) {}
       if (subEl) subEl.textContent = `${ch.category || t.category || ''} · ${fmtClock(cur)} / ${dur ? fmtClock(dur) : '--:--'}`;
-      if (playEl) playEl.textContent = (isAudioPlaying && !globalAudio.paused) ? '⏸' : '⏯';
+      if (playEl) playEl.textContent = (isAudioPlaying && !globalAudio.paused) ? '⏸' : '▶';
       if (speedEl) speedEl.textContent = `${player.speed || 1.0}x`;
       if (progEl) progEl.style.width = dur > 0 ? `${(cur / dur) * 100}%` : '0%';
     }
