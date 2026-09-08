@@ -241,6 +241,50 @@ def _load_audio_manifest(audio_dir: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def sync_audio_manifest(audio_dir: Path) -> None:
+    """Sync manifest.json with completed weekly audio batches across all ISO week dates."""
+    batches_file = paths.get_weekly_audio_batches_file()
+    if not batches_file.exists():
+        return
+    try:
+        data = json.loads(batches_file.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    manifest_path = audio_dir / "manifest.json"
+    manifest = _load_audio_manifest(audio_dir)
+    modified = False
+    for batch in data.get("batches", []):
+        week_start_str = batch.get("week_start")
+        if not week_start_str:
+            continue
+        try:
+            ws_date = datetime.strptime(week_start_str, "%Y-%m-%d").date()
+            week_dates = [ws_date + timedelta(days=i) for i in range(7)]
+        except ValueError:
+            continue
+        for entry in batch.get("entries", []):
+            if entry.get("state") != "completed":
+                continue
+            safe = paths.safe_channel_name(entry.get("source_name", ""))
+            filename = entry.get("audio_file") or f"{week_start_str}_{safe}.mp3"
+            nb_id = entry.get("notebook_id", "")
+            for d in week_dates:
+                key = f"{d.isoformat()}|{safe}"
+                if key not in manifest or manifest[key].get("file") != filename:
+                    manifest[key] = {"notebook_id": nb_id, "file": filename}
+                    modified = True
+    if modified:
+        try:
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            tmp = manifest_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            os.replace(tmp, manifest_path)
+            logger.info("Synchronized %d audio manifest entries.", len(manifest))
+        except Exception:
+            logger.exception("Failed to write updated audio manifest:")
+
+
+
 def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], audio_dir: Path) -> dict[str, Any] | None:
     """Build reader dict from structured sidecar JSON without HTML scraping."""
     try:
@@ -298,14 +342,14 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
     audio_filename = None
     audio_path = None
     audio_url = None
-    if len(videos) > 1 and audio_dir.exists():
+    if audio_dir.exists():
         manifest = _load_audio_manifest(audio_dir)
         hit = manifest.get(f"{run_date}|{safe_name}")
         if hit and isinstance(hit, dict):
             p = audio_dir / str(hit.get("file", ""))
             if p.name and p.exists() and p.stat().st_size > 0:
                 has_audio, audio_path, audio_filename = True, p, p.name
-        if not has_audio:
+        if not has_audio and len(videos) > 1:
             p = audio_dir / f"{run_date}_{safe_name}.mp3"
             if p.exists() and p.stat().st_size > 0:
                 has_audio, audio_path, audio_filename = True, p, p.name
@@ -397,7 +441,7 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
     audio_filename = None
     audio_path = None
 
-    if len(videos) > 1 and audio_dir.exists():
+    if audio_dir.exists():
         manifest = _load_audio_manifest(audio_dir)
         hit = manifest.get(f"{run_date}|{safe_name}")
         if hit and isinstance(hit, dict):
@@ -405,7 +449,7 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
             if p.name and p.exists() and p.stat().st_size > 0:
                 has_audio, audio_path, audio_filename = True, p, p.name
         # fallback ONLY for legacy files: exact run_date prefix, never a glob
-        if not has_audio:
+        if not has_audio and len(videos) > 1:
             p = audio_dir / f"{run_date}_{safe_name}.mp3"
             if p.exists() and p.stat().st_size > 0:
                 has_audio, audio_path, audio_filename = True, p, p.name
@@ -604,6 +648,9 @@ def build_reader_site(
         compress_audio = env_val.strip().lower() in ("1", "true", "yes")
 
     logger.info("Building Web Reader site (compress_audio=%s)...", compress_audio)
+
+    # Ensure audio manifest reflects all completed weekly batches
+    sync_audio_manifest(audio_dir)
 
     # Pure build: no destructive purge here (main.py purges post-deploy).
     # 1. Map channels
