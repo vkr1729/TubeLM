@@ -776,7 +776,7 @@ def build_reader_site(
             "channels": channels,
             "top20": top20_data,
             "total_read_minutes": sum(int(ch.get("read_minutes") or 0) for ch in channels),
-            "total_audio_seconds": sum(int(ch.get("audio_seconds") or ch.get("summary_audio_seconds") or 0) for ch in channels),
+            "total_audio_seconds": sum(int(ch.get("audio_seconds") or 0) for ch in channels),
             "channel_count": len(channels),
         }
 

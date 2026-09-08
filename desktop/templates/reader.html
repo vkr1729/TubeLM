@@ -356,6 +356,177 @@
       border-color: rgba(45, 76, 0, 0.22);
     }
 
+    .badge-podcast {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      background: rgba(206, 255, 26, 0.15);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+    }
+
+    :root[data-theme="light"] .badge-podcast {
+      color: #244c00;
+      background: rgba(45, 90, 0, 0.12);
+      border-color: rgba(45, 90, 0, 0.35);
+    }
+
+    /* Modern, compact iOS Sub-Navigation & Header Bar */
+    .view-top-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 12px;
+    }
+    @media (min-width: 769px) {
+      .view-top-nav {
+        display: none;
+      }
+    }
+
+    .view-heading-block {
+      margin-bottom: 14px;
+    }
+
+    .view-heading-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.25;
+      margin: 0;
+    }
+
+    .view-heading-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .view-subnav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 16px;
+    }
+
+    .btn-subnav-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--soft-hover);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+      text-decoration: none;
+    }
+    @media (min-width: 769px) {
+      .btn-subnav-back {
+        display: none;
+      }
+    }
+
+    .subnav-title-group {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .subnav-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.2;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .subnav-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .subnav-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .btn-subnav-pill {
+      background: var(--soft-hover);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      border-radius: 9999px;
+      padding: 5px 11px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+
+    .btn-subnav-pill.is-read {
+      color: var(--success);
+      border-color: rgba(46, 213, 115, 0.35);
+      background: rgba(46, 213, 115, 0.1);
+    }
+
+    .btn-subnav-nb {
+      background: var(--accent);
+      color: var(--accent-text);
+      border: none;
+      border-radius: 9999px;
+      padding: 5px 11px;
+      font-size: 11px;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .btn-summary-tts {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--soft-hover);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 4px 9px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 8px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    .btn-summary-tts:hover {
+      color: var(--text-primary);
+      border-color: var(--text-muted);
+    }
+
     .unread-dot {
       width: 6px;
       height: 6px;
@@ -728,7 +899,13 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 60%;
+      max-width: 45%;
+    }
+
+    @media (max-width: 640px) {
+      .audio-track-title {
+        display: none;
+      }
     }
 
     .audio-progress-bar-bg {
@@ -1332,10 +1509,14 @@
       const sortedChannels = [...unreadChannels, ...readChannels];
 
       let unreadReadMin = 0;
-      let unreadAudioSec = 0;
+      let unreadPodcastSec = 0;
+      let unreadPodcastCount = 0;
       unreadChannels.forEach(ch => {
         unreadReadMin += (ch.read_minutes || 0);
-        unreadAudioSec += (ch.audio_seconds || ch.summary_audio_seconds || 0);
+        if (ch.has_audio && ch.audio_url && !isHeard(ch.audio_url)) {
+          unreadPodcastSec += (ch.audio_seconds || 0);
+          unreadPodcastCount++;
+        }
       });
 
       sortedChannels.forEach(ch => {
@@ -1346,17 +1527,17 @@
         btn.className = `sidebar-item ${isSelected ? 'active' : ''} ${isRead ? 'is-read' : ''}`;
         btn.onclick = () => selectChannel(ch.id);
 
-        const audioBadge = ch.has_audio
-          ? `<span class="badge-audio">Audio</span>`
-          : (ch.summary_audio_url ? `<span class="badge-audio" style="opacity:0.85">TTS</span>` : '');
-        const trackSrc = ch.audio_url || ch.summary_audio_url;
+        const isPodcast = !!(ch.has_audio && ch.audio_url);
+        const audioBadge = isPodcast
+          ? `<span class="badge-podcast">▶ Podcast</span>`
+          : '';
+        const trackSrc = isPodcast ? ch.audio_url : '';
         const heardBadge = (trackSrc && isHeard(trackSrc)) ? `<span class="heard-badge">♪ heard</span>` : '';
         const readIndicator = isRead
           ? `<span class="text-[10px] text-[var(--success)]">✓</span>`
           : `<span class="unread-dot"></span>`;
         const readMin = ch.read_minutes ? `~${ch.read_minutes} min` : '';
-        const effSec = ch.audio_seconds || ch.summary_audio_seconds || 0;
-        const audioMin = effSec ? `· ${Math.max(1, Math.round(effSec / 60))}m audio` : '';
+        const audioMin = (isPodcast && ch.audio_seconds) ? `· ${Math.max(1, Math.round(ch.audio_seconds / 60))}m podcast` : '';
 
         btn.innerHTML = `
           <div class="sidebar-item-header">
@@ -1381,9 +1562,14 @@
       document.getElementById('unread-count').textContent = unreadChannels.length > 0 ? `${unreadChannels.length} unread` : 'All read ✓';
       const sumEl = document.getElementById('unread-summary');
       if (sumEl) {
+        const podcastPart = unreadPodcastCount > 0 ? ` · ${unreadPodcastCount} podcast${unreadPodcastCount > 1 ? 's' : ''} (${fmtAudioDur(unreadPodcastSec)})` : '';
         sumEl.textContent = unreadChannels.length > 0
-          ? `Unread: ${unreadChannels.length} channels · ${unreadReadMin} min · ${fmtAudioDur(unreadAudioSec)} audio`
-          : '';
+          ? `Unread: ${unreadChannels.length} channels · ${unreadReadMin} min read${podcastPart}`
+          : 'All channels read ✓';
+      }
+      const playBtn = document.getElementById('btn-play-all');
+      if (playBtn) {
+        playBtn.innerHTML = unreadPodcastCount > 0 ? `► Play podcasts (${unreadPodcastCount})` : `► Play podcasts`;
       }
       updatePillMinutes();
       updateBriefButton();
@@ -1430,18 +1616,30 @@
         const readPicks = items.filter(it => isTopItemRead(it.video_id || it.url));
         const sortedPicks = hideSeen ? unreadPicks : [...unreadPicks, ...readPicks];
         const seenCount = readPicks.length;
-        const weekLine = `This week: ${weekData.total_read_minutes || 0} min · ${fmtAudioDur(weekData.total_audio_seconds || 0)} audio`;
 
         let html = `
-          <article class="max-w-4xl mx-auto space-y-6">
-            ${mobileBackNav}
-            <div class="border-b border-[var(--border-color)] pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <article class="max-w-4xl mx-auto space-y-4">
+            <!-- Mobile Top Bar: Back & Actions -->
+            <div class="view-top-nav">
+              <button onclick="showSidebarMobile()" class="btn-subnav-back" title="Back to Channels">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+                <span>Channels</span>
+              </button>
               <div>
-                <h1 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">Editorial Picks</h1>
-                <div class="text-xs text-[var(--text-muted)] mt-1">${esc(weekLine)} · <span>${esc(weekData.run_date || '')}</span></div>
+                ${seenCount > 0 ? `<button onclick="toggleHideSeen()" class="btn-subnav-pill">${hideSeen ? `Show Seen (${seenCount})` : `Hide Seen (${seenCount})`}</button>` : ''}
               </div>
-              <div class="flex items-center gap-2 flex-shrink-0">
-                ${seenCount > 0 ? `<button onclick="toggleHideSeen()" class="btn-secondary text-xs">${hideSeen ? `Show Seen (${seenCount})` : `Hide Seen (${seenCount})`}</button>` : ''}
+            </div>
+
+            <!-- Title & Meta Header Block -->
+            <div class="view-heading-block">
+              <div class="flex items-center justify-between gap-2">
+                <div>
+                  <h1 class="view-heading-title">Editorial Picks</h1>
+                  <div class="view-heading-meta">Top 20 curated videos · ~${weekData.total_read_minutes || 50} min read</div>
+                </div>
+                <div class="hidden sm:block">
+                  ${seenCount > 0 ? `<button onclick="toggleHideSeen()" class="btn-subnav-pill">${hideSeen ? `Show Seen (${seenCount})` : `Hide Seen (${seenCount})`}</button>` : ''}
+                </div>
               </div>
             </div>
 
@@ -1508,20 +1706,22 @@
                 <div class="flex items-center gap-2">
                   <span class="audio-pulse-dot"></span>
                   <span class="audio-title">Audio Overview</span>
+                  <span class="audio-badge">NotebookLM · ${ch.audio_seconds ? Math.round(ch.audio_seconds / 60) + 'm' : ''}</span>
                 </div>
-                <span class="audio-badge">NotebookLM</span>
+                <div>
+                  ${(typeof player !== 'undefined' && player.queue.some(t => t.src === ch.audio_url)) ? '<span class="text-xs text-[var(--success)] font-medium">In Queue ✓</span>' : `<button onclick="enqueueChannel('${ch.id}')" class="btn-subnav-pill" style="padding: 2px 9px; font-size: 11px;" title="Add to queue">＋ Queue</button>`}
+                </div>
               </div>
 
               <div class="audio-controls">
-                <button onclick="playChannelAudio('${ch.id}')" class="audio-play-btn" title="Play / Pause">
+                <button onclick="playChannelAudio('${ch.id}')" class="audio-play-btn" title="Play NotebookLM Podcast">
                   <svg id="play-icon" viewBox="0 0 24 24"><path d="${(typeof isAudioPlaying !== 'undefined' && isAudioPlaying && typeof currentAudioSrc !== 'undefined' && currentAudioSrc === ch.audio_url) ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z'}"/></svg>
                 </button>
-                ${(typeof player !== 'undefined' && player.queue.some(t => t.src === ch.audio_url)) ? '' : `<button onclick="enqueueChannel('${ch.id}')" class="btn-seen" title="Add to queue">＋ Queue</button>`}
                 <div class="audio-progress-container">
                   <div class="audio-time-row">
                     <span id="audio-time-current">00:00</span>
                     <span class="audio-track-title">${esc(ch.name)}</span>
-                    <span id="audio-time-duration">--:--</span>
+                    <span id="audio-time-duration">${ch.audio_seconds ? formatTime(ch.audio_seconds) : '--:--'}</span>
                   </div>
                   <div class="audio-progress-bar-bg" onclick="seekAudio(event)" data-audio-src="${ch.audio_url}">
                     <div id="audio-progress-bar" class="audio-progress-bar-fill"></div>
@@ -1573,38 +1773,60 @@
         });
 
         let notebookLinkBtn = ch.notebook_url ? `
-          <a href="${ch.notebook_url}" target="_blank" class="btn-primary">
+          <a href="${ch.notebook_url}" target="_blank" class="btn-subnav-nb" title="Open NotebookLM">
             <span>Notebook ↗</span>
           </a>
         ` : '';
 
-        pane.innerHTML = `
-          <article class="max-w-4xl mx-auto space-y-6">
-            ${mobileBackNav}
-            <div class="border-b border-[var(--border-color)] pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h1 class="text-2xl font-bold tracking-tight text-[var(--text-primary)]">${esc(ch.name)}</h1>
-                <div class="flex items-center gap-2 mt-1 text-xs text-[var(--text-muted)]">
-                  <span>${weekData.run_date}</span>
-                  <span>·</span>
-                  <span>${ch.videos ? ch.videos.length : 0} videos</span>
-                  ${ch.subscribers ? `<span>·</span><span>${esc(ch.subscribers)}</span>` : ''}
-                </div>
-              </div>
+        const listenBtn = ch.summary_audio_url ? `
+          <button onclick="playSummaryAudio('${ch.id}')" class="btn-subnav-pill" title="Listen to Summary">
+            <span>🔊 Listen</span>
+          </button>
+        ` : '';
 
-              <div class="flex items-center gap-2 flex-shrink-0">
-                ${ch.summary_audio_url ? `<button onclick="playSummaryAudio('${ch.id}')" class="btn-secondary text-xs" title="Listen to spoken summary">🔊 Listen to Summary</button>` : ''}
-                <button onclick="toggleRead('${ch.id}')" class="btn-secondary" data-role="read-toggle">
-                  <span>${isRead ? 'Mark as Unread' : 'Mark as Read ✓'}</span>
+        pane.innerHTML = `
+          <article class="max-w-4xl mx-auto space-y-4">
+            <!-- Mobile Top Bar: Back & Actions -->
+            <div class="view-top-nav">
+              <button onclick="showSidebarMobile()" class="btn-subnav-back" title="Back to Channels">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+                <span>Channels</span>
+              </button>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                ${listenBtn}
+                <button onclick="toggleRead('${ch.id}')" class="btn-subnav-pill ${isRead ? 'is-read' : ''}" data-role="read-toggle">
+                  ${isRead ? 'Read ✓' : 'Mark Read'}
                 </button>
                 ${notebookLinkBtn}
               </div>
             </div>
 
-            <!-- Conditional Audio Overview Player -->
+            <!-- Title & Meta Header Block -->
+            <div class="view-heading-block">
+              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <h1 class="view-heading-title">${esc(ch.name)}</h1>
+                  <div class="view-heading-meta">
+                    <span>${ch.videos ? ch.videos.length : 0} video${(ch.videos && ch.videos.length > 1) ? 's' : ''}</span>
+                    <span>·</span>
+                    <span>~${ch.read_minutes || 2} min read</span>
+                    ${ch.subscribers ? `<span>·</span><span>${esc(ch.subscribers)}</span>` : ''}
+                  </div>
+                </div>
+                <div class="hidden sm:flex items-center gap-2 flex-shrink-0">
+                  ${listenBtn}
+                  <button onclick="toggleRead('${ch.id}')" class="btn-subnav-pill ${isRead ? 'is-read' : ''}" data-role="read-toggle">
+                    ${isRead ? 'Read ✓' : 'Mark Read'}
+                  </button>
+                  ${notebookLinkBtn}
+                </div>
+              </div>
+            </div>
+
+            <!-- Conditional Audio Overview Player (Right at top of channel!) -->
             ${audioSection}
 
-            <!-- Video Cards (No duplicate summary block!) -->
+            <!-- Video Cards with Inline TTS option -->
             <div class="space-y-4">
               ${videosHtml || `<div class="text-sm text-[var(--text-muted)] py-6">No individual video entries for this digest.</div>`}
             </div>
@@ -1822,11 +2044,12 @@
     function buildQueue(weekKey, opts) {
       const unheardOnly = !opts || opts.unheardOnly !== false;
       const weekData = SITE_DATA.weeks[weekKey || currentWeekKey] || { channels: [] };
-      const list = (weekData.channels || []).map(ch => {
-        const src = ch.audio_url || ch.summary_audio_url;
-        const isSummary = !ch.audio_url && !!ch.summary_audio_url;
-        return { ch, src, isSummary };
-      }).filter(item =>
+      // ONLY NotebookLM podcasts! Keep TTS completely separate.
+      const list = (weekData.channels || []).filter(ch => ch.has_audio && ch.audio_url).map(ch => ({
+        ch,
+        src: ch.audio_url,
+        isSummary: false,
+      })).filter(item =>
         item.src &&
         (currentCategoryId === 'all' || item.ch.category === currentCategoryId) &&
         (!unheardOnly || !isHeard(item.src))
@@ -1843,9 +2066,9 @@
         chId: item.ch.id,
         weekKey: weekKey || currentWeekKey,
         src: item.src,
-        title: item.ch.name + (item.isSummary ? ' (Summary)' : ''),
+        title: item.ch.name,
         category: item.ch.category,
-        summary: item.isSummary,
+        summary: false,
       }));
       player.index = -1;
       savePlayer();
