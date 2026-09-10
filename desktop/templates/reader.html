@@ -1310,12 +1310,24 @@
       border-color: rgba(92, 122, 16, 0.4);
       color: #4a6809;
     }
-    .video-card.is-watched {
-      opacity: 0.62;
-      transition: opacity 0.2s ease;
+    .video-card.is-watched,
+    .editorial-card.is-watched {
+      opacity: 0.52 !important;
+      background: var(--card-bg-watched, rgba(20, 21, 18, 0.6)) !important;
+      border-color: var(--border-color) !important;
+      filter: grayscale(15%);
+      transition: none !important;
     }
-    .video-card.is-watched:hover {
-      opacity: 0.95;
+    :root[data-theme="light"] .video-card.is-watched,
+    :root[data-theme="light"] .editorial-card.is-watched {
+      background: rgba(235, 235, 230, 0.65) !important;
+      border-color: rgba(0, 0, 0, 0.08) !important;
+      opacity: 0.55 !important;
+    }
+    .video-card.is-watched:hover,
+    .editorial-card.is-watched:hover {
+      opacity: 0.68 !important;
+      border-color: var(--border-focus) !important;
     }
     /* --- utilities formerly from Tailwind Play CDN --- */
     .hidden{display:none!important}.flex{display:flex}.inline-flex{display:inline-flex}.block{display:block}
@@ -1376,7 +1388,9 @@
     .brief-sticky{position:sticky;bottom:0;padding:12px 0 4px;background:linear-gradient(transparent,var(--bg-dark) 40%)}
     .seen-tag{font-size:10px;color:var(--success);border:1px solid var(--border-color);border-radius:6px;padding:1px 6px}
     .btn-seen{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
-      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
+      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;transition:none!important}
+    .btn-seen.is-seen{background:rgba(158,232,36,0.1)!important;border-color:rgba(158,232,36,0.35)!important;color:#9fe824!important;font-weight:600}
+    :root[data-theme="light"] .btn-seen.is-seen{background:rgba(92,122,16,0.12)!important;border-color:rgba(92,122,16,0.4)!important;color:#4a6809!important}
     .pref-chip{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
       padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
   </style>
@@ -1463,7 +1477,7 @@
         </div>
         <div class="sources-sub-row">
           <span id="unread-summary" class="unread-summary-text"></span>
-          <button id="btn-play-all" onclick="playAllUnheard()" class="btn-play-all" title="Play all unheard overviews">▶ Play all unheard</button>
+          <button id="btn-play-all" onclick="playAllUnheard()" class="btn-play-all" style="display: none;" title="Play all unheard overviews">► Play podcasts</button>
         </div>
 
         <div id="channels-container" class="space-y-1">
@@ -1519,9 +1533,44 @@
     function saveTop20Read() {
       try { localStorage.setItem('tubelm_top20_read', JSON.stringify(Array.from(top20Read))); } catch (_) {}
     }
-    function topItemKey(item) { return item.video_id || item.url; }
-    function isTopItemRead(id) { return !!(id && top20Read.has(id)); }
-    function isVideoWatched(id) { return !!(id && top20Read.has(id)); }
+    function normalizeVideoUrl(url) {
+      if (!url) return '';
+      try {
+        const u = new URL(url, 'https://youtube.com');
+        if (u.hostname.includes('youtube.com') || u.hostname.includes('youtu.be')) {
+          if (u.searchParams.has('v')) return u.searchParams.get('v');
+          if (u.pathname.length > 1) return u.pathname.slice(1);
+        }
+        return u.origin + u.pathname;
+      } catch (_) {
+        return String(url).trim();
+      }
+    }
+
+    function isVideoWatched(vid, url) {
+      if (vid && top20Read.has(vid)) return true;
+      if (url && top20Read.has(url)) return true;
+      const norm = normalizeVideoUrl(url || vid);
+      if (norm && top20Read.has(norm)) return true;
+      return false;
+    }
+    function isTopItemRead(vid, url) {
+      return isVideoWatched(vid, url);
+    }
+
+    function markVideoWatchedState(vid, url, makeWatched) {
+      const keys = [];
+      if (vid) keys.push(vid);
+      if (url) keys.push(url);
+      const norm = normalizeVideoUrl(url || vid);
+      if (norm && !keys.includes(norm)) keys.push(norm);
+
+      keys.forEach(k => {
+        if (makeWatched) top20Read.add(k);
+        else top20Read.delete(k);
+      });
+      saveTop20Read();
+    }
 
     function getChannelReadKey(chId, weekKey) {
       const wData = SITE_DATA.weeks[weekKey || currentWeekKey] || {};
@@ -1566,7 +1615,7 @@
       }
       if (!ch || !ch.videos || ch.videos.length === 0) return;
 
-      const allWatched = ch.videos.every(v => isTopItemRead(v.video_id || v.url));
+      const allWatched = ch.videos.every(v => isVideoWatched(v.video_id, v.url));
       const canonicalKey = getChannelReadKey(ch.id, wk);
       const slotKey = `${wk}_${ch.id}`;
 
@@ -1583,36 +1632,59 @@
       }
     }
 
-    function toggleVideoWatched(vidKey, chId) {
+    function toggleVideoWatched(vidKey, chId, btnEl) {
       if (!vidKey) return;
-      if (top20Read.has(vidKey)) {
-        top20Read.delete(vidKey);
-      } else {
-        top20Read.add(vidKey);
+      const willBeWatched = !isVideoWatched(vidKey);
+      markVideoWatchedState(vidKey, null, willBeWatched);
+
+      if (btnEl) {
+        const card = btnEl.closest('.video-card, .editorial-card');
+        if (card) {
+          if (willBeWatched) {
+            card.classList.add('is-watched');
+            btnEl.classList.add('is-seen');
+            btnEl.innerHTML = 'Watched ✓';
+          } else {
+            card.classList.remove('is-watched');
+            btnEl.classList.remove('is-seen');
+            btnEl.innerHTML = '✓ Mark Watched';
+          }
+        }
       }
-      saveTop20Read();
+
       syncChannelReadStateForVideo(vidKey, chId);
       renderSidebar();
       renderActiveView();
     }
 
-    function toggleTopItemRead(id) {
+    function toggleTopItemRead(id, btnEl) {
       if (!id) return;
-      if (top20Read.has(id)) {
-        top20Read.delete(id);
-      } else {
-        top20Read.add(id);
+      const willBeRead = !isVideoWatched(id);
+      markVideoWatchedState(id, null, willBeRead);
+
+      if (btnEl) {
+        const card = btnEl.closest('.editorial-card, .video-card');
+        if (card) {
+          if (willBeRead) {
+            card.classList.add('is-watched');
+            btnEl.classList.add('is-seen');
+            btnEl.innerHTML = 'Watched ✓';
+          } else {
+            card.classList.remove('is-watched');
+            btnEl.classList.remove('is-seen');
+            btnEl.innerHTML = '✓ Mark Watched';
+          }
+        }
       }
-      saveTop20Read();
+
       syncChannelReadStateForVideo(id);
       renderSidebar();
       renderActiveView();
     }
 
     function markTopSeen(id) {
-      if (!id || top20Read.has(id)) return;
-      top20Read.add(id);
-      saveTop20Read();
+      if (!id || isVideoWatched(id)) return;
+      markVideoWatchedState(id, null, true);
       syncChannelReadStateForVideo(id);
       renderSidebar();
     }
@@ -1650,13 +1722,8 @@
       const ch = ((SITE_DATA.weeks[wk] || {}).channels || []).find(c => c.id === chId);
       if (ch && ch.videos) {
         ch.videos.forEach(v => {
-          const k = v.video_id || v.url;
-          if (k) {
-            if (nowRead) top20Read.add(k);
-            else top20Read.delete(k);
-          }
+          markVideoWatchedState(v.video_id, v.url, nowRead);
         });
-        saveTop20Read();
       }
 
       renderSidebar();
@@ -1832,7 +1899,12 @@
       }
       const playBtn = document.getElementById('btn-play-all');
       if (playBtn) {
-        playBtn.innerHTML = unreadPodcastCount > 0 ? `► Play podcasts (${unreadPodcastCount})` : `► Play podcasts`;
+        if (unreadPodcastCount > 1) {
+          playBtn.style.display = 'inline-block';
+          playBtn.innerHTML = `► Play podcasts (${unreadPodcastCount})`;
+        } else {
+          playBtn.style.display = 'none';
+        }
       }
       updatePillMinutes();
       updateBriefButton();
@@ -1874,9 +1946,18 @@
       }
       if (selectedItemId === 'top20') {
         const top20 = weekData.top20 || { items: [] };
-        const items = top20.items || [];
-        const unreadPicks = items.filter(it => !isTopItemRead(it.video_id || it.url));
-        const readPicks = items.filter(it => isTopItemRead(it.video_id || it.url));
+        const rawItems = top20.items || [];
+        const seenTopKeys = new Set();
+        const items = [];
+        for (const it of rawItems) {
+          const k = it.video_id || it.url || (it.title || '').trim().toLowerCase();
+          if (k && !seenTopKeys.has(k)) {
+            seenTopKeys.add(k);
+            items.push(it);
+          }
+        }
+        const unreadPicks = items.filter(it => !isTopItemRead(it.video_id, it.url));
+        const readPicks = items.filter(it => isTopItemRead(it.video_id, it.url));
         const sortedPicks = hideSeen ? unreadPicks : [...unreadPicks, ...readPicks];
         const seenCount = readPicks.length;
 
@@ -1910,12 +1991,12 @@
         `;
 
         sortedPicks.forEach(item => {
-          const isVideo = item.source_type === 'youtube';
-          const hasVideoId = isVideo && item.video_id;
-          const seen = isTopItemRead(item.video_id || item.url);
+          const isVideo = item.source_type === 'youtube' || Boolean(item.video_id);
+          const hasVideoId = Boolean(item.video_id);
+          const seen = isTopItemRead(item.video_id, item.url);
           const key = escapeQuotes(item.video_id || item.url);
           html += `
-            <div class="editorial-card ${seen ? 'opacity-60' : ''}">
+            <div class="editorial-card ${seen ? 'is-watched' : ''}">
               <div>
                 <div class="flex items-center justify-between text-xs mb-1.5">
                   <span class="editorial-rank">#${String(item.rank).padStart(2, '0')}</span>
@@ -1932,7 +2013,7 @@
                 <span class="date">${esc(item.published || '')}${item.duration ? ` · <span class="font-mono text-[11px] font-semibold text-[var(--text-primary)]">⏱ ${esc(item.duration)}</span>` : ''}</span>
                 <div class="flex items-center gap-2">
                   ${seen ? `<span class="seen-tag">✓ Watched</span>` : ''}
-                  <button onclick="toggleTopItemRead('${key}')" class="btn-seen" title="Toggle watched status">${seen ? 'Watched ✓' : '✓ Mark Watched'}</button>
+                  <button onclick="toggleTopItemRead('${key}', this)" class="btn-seen ${seen ? 'is-seen' : ''}" title="Toggle watched status">${seen ? 'Watched ✓' : '✓ Mark Watched'}</button>
                   ${hasVideoId ? `
                     <button onclick="playVideo('${item.video_id}', '${escapeQuotes(item.title)}')" class="btn-play" title="Play Video">
                       Play ▶
@@ -2006,7 +2087,7 @@
           const playerId = `player-${ch.id}-${idx}`;
           const safeTitle = escapeQuotes(v.title);
           const vidKey = escapeQuotes(v.video_id || v.url);
-          const isWatched = isVideoWatched(v.video_id || v.url);
+          const isWatched = isVideoWatched(v.video_id, v.url);
           videosHtml += `
             <div class="video-card ${isWatched ? 'is-watched' : ''}">
               <div class="video-card-header">
@@ -2015,7 +2096,7 @@
                     <h3 class="video-card-title">
                       <a href="${v.url}" target="_blank">${esc(v.title)}</a>
                     </h3>
-                    <button onclick="toggleVideoWatched('${vidKey}', '${ch.id}')" class="btn-seen-sm ${isWatched ? 'is-seen' : ''}" title="Toggle watched status">
+                    <button onclick="toggleVideoWatched('${vidKey}', '${ch.id}', this)" class="btn-seen-sm ${isWatched ? 'is-seen' : ''}" title="Toggle watched status">
                       ${isWatched ? 'Watched ✓' : '✓ Mark Watched'}
                     </button>
                   </div>

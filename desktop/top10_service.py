@@ -117,6 +117,9 @@ def _source_candidates(channel_data: dict[str, Any]) -> list[dict[str, str]]:
 
     candidates = []
     for item in items:
+        # Top 20 is strictly reserved for videos to ensure 100% playable cards, durations, and watch-sync
+        if source_type != "youtube" and not item.get("video_id"):
+            continue
         url = _safe_web_url(item.get("url"))
         title = str(item.get("title") or "").strip()
         if not url or not title:

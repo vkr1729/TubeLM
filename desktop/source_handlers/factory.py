@@ -16,10 +16,12 @@ def create_handler(source_config: dict, cfg: object = None) -> BaseSourceHandler
             category=category,
         )
     elif source_type == "rss":
+        behind_paywall = source_config.get("behind_paywall", True)
         return GenericRSSHandler(
             name=source_config["name"],
             url=source_config["url"],
             force_text_extraction=source_config.get("force_text_extraction", False),
+            behind_paywall=behind_paywall,
             max_items=source_config.get("max_items", 15),
             category=category,
         )

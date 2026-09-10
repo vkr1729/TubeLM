@@ -28,10 +28,19 @@ def _parse_feed_datetime(entry) -> datetime:
 
 
 class GenericRSSHandler(BaseSourceHandler):
-    def __init__(self, name: str, url: str, force_text_extraction: bool = False, max_items: int = 15, category: str = "tech"):
+    def __init__(
+        self,
+        name: str,
+        url: str,
+        force_text_extraction: bool = False,
+        behind_paywall: bool = False,
+        max_items: int = 15,
+        category: str = "tech",
+    ):
         self._name = name
         self._url = url
         self._force_text_extraction = force_text_extraction
+        self._behind_paywall = behind_paywall
         self._max_items = max_items
         self._category = category
 
@@ -95,11 +104,38 @@ class GenericRSSHandler(BaseSourceHandler):
         notebook_id: str,
         items: list[SourceItem],
     ) -> list[str]:
-        from source_handlers.extractor import extract_clean_text, truncate_for_notebooklm
+        from source_handlers.extractor import extract_clean_text, extract_paywalled_article, truncate_for_notebooklm
         source_ids = []
 
         for item in items:
-            if self._force_text_extraction:
+            if self._behind_paywall:
+                if not item.extracted_text:
+                    try:
+                        item.extracted_text = extract_paywalled_article(item.url)
+                    except Exception as exc:
+                        logger.warning("Paywall extraction failed for %r: %s", item.title, exc)
+                if not item.extracted_text:
+                    try:
+                        item.extracted_text = extract_clean_text(url=item.url, is_paywalled=True)
+                    except Exception as exc:
+                        logger.warning("Fallback extraction failed for %r: %s", item.title, exc)
+
+                if not item.extracted_text and item.description:
+                    logger.info("Using feed summary/description for %r", item.title)
+                    item.extracted_text = f"{item.title}\n\n{item.description}"
+
+                if item.extracted_text:
+                    try:
+                        source = await client.sources.add_text(
+                            notebook_id, item.title, truncate_for_notebooklm(item.extracted_text)
+                        )
+                        source_ids.append(source.id)
+                        item.source_id = source.id
+                        logger.info("Added paywall-extracted text source for %r", item.title)
+                        continue
+                    except Exception as exc:
+                        logger.warning("Failed to add_text for paywalled %r: %s", item.title, exc)
+            elif self._force_text_extraction:
                 if not item.extracted_text:
                     try:
                         item.extracted_text = extract_clean_text(url=item.url)

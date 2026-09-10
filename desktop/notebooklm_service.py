@@ -540,6 +540,7 @@ def schedule_artifacts_after_delivery(
     channel_order: int,
     generate_cinematic_video: bool = False,
     generate_infographics: bool = False,
+    generate_audio_overview: bool = True,
 ) -> None:
     """Persist Studio work without delaying any remaining summary emails."""
     video_instructions = _VIDEO_PROMPT_TEMPLATE.format(
@@ -556,18 +557,21 @@ def schedule_artifacts_after_delivery(
         )
 
     artifact_types = []
-    if len(result.get("source_ids", [])) > 1:
-        register_weekly_audio(
-            notebook_id=result["notebook_id"],
-            notebook_url=result.get("notebook_url", ""),
-            source_name=result["channel_name"],
-            channel_order=channel_order,
-            source_ids=result.get("source_ids", []),
-            instructions=result.get("audio_instructions", ""),
-            run_date=result.get("run_date") or date.today().isoformat(),
-        )
+    if generate_audio_overview:
+        if len(result.get("source_ids", [])) > 1:
+            register_weekly_audio(
+                notebook_id=result["notebook_id"],
+                notebook_url=result.get("notebook_url", ""),
+                source_name=result["channel_name"],
+                channel_order=channel_order,
+                source_ids=result.get("source_ids", []),
+                instructions=result.get("audio_instructions", ""),
+                run_date=result.get("run_date") or date.today().isoformat(),
+            )
+        else:
+            result["audio_status"] = "skipped_single_source"
     else:
-        result["audio_status"] = "skipped_single_source"
+        result["audio_status"] = "disabled"
     if generate_infographics:
         artifact_types.append("infographic")
     if artifact_types:

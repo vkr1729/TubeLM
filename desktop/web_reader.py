@@ -139,7 +139,7 @@ def parse_top20_digest(top20_file: Path) -> dict[str, Any]:
 
     soup = BeautifulSoup(top20_file.read_text(encoding="utf-8", errors="replace"), "html.parser")
     items = []
-    seen_titles = set()
+    seen_keys = set()
 
     for tr in soup.find_all("tr"):
         rank_td = tr.find(class_="rank-cell")
@@ -147,17 +147,20 @@ def parse_top20_digest(top20_file: Path) -> dict[str, Any]:
             rank_text = rank_td.get_text(strip=True)
             title_elem = tr.find(class_="item-title") or tr.find("h2")
             title = title_elem.get_text(" ", strip=True) if title_elem else ""
-            if not title or title in seen_titles:
+            link_elem = tr.find("a", href=True)
+            url = link_elem["href"] if link_elem else ""
+            source_type = "youtube" if ("youtube.com" in url or "youtu.be" in url) else "web"
+            video_id = extract_youtube_video_id(url) if source_type == "youtube" else ""
+
+            dedup_key = video_id or url or title.strip().lower()
+            if not title or not dedup_key or dedup_key in seen_keys:
                 continue
-            seen_titles.add(title)
+            seen_keys.add(dedup_key)
 
             try:
                 rank_num = int(rank_text)
             except ValueError:
                 rank_num = len(items) + 1
-
-            link_elem = tr.find("a", href=True)
-            url = link_elem["href"] if link_elem else ""
 
             p_elem = tr.find("p")
             why_it_matters = p_elem.get_text(" ", strip=True) if p_elem else ""
@@ -753,7 +756,15 @@ def build_reader_site(
                             try:
                                 tdata = json.loads(sidecar_top.read_text(encoding="utf-8"))
                                 if isinstance(tdata, dict) and tdata.get("items"):
-                                    top20_data = {"items": tdata["items"], "candidate_count": tdata.get("candidate_count", len(tdata["items"]))}
+                                    raw_items = tdata["items"]
+                                    deduped_sidecar = []
+                                    seen_sidecar_keys = set()
+                                    for it in raw_items:
+                                        k = it.get("video_id") or it.get("url") or (it.get("title") or "").strip().lower()
+                                        if k and k not in seen_sidecar_keys:
+                                            seen_sidecar_keys.add(k)
+                                            deduped_sidecar.append(it)
+                                    top20_data = {"items": deduped_sidecar, "candidate_count": tdata.get("candidate_count", len(deduped_sidecar))}
                                     continue
                             except (OSError, json.JSONDecodeError):
                                 pass
@@ -779,7 +790,7 @@ def build_reader_site(
                             except Exception:
                                 logger.exception("Summary TTS backfill failed for %s.", ch_data.get("name"))
                         if tts_path.exists() and tts_path.stat().st_size > 0:
-                            remote = (_audio_storage.upload_audio(tts_path, d_str) if (_audio_storage is not None and _audio_storage.is_configured()) else "")
+                            remote = (_audio_storage.upload_audio(tts_path, d_str) if (_audio_storage is not None and _audio_storage.is_configured() and not os.environ.get("PYTEST_CURRENT_TEST")) else "")
                             if remote:
                                 ch_data["summary_audio_url"] = remote
                                 (site_audio_dir / tts_filename).unlink(missing_ok=True)
@@ -790,7 +801,7 @@ def build_reader_site(
                             ch_data["summary_audio_seconds"] = _audio_seconds_for(str(tts_path))
                         if ch_data.get("audio_path") and Path(ch_data["audio_path"]).exists():
                             src_audio = Path(ch_data["audio_path"])
-                            remote = (_audio_storage.upload_audio(src_audio, d_str) if (_audio_storage is not None and _audio_storage.is_configured()) else "")
+                            remote = (_audio_storage.upload_audio(src_audio, d_str) if (_audio_storage is not None and _audio_storage.is_configured() and not os.environ.get("PYTEST_CURRENT_TEST")) else "")
                             if remote:
                                 ch_data["audio_url"] = remote
                                 (site_audio_dir / src_audio.name).unlink(missing_ok=True)
@@ -816,6 +827,17 @@ def build_reader_site(
                 vid = v.get("video_id") or v.get("url")
                 if vid and v.get("duration"):
                     vid_to_dur[vid] = (v.get("duration"), v.get("duration_seconds", 0))
+        if top20_data.get("items"):
+            deduped_final = []
+            seen_final_keys = set()
+            for it in top20_data["items"]:
+                k = it.get("video_id") or it.get("url") or (it.get("title") or "").strip().lower()
+                if k and k not in seen_final_keys:
+                    seen_final_keys.add(k)
+                    deduped_final.append(it)
+            top20_data["items"] = deduped_final
+            top20_data["candidate_count"] = len(deduped_final)
+
         for it in top20_data.get("items", []):
             vid = it.get("video_id") or it.get("url")
             if not it.get("duration") and vid in vid_to_dur:

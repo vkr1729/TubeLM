@@ -35,5 +35,10 @@ def load_sources(sources_file: Path) -> list[dict]:
         entry["generate_cinematic_video"] = bool(
             entry.get("generate_cinematic_video", False)
         )
+        entry["generate_podcast"] = bool(
+            entry.get("generate_podcast", False)
+        )
+        if entry["type"] == "rss":
+            entry["behind_paywall"] = bool(entry.get("behind_paywall", True))
         sources.append(entry)
     return sources

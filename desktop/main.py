@@ -577,6 +577,14 @@ async def async_main(
         )
         for source, handler in zip(sources, handlers)
     }
+    podcast_selection = {
+        handler.state_key(): bool(
+            source.get("generate_podcast", getattr(cfg, "generate_podcasts", False))
+            if isinstance(source, dict)
+            else getattr(cfg, "generate_podcasts", False)
+        )
+        for source, handler in zip(sources, handlers)
+    }
 
     if channels_filter:
         selected = {s.strip() for s in channels_filter.split(",") if s.strip()}
@@ -780,6 +788,9 @@ async def async_main(
                         handler.state_key(), False
                     ),
                     generate_infographics=getattr(cfg, "generate_infographics", False),
+                    generate_audio_overview=podcast_selection.get(
+                        handler.state_key(), getattr(cfg, "generate_podcasts", False)
+                    ),
                 )
 
                 # Checkpoint immediately after this channel is fully finalized.

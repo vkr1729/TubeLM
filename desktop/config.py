@@ -139,6 +139,9 @@ class Config:
     # Default browser for NotebookLM extraction (chrome, edge, safari, firefox, opera, etc.)
     notebooklm_browser: str = "chrome"
 
+    # NotebookLM podcast (Audio Overview) generation — opt-in, default false
+    generate_podcasts: bool = False
+
     # Neural summary narration (Edge-TTS)
     tts_voice: str = "en-US-BrianMultilingualNeural"
     tts_rate: str = "+0%"
@@ -219,6 +222,7 @@ def load_config() -> Config:
         gh_pages_url=_get_optional("GH_PAGES_URL", "https://vkr1729.github.io/TubeLM/"),
         compress_audio=_get_bool("COMPRESS_AUDIO", True),
         generate_top_article_videos=_get_bool("GENERATE_TOP_ARTICLE_VIDEOS", False),
+        generate_podcasts=_get_bool("GENERATE_PODCASTS", False),
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
         tts_voice=_get_optional("TTS_VOICE", "en-US-BrianMultilingualNeural"),
         tts_rate=_get_optional("TTS_RATE", "+0%"),

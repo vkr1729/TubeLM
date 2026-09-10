@@ -179,3 +179,19 @@ class TestRSSIngestion:
             ids = await handler.ingest(client, "nb_id", items)
         assert len(ids) == 1
         client.sources.add_text.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_uses_add_text_when_behind_paywall(self):
+        client = AsyncMock()
+        client.sources.add_text.return_value = MagicMock(id="src_text_paywall_001")
+        handler = GenericRSSHandler("PaywallBlog", "https://example.com/feed.xml", behind_paywall=True)
+        item = SourceItem(title="Paywalled Post", url="https://example.com/paywalled", published="2025-01-01",
+                          extracted_text="")
+        items = [item]
+        with patch("source_handlers.extractor.extract_paywalled_article",
+                   return_value="Full paywall extracted text content"):
+            ids = await handler.ingest(client, "nb_id", items)
+        assert len(ids) == 1
+        client.sources.add_text.assert_called_once()
+        client.sources.add_url.assert_not_called()
+        assert item.extracted_text == "Full paywall extracted text content"
