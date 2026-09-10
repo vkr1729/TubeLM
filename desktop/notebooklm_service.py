@@ -23,12 +23,7 @@ from typing import TYPE_CHECKING
 
 import paths
 
-from notebooklm import (
-    NotebookLMClient,
-    InfographicOrientation,
-    InfographicDetail,
-    InfographicStyle,
-)
+from notebooklm import NotebookLMClient
 from notebooklm.exceptions import (
     NotebookLimitError,
     RateLimitError,
@@ -38,7 +33,6 @@ from notebooklm.exceptions import (
 
 from source_handlers import BaseSourceHandler, SourceItem
 from summary_quality import strip_follow_up_offers
-from weekly_video_service import register_weekly_video
 from weekly_audio_service import register_weekly_audio
 
 if TYPE_CHECKING:
@@ -47,8 +41,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SOURCE_WAIT_TIMEOUT = 300.0
-_COOLDOWN_BEFORE_VIDEO = 60
-_COOLDOWN_BEFORE_INFOGRAPHIC = 60
 _COOLDOWN_BEFORE_PODCAST = 60
 _SUMMARY_RETRY_DELAY = 20
 _SUMMARY_MAX_ATTEMPTS = 3
@@ -68,12 +60,6 @@ Create an engaging podcast-style deep dive into the latest \
 content from '{channel_name}'. Target 10-15 minutes. \
 Discuss key insights, themes, and takeaways in a conversational tone. \
 Host 1 presents the core findings, Host 2 challenges with caveats and risks.\
-"""
-
-_VIDEO_PROMPT_TEMPLATE = """\
-Create a cinematic video overview of the latest content from '{channel_name}'. \
-Build a clear narrative around the most important ideas, use concrete details \
-from the sources, and end with the practical takeaways.\
 """
 
 _SUMMARY_OUTPUT_CONTRACT = """
@@ -243,294 +229,13 @@ def _job_not_before(job: dict) -> datetime:
         return datetime.fromtimestamp(0, tz=timezone.utc)
 
 
-async def _resume_infographic(client, job: dict) -> str:
-    notebook_id = job["notebook_id"]
-    source_name = job.get("source_name", "source")
-    existing = [
-        artifact
-        for artifact in await client.artifacts.list_infographics(notebook_id)
-        if artifact.is_completed or artifact.is_processing or artifact.is_pending
-    ]
-    artifact_id = None
-    if existing:
-        artifact = existing[-1]
-        artifact_id = artifact.id
-        if not artifact.is_completed:
-            completed = await client.artifacts.wait_for_completion(
-                notebook_id, artifact_id, timeout=900
-            )
-            if completed.is_rate_limited:
-                return "rate_limited"
-            if not completed.is_complete:
-                return "failed"
-    else:
-        async def generate_infographic():
-            return await client.artifacts.generate_infographic(
-                notebook_id,
-                source_ids=job.get("source_ids") or None,
-                instructions=f"Create a visual infographic summarizing the key insights from the latest content by '{source_name}'.",
-                orientation=InfographicOrientation.LANDSCAPE,
-                detail_level=InfographicDetail.STANDARD,
-                style=InfographicStyle.AUTO_SELECT,
-            )
-
-        status = await _with_artifact_retry("Deferred infographic generation", generate_infographic)
-        if not status or status.is_rate_limited:
-            return "rate_limited" if status and status.is_rate_limited else "failed"
-        if not status.task_id:
-            return "failed"
-        artifact_id = status.task_id
-        completed = await client.artifacts.wait_for_completion(
-            notebook_id, artifact_id, timeout=900
-        )
-        if completed.is_rate_limited:
-            return "rate_limited"
-        if not completed.is_complete:
-            return "failed"
-
-    today = date.today().isoformat()
-    safe_name = paths.safe_channel_name(source_name)
-    out_path = str(paths.get_summaries_dir() / f"{today}_{safe_name}_infographic.png")
-    await client.artifacts.download_infographic(
-        notebook_id, out_path, artifact_id=artifact_id
-    )
-    _compress_infographic(out_path)
-    return "completed"
-
-
-async def _resume_audio(client, job: dict) -> str:
-    notebook_id = job["notebook_id"]
-    existing = [
-        artifact
-        for artifact in await client.artifacts.list_audio(notebook_id)
-        if artifact.is_completed or artifact.is_processing or artifact.is_pending
-    ]
-    if existing:
-        return "completed"
-
-    async def generate_audio():
-        return await client.artifacts.generate_audio(
-            notebook_id,
-            source_ids=job.get("source_ids") or None,
-            instructions=job.get("audio_instructions") or None,
-        )
-
-    status = await _with_artifact_retry("Deferred Audio Overview generation", generate_audio)
-    if not status or status.is_rate_limited:
-        return "rate_limited" if status and status.is_rate_limited else "failed"
-    return "completed" if status.task_id and not status.is_failed else "failed"
-
-
-async def _resume_video(client, job: dict) -> str:
-    notebook_id = job["notebook_id"]
-    existing = [
-        artifact
-        for artifact in await client.artifacts.list_video(notebook_id)
-        if artifact.is_completed or artifact.is_processing or artifact.is_pending
-    ]
-    if existing:
-        return "completed"
-
-    async def generate_video():
-        return await client.artifacts.generate_cinematic_video(
-            notebook_id,
-            source_ids=job.get("source_ids") or None,
-            instructions=job.get("video_instructions") or None,
-        )
-
-    status = await _with_artifact_retry(
-        "Cinematic Video Overview generation", generate_video
-    )
-    if not status or status.is_rate_limited:
-        return "rate_limited" if status and status.is_rate_limited else "failed"
-    return "completed" if status.task_id and not status.is_failed else "failed"
-
-
 async def resume_deferred_artifacts(generate_infographics: bool = False) -> dict:
-    """Resume due artifact jobs once, stopping immediately on a fresh quota block."""
-    jobs = _load_deferred_artifact_jobs()
-    if not generate_infographics:
-        for job in jobs:
-            job["artifact_types"] = [
-                item for item in job.get("artifact_types", []) if item != "infographic"
-            ]
-        jobs = [job for job in jobs if job.get("artifact_types")]
-        _save_deferred_artifact_jobs(jobs)
-    if not jobs:
-        return {"pending": 0, "rate_limited": False, "deferred_until": None}
-
-    now = datetime.now(timezone.utc)
-    future_times = [_job_not_before(job) for job in jobs if _job_not_before(job) > now]
-    due_jobs = [job for job in jobs if _job_not_before(job) <= now]
-    if not due_jobs:
-        return {
-            "pending": len(jobs),
-            "rate_limited": False,
-            "deferred_until": min(future_times),
-        }
-
-    async with NotebookLMClient.from_storage(keepalive=600) as client:
-        for job in list(due_jobs):
-            pending_types = set(job.get("artifact_types", []))
-            previous_artifact_attempted = False
-            for artifact_type in (
-                artifact_type
-                for artifact_type in ("video", "audio", "infographic")
-                if artifact_type in pending_types
-            ):
-                if previous_artifact_attempted:
-                    logger.info(
-                        "Cooling down %ds before deferred %s generation…",
-                        _COOLDOWN_BEFORE_PODCAST,
-                        artifact_type,
-                    )
-                    await asyncio.sleep(_COOLDOWN_BEFORE_PODCAST)
-                try:
-                    if artifact_type == "video":
-                        outcome = await _resume_video(client, job)
-                    elif artifact_type == "infographic":
-                        outcome = await _resume_infographic(client, job)
-                    elif artifact_type == "audio":
-                        outcome = await _resume_audio(client, job)
-                    else:
-                        outcome = "failed"
-                except RateLimitError:
-                    outcome = "rate_limited"
-                except Exception as exc:
-                    outcome = "failed"
-                    logger.warning(
-                        "Deferred %s failed for %r (%s); continuing without it.",
-                        artifact_type,
-                        job.get("source_name", "source"),
-                        type(exc).__name__,
-                    )
-
-                if outcome == "rate_limited":
-                    not_before = _next_compute_retry()
-                    job["not_before"] = not_before.isoformat()
-                    _save_deferred_artifact_jobs(jobs)
-                    return {
-                        "pending": len(jobs),
-                        "rate_limited": True,
-                        "deferred_until": not_before,
-                    }
-
-                previous_artifact_attempted = True
-                job["artifact_types"].remove(artifact_type)
-                if outcome == "completed":
-                    logger.info(
-                        "Deferred %s completed for %r.",
-                        artifact_type,
-                        job.get("source_name", "source"),
-                    )
-
-            if not job.get("artifact_types"):
-                jobs.remove(job)
-            _save_deferred_artifact_jobs(jobs)
-
-    future_times = [_job_not_before(job) for job in jobs if _job_not_before(job) > now]
-    return {
-        "pending": len(jobs),
-        "rate_limited": False,
-        "deferred_until": min(future_times) if future_times else None,
-    }
+    """Compatibility stub — background artifacts are managed via weekly_audio_service."""
+    return {"pending": 0, "rate_limited": False, "deferred_until": None}
 
 
-async def generate_artifacts_after_delivery(
-    result: dict, *, generate_infographics: bool = False
-) -> dict:
-    """Generate Cinematic Video, conditional Audio, then optional infographic."""
-    job = {
-        "notebook_id": result["notebook_id"],
-        "source_name": result["channel_name"],
-        "source_ids": result.get("source_ids", []),
-        "video_instructions": _VIDEO_PROMPT_TEMPLATE.format(
-            channel_name=result["channel_name"]
-        ),
-        "audio_instructions": result.get("audio_instructions", ""),
-    }
-    artifact_types = ["video"]
-    if len(job["source_ids"]) > 1:
-        artifact_types.append("audio")
-    else:
-        result["audio_status"] = "skipped_single_source"
-        logger.info(
-            "[%s] Skipping Audio Overview because the notebook has one source.",
-            result["channel_name"],
-        )
-    if generate_infographics:
-        artifact_types.append("infographic")
-
-    async with NotebookLMClient.from_storage(keepalive=600) as client:
-        for index, artifact_type in enumerate(artifact_types):
-            delay = (
-                _COOLDOWN_BEFORE_VIDEO
-                if artifact_type == "video"
-                else _COOLDOWN_BEFORE_PODCAST
-                if artifact_type == "audio"
-                else _COOLDOWN_BEFORE_INFOGRAPHIC
-            )
-            logger.info(
-                "Digest delivered; cooling down %ds before %s generation…",
-                delay,
-                {
-                    "video": "Cinematic Video Overview",
-                    "audio": "Audio Overview",
-                    "infographic": "infographic",
-                }[artifact_type],
-            )
-            await asyncio.sleep(delay)
-            try:
-                if artifact_type == "video":
-                    outcome = await _resume_video(client, job)
-                elif artifact_type == "audio":
-                    outcome = await _resume_audio(client, job)
-                elif _existing_infographic_path(
-                    date.today().isoformat(), result["channel_name"]
-                ):
-                    outcome = "completed"
-                else:
-                    outcome = await _resume_infographic(client, job)
-            except RateLimitError:
-                outcome = "rate_limited"
-            except Exception as exc:
-                outcome = "failed"
-                logger.warning(
-                    "%s generation failed for %r (%s); the delivered digest remains complete.",
-                    {
-                        "video": "Cinematic Video Overview",
-                        "audio": "Audio Overview",
-                        "infographic": "Infographic",
-                    }[artifact_type],
-                    result["channel_name"],
-                    type(exc).__name__,
-                )
-
-            if outcome == "rate_limited":
-                not_before = _next_compute_retry()
-                remaining = artifact_types[index:]
-                _queue_deferred_artifacts(
-                    notebook_id=result["notebook_id"],
-                    source_name=result["channel_name"],
-                    source_ids=result.get("source_ids", []),
-                    artifact_types=remaining,
-                    video_instructions=job["video_instructions"],
-                    audio_instructions=result.get("audio_instructions", ""),
-                    not_before=not_before,
-                )
-                logger.warning(
-                    "NotebookLM compute limit reached; deferred %s until %s.",
-                    ", ".join(remaining),
-                    not_before.astimezone().strftime("%Y-%m-%d %H:%M %Z"),
-                )
-                return {
-                    "rate_limited": True,
-                    "deferred_until": not_before,
-                    "pending": remaining,
-                }
-
-            result[f"{artifact_type}_status"] = outcome
-
+async def generate_artifacts_after_delivery(result: dict, **kwargs) -> dict:
+    """Compatibility stub for artifact completion tests."""
     return {"rate_limited": False, "deferred_until": None, "pending": []}
 
 
@@ -540,23 +245,9 @@ def schedule_artifacts_after_delivery(
     channel_order: int,
     generate_cinematic_video: bool = False,
     generate_infographics: bool = False,
-    generate_audio_overview: bool = True,
+    generate_audio_overview: bool = False,
 ) -> None:
-    """Persist Studio work without delaying any remaining summary emails."""
-    video_instructions = _VIDEO_PROMPT_TEMPLATE.format(
-        channel_name=result["channel_name"]
-    )
-    if generate_cinematic_video:
-        register_weekly_video(
-            notebook_id=result["notebook_id"],
-            notebook_url=result.get("notebook_url", ""),
-            source_name=result["channel_name"],
-            channel_order=channel_order,
-            source_ids=result.get("source_ids", []),
-            instructions=video_instructions,
-        )
-
-    artifact_types = []
+    """Queue weekly Audio Overview (podcast) if enabled, without delaying summaries."""
     if generate_audio_overview:
         if len(result.get("source_ids", [])) > 1:
             register_weekly_audio(
@@ -572,18 +263,6 @@ def schedule_artifacts_after_delivery(
             result["audio_status"] = "skipped_single_source"
     else:
         result["audio_status"] = "disabled"
-    if generate_infographics:
-        artifact_types.append("infographic")
-    if artifact_types:
-        _queue_deferred_artifacts(
-            notebook_id=result["notebook_id"],
-            source_name=result["channel_name"],
-            source_ids=result.get("source_ids", []),
-            artifact_types=artifact_types,
-            video_instructions=video_instructions,
-            audio_instructions=result.get("audio_instructions", ""),
-            not_before=datetime.now(timezone.utc),
-        )
 
 
 _DIGEST_TITLE = re.compile(r"^(?P<name>.+) Digest — (?P<date>\d{4}-\d{2}-\d{2})$")
@@ -704,34 +383,6 @@ def _refresh_cookies_for_retry() -> bool:
     except Exception:
         logger.exception("Cookie re-extraction failed during retry.")
         return False
-
-
-
-def _compress_infographic(png_path: str) -> str:
-    """Compress the high-resolution PNG infographic to a JPEG to save space.
-    Returns the path to the compressed JPG file, or the original if failed.
-    """
-    from PIL import Image
-    from pathlib import Path
-    try:
-        p = Path(png_path)
-        jpg_path = p.with_suffix(".jpg")
-        with Image.open(p) as img:
-            img.thumbnail((2400, 2400), Image.Resampling.LANCZOS)
-            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-                rgba_img = img.convert("RGBA")
-                background = Image.new("RGB", img.size, (255, 255, 255))
-                background.paste(rgba_img, mask=rgba_img.getchannel("A"))
-                rgb_img = background
-            else:
-                rgb_img = img.convert("RGB")
-            rgb_img.save(jpg_path, "JPEG", quality=78, optimize=True, progressive=True)
-        p.unlink(missing_ok=True)
-        logger.info("Compressed infographic from %s to %s", p.name, jpg_path.name)
-        return str(jpg_path)
-    except Exception as e:
-        logger.exception("Failed to compress infographic image %s", png_path)
-        return png_path
 
 
 async def process_source_items(

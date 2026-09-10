@@ -269,14 +269,8 @@ def download_top10_videos(
             "title": title,
         })
 
-    # Register non-YouTube articles for Cinematic Video only when explicitly opted in.
-    queued_articles = []
-    if generate_article_videos:
-        try:
-            from top_article_video_service import register_top_article_videos
-            queued_articles = register_top_article_videos(selection)
-        except Exception as exc:
-            logger.warning("Could not register top article videos: %s", exc)
+    # Top 20 is strictly YouTube videos; non-video article cinematic videos are removed
+    queued_articles: list[Any] = []
 
     if not download_tasks:
         logger.info("No YouTube videos found in the Top list; skipping folder rotation and download.")

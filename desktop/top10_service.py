@@ -576,7 +576,6 @@ def _rank_render_and_send(
                     dest_dir=getattr(cfg, "top10_download_dir", None),
                     prev_dir=getattr(cfg, "top10_prev_dir", None),
                     rotate=rotate_downloads,
-                    generate_article_videos=bool(getattr(cfg, "generate_top_article_videos", False)),
                 )
             except TypeError:
                 download_top10_videos(

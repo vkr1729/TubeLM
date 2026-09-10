@@ -31,10 +31,6 @@ def load_sources(sources_file: Path) -> list[dict]:
         required_field = "channel_id" if entry["type"] == "youtube" else "url"
         if not entry.get(required_field):
             logger.warning("Entry %d missing %r — skipping.", i, required_field)
-            continue
-        entry["generate_cinematic_video"] = bool(
-            entry.get("generate_cinematic_video", False)
-        )
         entry["generate_podcast"] = bool(
             entry.get("generate_podcast", False)
         )

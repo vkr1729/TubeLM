@@ -51,13 +51,6 @@ from run_control import (
     save_compute_deferral,
     save_resume_request,
 )
-from weekly_video_service import (
-    mark_video_completion_email_sent,
-    pending_weekly_video_count,
-    resume_weekly_video_batches,
-    seal_weekly_video_batch,
-    unnotified_completed_video_batches,
-)
 from weekly_audio_service import (
     mark_audio_completion_email_sent,
     pending_weekly_audio_count,
@@ -69,10 +62,6 @@ from top10_service import (
     generate_and_send_top10_digest,
     prepare_top10_batch,
     record_top10_source,
-)
-from top_article_video_service import (
-    pending_top_article_video_count,
-    process_top_article_videos,
 )
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
@@ -379,58 +368,30 @@ def _build_and_deploy_reader(cfg) -> None:
 
 
 async def _finish_background_artifacts(
-    cfg, *, seal_video_batch: bool, send_completion_emails: bool = True
+    cfg, *, seal_audio_batch: bool, send_completion_emails: bool = True
 ) -> tuple[bool, bool]:
-    """Advance independent Audio, Video, and optional infographic queues."""
+    """Advance background weekly audio overviews if any are queued."""
     before = _audio_inventory()
-    if seal_video_batch:
-        seal_weekly_video_batch()
+    if seal_audio_batch:
         seal_weekly_audio_batch()
 
     audio_batch = {"pending": 0, "deferred_until": None, "rate_limited": False}
-    video_batch = {"pending": 0, "deferred_until": None, "rate_limited": False}
-    top_article_batch = {"pending": 0, "deferred_until": None, "rate_limited": False}
-    if pending_weekly_audio_count() or pending_weekly_video_count() or pending_top_article_video_count():
+    if pending_weekly_audio_count():
         async with NotebookLMClient.from_storage(keepalive=600) as client:
-            if pending_weekly_audio_count():
-                audio_batch = await resume_weekly_audio_batches(client)
-            # Video is always attempted separately, even when Audio is limited.
-            if pending_weekly_video_count():
-                video_batch = await resume_weekly_video_batches(client)
-            if pending_top_article_video_count():
-                top_article_batch = await process_top_article_videos(
-                    client, dest_dir=getattr(cfg, "top10_download_dir", None)
-                )
+            audio_batch = await resume_weekly_audio_batches(client)
 
     if audio_batch["pending"]:
         logger.info(
             "%d weekly Audio Overview(s) remain; background resume is scheduled.",
             audio_batch["pending"],
         )
-    if video_batch["pending"]:
-        logger.info(
-            "%d weekly Cinematic Video(s) remain; background resume is scheduled.",
-            video_batch["pending"],
-        )
-    if top_article_batch["pending"]:
-        logger.info(
-            "%d Top Digest article Cinematic Video(s) remain; background resume is scheduled.",
-            top_article_batch["pending"],
-        )
-
-    deferred_artifacts = await resume_deferred_artifacts(
-        generate_infographics=getattr(cfg, "generate_infographics", False)
-    )
 
     notification_failed = False
     audio_notifications = unnotified_completed_audio_batches()
-    video_notifications = unnotified_completed_video_batches()
     if not send_completion_emails:
         for batch in audio_notifications:
             mark_audio_completion_email_sent(batch["week_start"])
-        for batch in video_notifications:
-            mark_video_completion_email_sent(batch["week_start"])
-        if audio_notifications or video_notifications:
+        if audio_notifications:
             logger.info("Artifact completion emails were skipped by configuration.")
     else:
         for batch in audio_notifications:
@@ -441,40 +402,16 @@ async def _finish_background_artifacts(
                 notification_failed = True
             else:
                 mark_audio_completion_email_sent(batch["week_start"])
-        for batch in video_notifications:
-            try:
-                send_artifact_completion_email("video", batch, cfg)
-            except Exception:
-                logger.exception("Cinematic Video completion email failed and will be retried.")
-                notification_failed = True
-            else:
-                mark_video_completion_email_sent(batch["week_start"])
 
-    pending = bool(
-        audio_batch["pending"]
-        or video_batch["pending"]
-        or deferred_artifacts["pending"]
-        or notification_failed
-    )
+    pending = bool(audio_batch["pending"] or notification_failed)
     if pending:
-        retry_times = [
-            value
-            for value in (
-                audio_batch.get("deferred_until"),
-                video_batch.get("deferred_until"),
-                deferred_artifacts.get("deferred_until"),
-            )
-            if value is not None
-        ]
-        if notification_failed:
-            retry_times.append(datetime.now(timezone.utc) + timedelta(minutes=15))
-        deferred_until = min(retry_times) if retry_times else (
+        deferred_until = audio_batch.get("deferred_until") or (
             datetime.now(timezone.utc) + timedelta(minutes=15)
         )
         save_compute_deferral(
             paths.get_compute_deferral_file(),
             deferred_until,
-            "Background artifacts or their completion email are waiting to resume.",
+            "Background audio overviews or their completion email are waiting to resume.",
         )
         new_audio = bool(_audio_inventory() - before)
         return (False, new_audio)
@@ -552,7 +489,7 @@ async def async_main(
             logger.info("Resuming Studio artifacts only; source discovery is skipped.")
             ok, new_audio = await _finish_background_artifacts(
                 cfg,
-                seal_video_batch=False,
+                seal_audio_batch=False,
                 send_completion_emails=completion_emails_enabled,
             )
             if new_audio:
@@ -568,14 +505,6 @@ async def async_main(
     channel_orders = {
         handler.state_key(): index
         for index, handler in enumerate(handlers, start=1)
-    }
-    cinematic_selection = {
-        handler.state_key(): bool(
-            source.get("generate_cinematic_video", False)
-            if isinstance(source, dict)
-            else False
-        )
-        for source, handler in zip(sources, handlers)
     }
     podcast_selection = {
         handler.state_key(): bool(
@@ -784,10 +713,6 @@ async def async_main(
                 schedule_artifacts_after_delivery(
                     result,
                     channel_order=channel_orders[handler.state_key()],
-                    generate_cinematic_video=cinematic_selection.get(
-                        handler.state_key(), False
-                    ),
-                    generate_infographics=getattr(cfg, "generate_infographics", False),
                     generate_audio_overview=podcast_selection.get(
                         handler.state_key(), getattr(cfg, "generate_podcasts", False)
                     ),
@@ -850,7 +775,7 @@ async def async_main(
             try:
                 await _finish_background_artifacts(
                     cfg,
-                    seal_video_batch=False,
+                    seal_audio_batch=False,
                     send_completion_emails=False,
                 )
             except Exception:
@@ -896,7 +821,7 @@ async def async_main(
     try:
         artifacts_ok, new_audio = await _finish_background_artifacts(
             cfg,
-            seal_video_batch=True,
+            seal_audio_batch=True,
             send_completion_emails=completion_emails_enabled,
         )
     except Exception:

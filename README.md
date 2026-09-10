@@ -7,12 +7,12 @@
 ### Autonomous Intelligence Briefing Pipeline, Audio Studio & Modern Web Reader
 
 [![Version](https://img.shields.io/badge/version-4.0.0-lime.svg?style=flat-square)](VERSION)
-[![Tests](https://img.shields.io/badge/tests-175%20passed-brightgreen.svg?style=flat-square)](desktop/tests)
+[![Tests](https://img.shields.io/badge/tests-176%20passed-brightgreen.svg?style=flat-square)](desktop/tests)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?style=flat-square)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-purple.svg?style=flat-square)](LICENSE)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-success?style=flat-square&logo=github)](https://vkr1729.github.io/TubeLM/)
 
-**Turn 37+ YouTube channels, RSS feeds, and technical web publications into grounded Google NotebookLM executive summaries, 2-host podcast discussions, neural audio briefings, and an editorial Progressive Web App.**
+**Turn monitored YouTube channels, RSS feeds, and technical web publications into grounded Google NotebookLM executive summaries, 2-host podcast discussions, neural audio briefings, and an editorial Progressive Web App.**
 
 [Explore Live Web Reader](https://vkr1729.github.io/TubeLM/) · [Architecture](#architecture) · [Key Features](#key-features) · [Quickstart](#quickstart) · [Configuration](#configuration)
 
@@ -34,7 +34,7 @@ TubeLM features an editorial, high-performance static Web Reader designed with m
 
 ![TubeLM Top 20 Editorial Picks in Light Mode](docs/assets/desktop_editorial_light.png)
 
-### iPhone 16 Mobile Experience (PWA)
+### Mobile Experience (PWA)
 *Engineered for mobile reading and listening on the go with zero framework overhead.*
 
 <div align="center">
@@ -53,7 +53,7 @@ Information overload across YouTube, technical newsletters, and RSS feeds makes 
 1. **Curates without distraction:** Eliminates YouTube Shorts and clickbait using duration filtering.
 2. **Deep comprehension:** Feeds full video transcripts and long-form articles into **Google NotebookLM** for grounded, hallucination-free summaries tailored by domain (*Tech*, *Health*, *Deep Explainer*).
 3. **Studio Podcasts & Neural Audio:** Automatically triggers NotebookLM 2-host audio overviews for deep listening, and generates Microsoft Edge Neural TTS audio for instant article listening.
-4. **Lean, Zero-Spam Delivery:** Replaced 37 individual notification emails with a single weekly executive brief and an offline-capable PWA deployed directly to **GitHub Pages**.
+4. **Lean, Zero-Spam Delivery:** Replaces floods of individual channel notification emails with a single consolidated weekly executive brief and an offline-capable PWA deployed directly to **GitHub Pages**.
 5. **Ultra-Lightweight Static Architecture:** The client web reader is pure vanilla HTML5/CSS/JS (<1MB footprint), hosted free on GitHub Pages, backed by Cloudflare R2 for fast audio streaming.
 
 ---
@@ -250,7 +250,7 @@ TubeLM/
 │   │   ├── reader.html          # Responsive Web Reader PWA template
 │   │   ├── gui.html             # Local desktop dashboard template
 │   │   └── email_digest.html    # Consolidated weekly email template
-│   └── tests/                   # 175 passing unit & integration tests
+│   └── tests/                   # 176 passing unit & integration tests
 ├── shared/
 │   ├── assets/                  # Brand logos and icons
 │   └── prompts/                 # Domain-tailored prompts (Tech, Health, Explainer)
@@ -275,8 +275,8 @@ The repository maintains strict test coverage across all handlers, services, sta
 ```text
 ........................................................................ [ 41%]
 ........................................................................ [ 82%]
-...............................                                          [100%]
-175 passed in 34.12s
+................................                                         [100%]
+176 passed in 5.90s
 ```
 
 ---

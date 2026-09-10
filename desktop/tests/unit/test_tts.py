@@ -29,14 +29,14 @@ class TestCleanText:
 
 
 class TestGenerate:
-    def test_default_voice_is_brian_multilingual(self):
-        assert tts_service.DEFAULT_VOICE == "en-US-BrianMultilingualNeural"
+    def test_default_voice_is_andrew_multilingual(self):
+        assert tts_service.DEFAULT_VOICE == "en-US-AndrewMultilingualNeural"
         assert tts_service.DEFAULT_RATE == "+0%"
 
     def test_env_voice_and_rate_overrides(self, monkeypatch):
-        monkeypatch.setenv("TTS_VOICE", "en-US-AndrewMultilingualNeural")
+        monkeypatch.setenv("TTS_VOICE", "en-US-BrianMultilingualNeural")
         monkeypatch.setenv("TTS_RATE", "+5%")
-        assert tts_service.get_configured_voice() == "en-US-AndrewMultilingualNeural"
+        assert tts_service.get_configured_voice() == "en-US-BrianMultilingualNeural"
         assert tts_service.get_configured_rate() == "+5%"
 
     def test_short_text_skipped_without_network(self, tmp_path):
@@ -65,7 +65,7 @@ class TestGenerate:
         out = tmp_path / "s.mp3"
         assert generate_summary_tts("This is a long enough summary text for narration testing.", out) is True
         assert out.exists() and out.stat().st_size > 0
-        assert passed_args["voice"] == "en-US-BrianMultilingualNeural"
+        assert passed_args["voice"] == "en-US-AndrewMultilingualNeural"
         assert passed_args["rate"] == "+0%"
 
     def test_custom_voice_and_rate_passed(self, tmp_path, monkeypatch):

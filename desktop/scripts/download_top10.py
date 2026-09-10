@@ -84,27 +84,8 @@ def main() -> None:
     print(f"YouTube videos found: {summary['total_videos']}")
     print(f"YouTube downloaded: {summary['downloaded']}")
     print(f"YouTube failed: {summary['failed']}")
-    print(f"Top articles queued for NotebookLM: {summary.get('queued_articles', 0)}")
     print(f"Destination: {summary['dest_dir']}")
     print(f"Previous archive: {summary['prev_dir']}")
-
-    if not args.dry_run and summary.get("queued_articles", 0) > 0:
-        try:
-            import asyncio
-            from notebooklm import NotebookLMClient
-            from top_article_video_service import process_top_article_videos
-
-            async def _run_article_video_processing():
-                async with NotebookLMClient.from_storage(keepalive=600) as client:
-                    return await process_top_article_videos(client, dest_dir=args.dest_dir)
-
-            logger.info("Processing NotebookLM Cinematic Videos for %d top article(s)…", summary["queued_articles"])
-            article_summary = asyncio.run(_run_article_video_processing())
-            print(f"NotebookLM article videos remaining: {article_summary.get('pending', 0)}")
-            if article_summary.get("rate_limited"):
-                print(f"Rate limited on NotebookLM; cooldown until {article_summary.get('deferred_until')}")
-        except Exception as exc:
-            logger.warning("Could not process NotebookLM article videos: %s", exc)
 
 
 if __name__ == "__main__":

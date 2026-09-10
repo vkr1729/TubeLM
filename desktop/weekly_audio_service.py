@@ -6,14 +6,19 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from notebooklm.exceptions import RateLimitError
 
 import paths
-from weekly_video_service import current_week_start
 
 logger = logging.getLogger(__name__)
+
+
+def current_week_start(today: date | None = None) -> str:
+    """Return the Monday that identifies the local calendar week."""
+    value = today or date.today()
+    return (value - timedelta(days=value.weekday())).isoformat()
 
 _COMPUTE_REFRESH_DELAY = timedelta(hours=5, minutes=15)
 _POLL_DELAY = timedelta(minutes=15)

@@ -42,5 +42,5 @@ def test_load_config_tts_defaults(monkeypatch):
     monkeypatch.delenv("TTS_VOICE", raising=False)
     monkeypatch.delenv("TTS_RATE", raising=False)
     cfg = load_config()
-    assert cfg.tts_voice == "en-US-BrianMultilingualNeural"
+    assert cfg.tts_voice == "en-US-AndrewMultilingualNeural"
     assert cfg.tts_rate == "+0%"

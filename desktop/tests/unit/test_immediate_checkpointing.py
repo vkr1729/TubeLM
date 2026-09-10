@@ -47,13 +47,9 @@ async def test_each_channel_is_checkpointed_before_the_next_is_processed(tmp_pat
         "schedule_artifacts_after_delivery",
         lambda result, **_kwargs: events.append(("artifacts_queued", result["channel_name"])),
     )
-    monkeypatch.setattr(main, "seal_weekly_video_batch", lambda: None)
     monkeypatch.setattr(main, "seal_weekly_audio_batch", lambda: None)
-    monkeypatch.setattr(main, "pending_weekly_video_count", lambda: 0)
     monkeypatch.setattr(main, "pending_weekly_audio_count", lambda: 0)
-    monkeypatch.setattr(main, "pending_top_article_video_count", lambda: 0)
     monkeypatch.setattr(main, "unnotified_completed_audio_batches", lambda: [])
-    monkeypatch.setattr(main, "unnotified_completed_video_batches", lambda: [])
     import tts_service
     monkeypatch.setattr(tts_service, "generate_summary_tts", lambda *_, **__: False)
     monkeypatch.setattr(main, "save_state", lambda _, keys: events.append(("checkpoint", keys[0])))

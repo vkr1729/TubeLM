@@ -81,29 +81,6 @@ class TestTemplateRendering:
         assert "cid:" not in html
         assert "📊" in html  # Stats bar should show infographic emoji
 
-    def test_infographic_compression(self, tmp_path):
-        from PIL import Image
-        from notebooklm_service import _compress_infographic
-        
-        # 1. Create a dummy PNG file with an alpha channel
-        png_path = tmp_path / "test_infographic.png"
-        img = Image.new("RGBA", (100, 100), (255, 0, 0, 128))
-        img.save(png_path, "PNG")
-        
-        assert png_path.exists()
-        
-        # 2. Compress the image
-        jpg_path_str = _compress_infographic(str(png_path))
-        jpg_path = Path(jpg_path_str)
-        
-        # 3. Assert PNG was deleted and JPG was created
-        assert not png_path.exists()
-        assert jpg_path.exists()
-        assert jpg_path.suffix == ".jpg"
-        
-        # 4. Assert JPEG file size is non-zero
-        assert jpg_path.stat().st_size > 0
-
     def test_partial_item_mapping_falls_back_to_complete_global_summary(self):
         channel_data = {
             "channel_name": "Test Channel",

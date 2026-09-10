@@ -86,28 +86,3 @@ def test_exact_audio_manifest_join_no_glob(tmp_path, monkeypatch):
     got4 = web_reader.parse_channel_digest(html, {}, audio, run_date)
     assert got4["has_audio"] is False
 
-
-def test_top_article_videos_opt_in_default_off(tmp_path, monkeypatch):
-    import top10_downloader
-    import inspect
-    sig = inspect.signature(top10_downloader.download_top10_videos)
-    assert sig.parameters["generate_article_videos"].default is False
-    # Default call must not register article videos.
-    calls = []
-    import top_article_video_service
-    monkeypatch.setattr(
-        top_article_video_service,
-        "register_top_article_videos",
-        lambda sel: calls.append(1) or [{"x": 1}],
-    )
-    # Isolate state: the opt-in path must never touch the real ~/.tubelm queue.
-    monkeypatch.setattr(
-        top_article_video_service.paths,
-        "get_top_article_videos_file",
-        lambda: tmp_path / "top_article_videos.json",
-    )
-    sel = {"items": [{"source_type": "rss", "url": "https://example.com/a", "title": "A", "rank": 1}]}
-    top10_downloader.download_top10_videos(sel, dry_run=True, rotate=False)
-    assert calls == []
-    top10_downloader.download_top10_videos(sel, dry_run=True, rotate=False, generate_article_videos=True)
-    assert len(calls) == 1

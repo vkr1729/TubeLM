@@ -36,7 +36,9 @@ desktop/dist/
 AGENTS.md
 CLAUDE.md
 GEMINI.md
+HANDOFF_REVIEW_PROMPT.md
 .claude/
 .commandcode/
 .kimchi/
 .playwright-mcp/
+

@@ -6,81 +6,13 @@ import main
 import notebooklm_service
 
 
-@pytest.mark.asyncio
-async def test_artifacts_use_video_then_audio_and_skip_infographic(monkeypatch):
-    events = []
-
-    class ClientContext:
-        async def __aenter__(self):
-            return object()
-
-        async def __aexit__(self, *_):
-            return None
-
-    async def record_audio(_client, _job):
-        events.append("audio")
-        return "completed"
-
-    async def record_video(_client, _job):
-        events.append("video")
-        return "completed"
-
-    async def record_infographic(_client, _job):
-        events.append("infographic")
-        return "completed"
-
-    async def no_sleep(_seconds):
-        return None
-
+def test_single_source_skips_audio(monkeypatch):
+    called = []
     monkeypatch.setattr(
-        notebooklm_service.NotebookLMClient,
-        "from_storage",
-        lambda **_kwargs: ClientContext(),
+        notebooklm_service,
+        "register_weekly_audio",
+        lambda **kwargs: called.append(kwargs),
     )
-    monkeypatch.setattr(notebooklm_service, "_resume_audio", record_audio)
-    monkeypatch.setattr(notebooklm_service, "_resume_video", record_video)
-    monkeypatch.setattr(notebooklm_service, "_resume_infographic", record_infographic)
-    monkeypatch.setattr(notebooklm_service, "_existing_infographic_path", lambda *_: "")
-    monkeypatch.setattr(notebooklm_service.asyncio, "sleep", no_sleep)
-
-    outcome = await notebooklm_service.generate_artifacts_after_delivery(
-        {
-            "notebook_id": "notebook-1",
-            "channel_name": "Personal feed",
-            "source_ids": ["source-1", "source-2"],
-            "audio_instructions": "Summarize it.",
-        }
-    )
-
-    assert events == ["video", "audio"]
-    assert outcome["rate_limited"] is False
-
-
-@pytest.mark.asyncio
-async def test_single_source_skips_audio(monkeypatch):
-    events = []
-
-    class ClientContext:
-        async def __aenter__(self):
-            return object()
-
-        async def __aexit__(self, *_):
-            return None
-
-    async def record_video(_client, _job):
-        events.append("video")
-        return "completed"
-
-    async def no_sleep(_seconds):
-        return None
-
-    monkeypatch.setattr(
-        notebooklm_service.NotebookLMClient,
-        "from_storage",
-        lambda **_kwargs: ClientContext(),
-    )
-    monkeypatch.setattr(notebooklm_service, "_resume_video", record_video)
-    monkeypatch.setattr(notebooklm_service.asyncio, "sleep", no_sleep)
 
     result = {
         "notebook_id": "notebook-1",
@@ -88,14 +20,46 @@ async def test_single_source_skips_audio(monkeypatch):
         "source_ids": ["source-1"],
         "audio_instructions": "Summarize it.",
     }
-    await notebooklm_service.generate_artifacts_after_delivery(result)
+    notebooklm_service.schedule_artifacts_after_delivery(
+        result, channel_order=1, generate_audio_overview=True
+    )
 
-    assert events == ["video"]
+    assert called == []
     assert result["audio_status"] == "skipped_single_source"
 
 
+def test_scheduling_queues_audio_when_enabled(monkeypatch):
+    events = []
+    result = {
+        "notebook_id": "notebook-1",
+        "notebook_url": "https://notebooklm.google.com/notebook/notebook-1",
+        "channel_name": "Tech Weekly",
+        "source_ids": ["source-1", "source-2"],
+        "audio_instructions": "Summarize it.",
+    }
+    monkeypatch.setattr(
+        notebooklm_service,
+        "register_weekly_audio",
+        lambda **kwargs: events.append(kwargs),
+    )
+
+    # Disabled by default
+    notebooklm_service.schedule_artifacts_after_delivery(
+        result, channel_order=1, generate_audio_overview=False
+    )
+    assert events == []
+    assert result["audio_status"] == "disabled"
+
+    # Queues when opted-in
+    notebooklm_service.schedule_artifacts_after_delivery(
+        result, channel_order=1, generate_audio_overview=True
+    )
+    assert len(events) == 1
+    assert events[0]["source_name"] == "Tech Weekly"
+
+
 @pytest.mark.asyncio
-async def test_audio_and_video_queues_advance_independently(monkeypatch):
+async def test_audio_queue_advances_and_handles_deferral(monkeypatch):
     events = []
     retry_at = datetime.now(timezone.utc) + timedelta(hours=5)
 
@@ -110,63 +74,23 @@ async def test_audio_and_video_queues_advance_independently(monkeypatch):
         events.append("audio")
         return {"pending": 1, "deferred_until": retry_at, "rate_limited": True}
 
-    async def resume_video(_client):
-        events.append("video")
-        return {"pending": 0, "deferred_until": None, "rate_limited": False}
-
-    async def no_deferred(**_kwargs):
-        return {"pending": 0, "deferred_until": None, "rate_limited": False}
-
     monkeypatch.setattr(main, "pending_weekly_audio_count", lambda: 1)
-    monkeypatch.setattr(main, "pending_weekly_video_count", lambda: 1)
-    monkeypatch.setattr(main, "pending_top_article_video_count", lambda: 0)
     monkeypatch.setattr(main, "resume_weekly_audio_batches", resume_audio)
-    monkeypatch.setattr(main, "resume_weekly_video_batches", resume_video)
-    monkeypatch.setattr(main, "resume_deferred_artifacts", no_deferred)
     monkeypatch.setattr(main, "unnotified_completed_audio_batches", lambda: [])
-    monkeypatch.setattr(main, "unnotified_completed_video_batches", lambda: [])
-    monkeypatch.setattr(main, "save_compute_deferral", lambda *_: None)
+    deferrals = []
+    monkeypatch.setattr(main, "save_compute_deferral", lambda *args: deferrals.append(args))
     monkeypatch.setattr(
         main.NotebookLMClient, "from_storage", lambda **_kwargs: ClientContext()
     )
 
     completed = await main._finish_background_artifacts(
-        SimpleNamespace(generate_infographics=False), seal_video_batch=False
+        SimpleNamespace(), seal_audio_batch=False
     )
 
     ok, _new_audio = completed
     assert ok is False
-    assert events == ["audio", "video"]
-
-
-def test_scheduling_queues_audio_but_only_opted_in_video(monkeypatch):
-    events = []
-    result = {
-        "notebook_id": "notebook-1",
-        "notebook_url": "https://notebooklm.google.com/notebook/notebook-1",
-        "channel_name": "Personal feed",
-        "source_ids": ["source-1", "source-2"],
-        "audio_instructions": "Summarize it.",
-    }
-    monkeypatch.setattr(
-        notebooklm_service,
-        "register_weekly_audio",
-        lambda **_kwargs: events.append("audio"),
-    )
-    monkeypatch.setattr(
-        notebooklm_service,
-        "register_weekly_video",
-        lambda **_kwargs: events.append("video"),
-    )
-
-    notebooklm_service.schedule_artifacts_after_delivery(
-        result, channel_order=1, generate_cinematic_video=False
-    )
-    notebooklm_service.schedule_artifacts_after_delivery(
-        result, channel_order=1, generate_cinematic_video=True
-    )
-
-    assert events == ["audio", "video", "audio"]
+    assert events == ["audio"]
+    assert len(deferrals) == 1
 
 
 @pytest.mark.asyncio

@@ -115,9 +115,6 @@ class Config:
     # Retention configuration
     notebooks_retention_limit: int
 
-    # Infographics are retained as an opt-in feature because they are rarely used.
-    generate_infographics: bool = False
-
     # Cross-source Top digest email selected by agy/Gemini after summaries complete.
     generate_top10_digest: bool = False
     top_digest_count: int = 20
@@ -133,9 +130,6 @@ class Config:
     gh_pages_url: str = "https://vkr1729.github.io/TubeLM/"
     compress_audio: bool = True
 
-    # Cinematic video generation for top RSS/web articles (strictly opt-in).
-    generate_top_article_videos: bool = False
-
     # Default browser for NotebookLM extraction (chrome, edge, safari, firefox, opera, etc.)
     notebooklm_browser: str = "chrome"
 
@@ -143,7 +137,7 @@ class Config:
     generate_podcasts: bool = False
 
     # Neural summary narration (Edge-TTS)
-    tts_voice: str = "en-US-BrianMultilingualNeural"
+    tts_voice: str = "en-US-AndrewMultilingualNeural"
     tts_rate: str = "+0%"
 
     # Derived: use SSL (port 465) or STARTTLS (port 587)
@@ -211,7 +205,6 @@ def load_config() -> Config:
         sources_file=paths.get_sources_file(),
         state_file=paths.get_state_file(),
         notebooks_retention_limit=notebooks_retention_limit,
-        generate_infographics=_get_bool("GENERATE_INFOGRAPHICS", False),
         generate_top10_digest=_get_bool("GENERATE_TOP_10_DIGEST", False),
         top_digest_count=top_digest_count,
         download_top10_videos=_get_bool("DOWNLOAD_TOP_10_VIDEOS", False),
@@ -221,9 +214,8 @@ def load_config() -> Config:
         deploy_to_gh_pages=_get_bool("DEPLOY_TO_GH_PAGES", True),
         gh_pages_url=_get_optional("GH_PAGES_URL", "https://vkr1729.github.io/TubeLM/"),
         compress_audio=_get_bool("COMPRESS_AUDIO", True),
-        generate_top_article_videos=_get_bool("GENERATE_TOP_ARTICLE_VIDEOS", False),
         generate_podcasts=_get_bool("GENERATE_PODCASTS", False),
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
-        tts_voice=_get_optional("TTS_VOICE", "en-US-BrianMultilingualNeural"),
+        tts_voice=_get_optional("TTS_VOICE", "en-US-AndrewMultilingualNeural"),
         tts_rate=_get_optional("TTS_RATE", "+0%"),
     )

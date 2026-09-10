@@ -656,6 +656,7 @@ def serve_summary_file(filename):
     return send_from_directory(str(SUMMARIES_DIR), filename, conditional=True)
 
 @app.route("/reader")
+@app.route("/reader/")
 def serve_reader():
     site_dir = paths.get_site_dir()
     index_file = site_dir / "index.html"
@@ -666,6 +667,22 @@ def serve_reader():
 @app.route("/reader/<path:filename>")
 def serve_reader_static(filename):
     return send_from_directory(str(paths.get_site_dir()), filename, conditional=True)
+
+@app.route("/manifest.json")
+@app.route("/favicon-32x32.png")
+@app.route("/favicon.ico")
+@app.route("/icon.svg")
+@app.route("/apple-touch-icon.png")
+@app.route("/sw.js")
+def serve_pwa_root_assets():
+    req_filename = request.path.lstrip("/")
+    if req_filename == "favicon.ico":
+        req_filename = "favicon-32x32.png"
+    site_dir = paths.get_site_dir()
+    target_file = site_dir / req_filename
+    if target_file.exists():
+        return send_from_directory(str(site_dir), req_filename, conditional=True)
+    return "Not found", 404
 
 @app.route("/audio/<path:filename>")
 def serve_audio_file(filename):

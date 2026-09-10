@@ -18,8 +18,8 @@ import edge_tts
 
 logger = logging.getLogger(__name__)
 
-# High-signal, natural expressive voice (Brian Multilingual default)
-DEFAULT_VOICE = "en-US-BrianMultilingualNeural"
+# High-signal, natural expressive voice (Andrew Multilingual default)
+DEFAULT_VOICE = "en-US-AndrewMultilingualNeural"
 DEFAULT_RATE = "+0%"
 
 
