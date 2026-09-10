@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_VOICE = "en-US-AndrewMultilingualNeural"
 DEFAULT_RATE = "+0%"
 
+# Upper bound for one edge-tts synthesis so a hung websocket can never stall
+# the sequential per-channel pipeline loop (P1 hardening).
+TTS_TIMEOUT_SECONDS = 90
+
 
 def get_configured_voice() -> str:
     return os.getenv("TTS_VOICE", "").strip() or DEFAULT_VOICE
@@ -67,7 +71,7 @@ async def _generate_audio_async(
     temp_out = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp.mp3")
     try:
         communicate = edge_tts.Communicate(clean, effective_voice, rate=effective_rate)
-        await communicate.save(str(temp_out))
+        await asyncio.wait_for(communicate.save(str(temp_out)), timeout=TTS_TIMEOUT_SECONDS)
         if not force and output_path.exists() and output_path.stat().st_size > 0:
             temp_out.unlink(missing_ok=True)
             return True
@@ -80,6 +84,14 @@ async def _generate_audio_async(
             effective_rate,
         )
         return True
+    except asyncio.TimeoutError:
+        logger.warning(
+            "edge-tts generation timed out after %ds; skipping TTS for %s.",
+            TTS_TIMEOUT_SECONDS,
+            output_path.name,
+        )
+        temp_out.unlink(missing_ok=True)
+        return False
     except Exception as e:
         logger.warning("edge-tts generation failed: %s", e)
         temp_out.unlink(missing_ok=True)

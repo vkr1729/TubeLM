@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import re
+import ipaddress
 import socket
 import logging
 import threading
@@ -21,6 +22,7 @@ import hashlib
 import copy
 import tempfile
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from threading import Timer
@@ -78,6 +80,19 @@ class PipelineRunner:
             threading.Thread(target=self._run, args=(args_list,), daemon=True).start()
             return True, "Pipeline started."
 
+    def stop(self):
+        """Terminate a running pipeline subprocess, if any."""
+        with self.lock:
+            proc = self.process
+            if not self.is_running or proc is None:
+                return False, "Pipeline is not running."
+            try:
+                proc.terminate()
+            except Exception as e:
+                return False, f"Could not terminate pipeline: {e}"
+            self._publish_log("\n--- Pipeline termination requested ---\n")
+            return True, "Pipeline termination requested."
+
     def _run(self, args_list):
         if paths.is_frozen():
             cmd = [sys.executable, "--sync"] + args_list
@@ -113,6 +128,7 @@ class PipelineRunner:
             self._publish_log(err_msg)
         finally:
             self.is_running = False
+            self.process = None
             with self.log_condition:
                 self.log_condition.notify_all()
 
@@ -159,6 +175,83 @@ def _invalidate_runtime_caches():
         _requirements_cache["expires"] = 0.0
         _notebooks_cache["expires"] = 0.0
 
+# Cap client-supplied read-state so one browser cannot grow read_state.json
+# without bound.
+MAX_READ_IDS = 5000
+MAX_READ_ID_LENGTH = 256
+
+
+def _atomic_write_json_file(path: Path, data: dict) -> None:
+    """Atomically replace a JSON file so SIGKILL can never leave it truncated."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=str(path.parent),
+        prefix=f".{path.name}.", suffix=".tmp", delete=False,
+    ) as tmp:
+        json.dump(data, tmp, indent=2)
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+
+
+def _sanitize_read_ids(read_ids) -> list[str]:
+    """Keep only string ids, de-duplicated, sorted, and bounded."""
+    clean = sorted({
+        item[:MAX_READ_ID_LENGTH]
+        for item in read_ids
+        if isinstance(item, str) and item
+    })
+    return clean[:MAX_READ_IDS]
+
+
+def _fetch_target_is_blocked(url: str) -> str | None:
+    """Return a reason when url must not be fetched server-side, else None.
+
+    Blocks non-http(s) schemes and hosts that resolve to loopback, private,
+    link-local, reserved, or multicast addresses (cloud metadata endpoints,
+    intranet hosts). Unresolvable hosts fail open with a warning: DNS may be
+    unavailable offline, and literal-IP threats are already covered.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "malformed URL"
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return "only http(s) URLs with a host may be fetched"
+    hostname = parsed.hostname
+    candidates: list[str] = []
+    try:
+        addrinfo = socket.getaddrinfo(hostname, None)
+    except OSError:
+        logger.warning("Could not resolve fetch host %s; allowing (offline?).", hostname)
+        return None
+    for family, _, _, _, sockaddr in addrinfo:
+        candidates.append(sockaddr[0])
+    if not candidates:
+        return "host did not resolve to any address"
+    for candidate in candidates:
+        try:
+            ip = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+        ):
+            return f"host resolves to non-public address {candidate}"
+    return None
+
+
+def _ensure_safe_fetch_url(url: str) -> str:
+    """Raise ValueError when url must not be fetched server-side."""
+    reason = _fetch_target_is_blocked(url)
+    if reason is not None:
+        raise ValueError(f"Refusing to fetch URL ({reason}).")
+    return url
+
 # ── Env Config Helpers ────────────────────────────────────────────────────────
 
 def read_env_file():
@@ -180,7 +273,7 @@ def write_env_file(updates):
         "SMTP_SERVER", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD",
         "SENDER_EMAIL", "RECIPIENT_EMAIL", "YOUTUBE_API_KEY",
         "NOTEBOOKS_RETENTION_LIMIT", "NOTEBOOKLM_BROWSER",
-        "GENERATE_INFOGRAPHICS", "GENERATE_TOP_10_DIGEST",
+        "GENERATE_TOP_10_DIGEST",
     }
     if not isinstance(updates, dict):
         raise ValueError("Configuration payload must be a JSON object.")
@@ -724,25 +817,26 @@ def api_save_read_state():
     
     if not isinstance(read_ids, list):
         item_id = data.get("id")
-        if item_id:
+        if isinstance(item_id, str) and item_id:
             cur = []
             if state_file.exists():
                 try:
                     cur = json.loads(state_file.read_text(encoding="utf-8")).get("read_ids", [])
                 except Exception:
                     cur = []
-            s = set(cur)
+            s = set(item for item in cur if isinstance(item, str))
             if data.get("is_read", True):
-                s.add(item_id)
+                s.add(item_id[:MAX_READ_ID_LENGTH])
             else:
                 s.discard(item_id)
             read_ids = sorted(s)
         else:
             return jsonify({"error": "Missing read_ids or id"}), 400
 
+    read_ids = _sanitize_read_ids(read_ids)
     try:
-        state_file.write_text(json.dumps({"read_ids": sorted(set(read_ids))}, indent=2), encoding="utf-8")
-        return jsonify({"success": True, "read_ids": sorted(set(read_ids))})
+        _atomic_write_json_file(state_file, {"read_ids": read_ids})
+        return jsonify({"success": True, "read_ids": read_ids})
     except Exception as exc:
         logger.exception("Failed to save read state file.")
         return jsonify({"error": str(exc)}), 500
@@ -796,11 +890,13 @@ def extract_youtube_channel_info(url):
     if "youtube.com" not in url and "youtu.be" not in url:
         raise ValueError("Invalid YouTube URL. Please provide a valid youtube.com channel link.")
 
+    _ensure_safe_fetch_url(url)
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
     }
-    
+
     try:
         resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
@@ -1122,6 +1218,11 @@ def api_validate_source():
     if not url:
         return jsonify({"error": "Missing url"}), 400
 
+    try:
+        _ensure_safe_fetch_url(url if "://" in url else "https://" + url)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
     # Check for YouTube
     if "youtube.com" in url or "youtu.be" in url:
         try:
@@ -1130,9 +1231,16 @@ def api_validate_source():
         except Exception as e:
             return jsonify({"error": str(e)}), 400
 
-    # Try feedparser for RSS
+    # Try feedparser for RSS (bounded fetch first so the parse cannot hang
+    # on a slow host; feedparser itself gets bytes, not a URL to fetch).
     try:
-        feed = feedparser.parse(url)
+        resp = requests.get(
+            url,
+            headers={"User-Agent": "TubeLM/1.0 (+local validation)"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        feed = feedparser.parse(resp.content)
         if feed.entries and not (feed.bozo and not feed.entries):
             return jsonify({
                 "type": "rss",
@@ -1142,10 +1250,13 @@ def api_validate_source():
     except Exception:
         pass
 
-    # Try trafilatura for webpage
+    # Try trafilatura for webpage, bounded so one slow host cannot hang the
+    # Flask worker thread indefinitely.
     try:
         from source_handlers.extractor import extract_metadata
-        meta = extract_metadata(url)
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            meta = pool.submit(extract_metadata, url).result(timeout=30)
         if meta.get("title"):
             return jsonify({
                 "type": "webpage",
@@ -1211,7 +1322,7 @@ def api_update_channel_state():
             return jsonify({"error": "Invalid timestamp format. Must be ISO8601."}), 400
 
     try:
-        STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        _atomic_write_json_file(STATE_FILE, state)
         return jsonify({"success": True, "state": state})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1895,6 +2006,13 @@ def api_trigger_run():
         
     started, msg = runner.start(args)
     if started:
+        return jsonify({"success": True, "message": msg})
+    return jsonify({"error": msg}), 400
+
+@app.route("/api/run/stop", methods=["POST"])
+def api_stop_run():
+    stopped, msg = runner.stop()
+    if stopped:
         return jsonify({"success": True, "message": msg})
     return jsonify({"error": msg}), 400
 

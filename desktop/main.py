@@ -8,7 +8,7 @@ Entry point. Orchestrates:
   4. NotebookLM notebook creation, source upload, and summary
   5. Per-source email delivery and checkpointing
   6. Optional cross-source Top 10 selection and email
-  7. Independent conditional Audio and opt-in Cinematic Video generation
+  7. Independent conditional weekly Audio Overview generation
   8. Durable background resume when compute is limited
 
 Usage:
@@ -31,6 +31,7 @@ from config import ConfigurationError, load_config
 from email_service import send_artifact_completion_email, send_channel_email
 import paths
 from notebooklm_service import (
+    NotebookLMAuthExpiredError,
     process_source_items,
     resume_deferred_artifacts,
     schedule_artifacts_after_delivery,
@@ -632,6 +633,12 @@ async def async_main(
                 try:
                     result = await process_source_items(handler, items, cfg)
                     stage_results.append(result)
+                except NotebookLMAuthExpiredError:
+                    logger.critical(
+                        "NotebookLM authentication expired and cookie refresh failed — stopping run."
+                    )
+                    print("AUTH_REQUIRED", flush=True)
+                    sys.exit(2)
                 except NotebookLimitError:
                     logger.critical("Notebook quota exceeded — stopping source processing.")
                     failed_handlers.extend(pair[0] for pair in stage_handler_items[idx:])

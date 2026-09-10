@@ -103,10 +103,15 @@ def extract_youtube_video_id(url: str) -> str:
     return match_mock.group(1) if match_mock else ""
 
 
+FFMPEG_TIMEOUT_SECONDS = 120
+
+
 def optimize_audio_for_web(input_audio: Path, output_audio: Path) -> bool:
     """
     Transcode speech audio to high-efficiency 64kbps mono MP3.
     Reduces file size by ~75% and ensures seamless buffering on mobile Safari/Chrome.
+    Falls back to a plain copy when ffmpeg is missing, fails, or exceeds
+    FFMPEG_TIMEOUT_SECONDS so one corrupt file can never hang the site build.
     """
     output_audio.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -119,12 +124,24 @@ def optimize_audio_for_web(input_audio: Path, output_audio: Path) -> bool:
             "-b:a", "64k",
             str(output_audio),
         ]
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        res = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=FFMPEG_TIMEOUT_SECONDS,
+        )
         if res.returncode == 0 and output_audio.exists() and output_audio.stat().st_size > 0:
             logger.info("Optimized audio %s (%d KB) -> %s (%d KB)",
                         input_audio.name, input_audio.stat().st_size // 1024,
                         output_audio.name, output_audio.stat().st_size // 1024)
             return True
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "ffmpeg transcoding timed out after %ds for %s; falling back to copy.",
+            FFMPEG_TIMEOUT_SECONDS,
+            input_audio,
+        )
     except Exception as exc:
         logger.warning("ffmpeg audio transcoding failed for %s: %s", input_audio, exc)
 
@@ -668,6 +685,84 @@ def generate_pwa_assets(site_dir: Path) -> None:
         ]
     }
     (site_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    # 4. Generate minimal offline service worker: cache-first for audio
+    # (large, immutable, date-prefixed files), stale-while-revalidate for
+    # documents (index.html, feed.xml). No build step, no framework.
+    sw_content = """/* TubeLM offline service worker (generated, no framework). */
+const TUBELM_CACHE = 'tubelm-v1';
+const PRECACHE = ['index.html', 'manifest.json', 'icon.svg', 'favicon-32x32.png', 'feed.xml'];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(TUBELM_CACHE)
+      .then((cache) => cache.addAll(PRECACHE).catch(() => {}))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== TUBELM_CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
+function isAudioRequest(url) {
+  return url.pathname.includes('/audio/') || url.pathname.endsWith('.mp3');
+}
+
+function isDocumentRequest(request, url) {
+  return request.mode === 'navigate'
+    || url.pathname.endsWith('.html')
+    || url.pathname.endsWith('.xml')
+    || url.pathname.endsWith('.json');
+}
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (request.method !== 'GET') return;
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch (_) {
+    return;
+  }
+  if (isAudioRequest(url)) {
+    // Cache-first: audio files are immutable week-partitioned assets.
+    event.respondWith(
+      caches.match(request).then((hit) => {
+        if (hit) return hit;
+        return fetch(request).then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(TUBELM_CACHE).then((cache) => cache.put(request, copy));
+          }
+          return res;
+        });
+      })
+    );
+    return;
+  }
+  if (isDocumentRequest(request, url)) {
+    // Stale-while-revalidate: render instantly, refresh in background.
+    event.respondWith(
+      caches.open(TUBELM_CACHE).then(async (cache) => {
+        const cached = await cache.match(request);
+        const network = fetch(request)
+          .then((res) => {
+            if (res && res.ok) cache.put(request, res.clone());
+            return res;
+          })
+          .catch(() => cached);
+        return cached || network;
+      })
+    );
+  }
+});
+"""
+    (site_dir / "sw.js").write_text(sw_content, encoding="utf-8")
 
 
 def build_reader_site(

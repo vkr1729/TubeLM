@@ -2,32 +2,25 @@
 notebooklm_service.py — NotebookLM integration layer.
 
 Responsibilities:
-  - Verify authentication via CLI subprocess
+  - Verify authentication against the NotebookLM session store
   - Pre-run cookie refresh via rookiepy
   - Create notebooks, add source items, and generate summaries via chat
-  - Trigger Cinematic Video first and Audio for multi-source notebooks
-  - Retain infographic generation as an opt-in feature
-  - Persist quota-blocked artifacts for background resume
+  - Queue multi-source notebooks for weekly Audio Overview generation
+    (background artifacts live in weekly_audio_service; this module never
+    generates cinematic video or infographics — those subsystems were pruned)
 """
 
 import asyncio
-import json
 import logging
 import os
 import re
-import subprocess
-import sys
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING
-
-import paths
 
 from notebooklm import NotebookLMClient
 from notebooklm.exceptions import (
     NotebookLimitError,
     RateLimitError,
-    SourceAddError,
     SourceTimeoutError,
 )
 
@@ -41,7 +34,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SOURCE_WAIT_TIMEOUT = 300.0
-_COOLDOWN_BEFORE_PODCAST = 60
 _SUMMARY_RETRY_DELAY = 20
 _SUMMARY_MAX_ATTEMPTS = 3
 _COMPUTE_REFRESH_DELAY = timedelta(hours=5, minutes=15)
@@ -161,75 +153,15 @@ def _next_compute_retry() -> datetime:
     return datetime.now(timezone.utc) + _COMPUTE_REFRESH_DELAY
 
 
-def _load_deferred_artifact_jobs() -> list[dict]:
-    path = paths.get_deferred_artifacts_file()
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    jobs = payload.get("jobs", []) if isinstance(payload, dict) else []
-    return [job for job in jobs if isinstance(job, dict)]
+class NotebookLMAuthExpiredError(RuntimeError):
+    """Raised when NotebookLM auth is expired and cookie refresh failed.
+
+    Raised instead of exiting so the CLI orchestrator (main.py) decides how
+    to terminate; library code must never call sys.exit.
+    """
 
 
-def _save_deferred_artifact_jobs(jobs: list[dict]) -> None:
-    path = paths.get_deferred_artifacts_file()
-    if not jobs:
-        path.unlink(missing_ok=True)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        temp_path.write_text(json.dumps({"jobs": jobs}, indent=2), encoding="utf-8")
-        os.replace(temp_path, path)
-    finally:
-        temp_path.unlink(missing_ok=True)
-
-
-def _queue_deferred_artifacts(
-    *,
-    notebook_id: str,
-    source_name: str,
-    source_ids: list[str],
-    artifact_types: list[str],
-    video_instructions: str,
-    audio_instructions: str,
-    not_before: datetime,
-) -> None:
-    """Upsert one small, credential-free artifact retry job per notebook."""
-    jobs = _load_deferred_artifact_jobs()
-    existing = next((job for job in jobs if job.get("notebook_id") == notebook_id), None)
-    if existing is None:
-        existing = {"notebook_id": notebook_id}
-        jobs.append(existing)
-    existing.update(
-        {
-            "source_name": source_name,
-            "source_ids": list(source_ids),
-            "artifact_types": [
-                artifact_type
-                for artifact_type in ("video", "audio", "infographic")
-                if artifact_type
-                in (set(existing.get("artifact_types", [])) | set(artifact_types))
-            ],
-            "video_instructions": video_instructions,
-            "audio_instructions": audio_instructions,
-            "not_before": not_before.astimezone(timezone.utc).isoformat(),
-        }
-    )
-    _save_deferred_artifact_jobs(jobs)
-
-
-def _job_not_before(job: dict) -> datetime:
-    try:
-        value = datetime.fromisoformat(str(job.get("not_before", "")).replace("Z", "+00:00"))
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-    except (TypeError, ValueError):
-        return datetime.fromtimestamp(0, tz=timezone.utc)
-
-
-async def resume_deferred_artifacts(generate_infographics: bool = False) -> dict:
+async def resume_deferred_artifacts() -> dict:
     """Compatibility stub — background artifacts are managed via weekly_audio_service."""
     return {"pending": 0, "rate_limited": False, "deferred_until": None}
 
@@ -243,8 +175,6 @@ def schedule_artifacts_after_delivery(
     result: dict,
     *,
     channel_order: int,
-    generate_cinematic_video: bool = False,
-    generate_infographics: bool = False,
     generate_audio_overview: bool = False,
 ) -> None:
     """Queue weekly Audio Overview (podcast) if enabled, without delaying summaries."""
@@ -336,25 +266,6 @@ async def _get_or_create_daily_notebook(client, title: str):
     except Exception:
         pass
     return notebook, sources
-
-
-def _existing_infographic_path(today: str, source_name: str) -> str:
-    base = paths.get_summaries_dir() / f"{today}_{paths.safe_channel_name(source_name)}_infographic"
-    for suffix in (".jpg", ".jpeg", ".png"):
-        candidate = base.with_suffix(suffix)
-        if candidate.is_file() and candidate.stat().st_size > 0:
-            return str(candidate)
-    return ""
-
-
-async def _with_artifact_retry(label: str, generate):
-    # The first quota rejection defines the absolute compute-refresh anchor.
-    # Propagate it immediately so the durable marker records that first event.
-    return await generate()
-
-
-def _get_notebooklm_bin() -> str:
-    return paths.get_notebooklm_bin()
 
 
 async def verify_notebooklm_auth() -> bool:
@@ -591,12 +502,12 @@ async def process_source_items(
                     if "Authentication expired" in str(retry_exc) or "Redirected" in str(retry_exc):
                         logger.critical("Authentication still expired after cookie refresh: %s", retry_exc)
                         print("AUTH_REQUIRED", flush=True)
-                        sys.exit(2)
+                        raise NotebookLMAuthExpiredError(str(retry_exc)) from retry_exc
                     raise
             else:
                 logger.critical("Cookie re-extraction failed. Cannot continue: %s", auth_msg)
                 print("AUTH_REQUIRED", flush=True)
-                sys.exit(2)
+                raise NotebookLMAuthExpiredError(auth_msg)
         logger.exception("Unexpected ValueError processing %r.", source_name)
         result["error"] = f"ValueError: {exc}"
     except Exception:
