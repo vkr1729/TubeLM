@@ -40,18 +40,19 @@ def is_configured() -> bool:
     return _client() is not None and bool(public_domain())
 
 
-def upload_audio(local: Path, run_date: str) -> str:
-    """Upload (idempotent) and return the public URL, or '' when R2 is not configured/available."""
+def upload_audio(local: Path, run_date: str, force: bool = False) -> str:
+    """Upload (idempotent unless force=True) and return the public URL, or '' when R2 is not configured/available."""
     s3 = _client()
     if not s3 or not public_domain():
         return ""
     key = f"{PREFIX}/{run_date}/{local.name}"
     url = f"{public_domain()}/{key}"
-    try:
-        s3.head_object(Bucket=bucket(), Key=key)
-        return url
-    except Exception:
-        pass
+    if not force:
+        try:
+            s3.head_object(Bucket=bucket(), Key=key)
+            return url
+        except Exception:
+            pass
     try:
         s3.upload_file(str(local), bucket(), key, ExtraArgs={
             "ContentType": "audio/mpeg",

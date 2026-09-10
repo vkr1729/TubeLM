@@ -26,3 +26,21 @@ def test_invalid_category_falls_back_to_tech(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "get_user_prompts_dir", lambda: user)
 
     assert load_category_prompt("unknown", "summary") == "Tech default"
+
+
+def test_load_config_tts_settings(monkeypatch):
+    from config import load_config
+    monkeypatch.setenv("TTS_VOICE", "en-US-AndrewMultilingualNeural")
+    monkeypatch.setenv("TTS_RATE", "+5%")
+    cfg = load_config()
+    assert cfg.tts_voice == "en-US-AndrewMultilingualNeural"
+    assert cfg.tts_rate == "+5%"
+
+
+def test_load_config_tts_defaults(monkeypatch):
+    from config import load_config
+    monkeypatch.delenv("TTS_VOICE", raising=False)
+    monkeypatch.delenv("TTS_RATE", raising=False)
+    cfg = load_config()
+    assert cfg.tts_voice == "en-US-BrianMultilingualNeural"
+    assert cfg.tts_rate == "+0%"

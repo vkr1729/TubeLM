@@ -15,6 +15,8 @@ class SourceItem:
     description: str = ""
     extracted_text: str = ""
     source_id: str = ""
+    duration: str = ""
+    duration_seconds: int = 0
 
 
 class BaseSourceHandler(ABC):

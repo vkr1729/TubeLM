@@ -51,6 +51,18 @@ def _parse_iso8601_duration(duration: str) -> int:
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
+def format_duration(seconds: int) -> str:
+    """Format seconds into YouTube-style duration string: 'MM:SS' or 'H:MM:SS'."""
+    if not seconds or seconds < 0:
+        return ""
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
 def _extract_video_id(entry) -> str | None:
     vid_id = getattr(entry, "yt_videoid", None)
     if vid_id:
@@ -111,6 +123,8 @@ class YouTubeHandler(BaseSourceHandler):
                 url=v["url"],
                 published=v["published"],
                 description=v.get("description", ""),
+                duration=v.get("duration", ""),
+                duration_seconds=v.get("duration_seconds", 0),
             ))
         return items
 
@@ -363,6 +377,9 @@ class YouTubeHandler(BaseSourceHandler):
                 vid_id = item.get("id", "")
                 duration_str = item.get("contentDetails", {}).get("duration", "")
                 secs = _parse_iso8601_duration(duration_str)
+                if vid_id in video_map:
+                    video_map[vid_id]["duration_seconds"] = secs
+                    video_map[vid_id]["duration"] = format_duration(secs)
                 if secs < MIN_VIDEO_DURATION_SECONDS:
                     short_ids.add(vid_id)
                     logger.debug("Filtered short video (%ds < %ds): %s", secs, MIN_VIDEO_DURATION_SECONDS, vid_id)

@@ -55,11 +55,12 @@ _SUMMARY_MAX_ATTEMPTS = 3
 _COMPUTE_REFRESH_DELAY = timedelta(hours=5, minutes=15)
 
 _SUMMARY_PROMPT_TEMPLATE = """\
-You are a research analyst. The following content from "{channel_name}" \
-has been added as sources. Provide a narrative digest: for each item, \
-write 2-3 short paragraphs retelling the core argument as a story. \
-**Bold** key terms, names, and data points inline. \
-Be specific, cite items directly, and avoid generic statements.\
+You are an essayist writing in the voice of James Clear's early blogs. The following content from "{channel_name}" \
+has been added as sources. For EACH item, write a short, engaging blog essay: open with a compelling hook \
+introducing the central tension, followed by 2 crisp paragraphs explaining the core facts and arguments \
+with **bold** key terms and data points inline. Conclude each item with: \
+`**The Core Principle:** [A memorable, one-sentence practical takeaway or mental model]`. \
+Use heading format: `## [Title] — {channel_name}`. Be specific, clear, and grounded in the source facts.\
 """
 
 _PODCAST_PROMPT_TEMPLATE = """\
@@ -741,6 +742,10 @@ async def process_source_items(
     videos_list = []
     for i in items:
         entry = {"title": i.title, "url": i.url, "published": i.published}
+        if getattr(i, "duration", ""):
+            entry["duration"] = i.duration
+        if getattr(i, "duration_seconds", 0):
+            entry["duration_seconds"] = i.duration_seconds
         if handler.source_type == "youtube" or "youtube.com/watch?v=" in i.url:
             match = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", i.url)
             if match:

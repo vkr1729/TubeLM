@@ -175,11 +175,17 @@ def parse_top20_digest(top20_file: Path) -> dict[str, Any]:
             source_type = "youtube" if ("youtube.com" in url or "youtu.be" in url) else "web"
             video_id = extract_youtube_video_id(url) if source_type == "youtube" else ""
 
+            dur_elem = tr.find(class_=re.compile(r"duration", re.I)) or tr.find("span", attrs={"data-duration": True})
+            duration = tr.get("data-duration", "") or (dur_elem.get_text(strip=True) if dur_elem else "")
+            duration_seconds = int(tr.get("data-duration-seconds") or 0)
+
             items.append({
                 "rank": rank_num,
                 "title": title,
                 "url": url,
                 "video_id": video_id,
+                "duration": duration,
+                "duration_seconds": duration_seconds,
                 "why_it_matters": why_it_matters,
                 "source_name": source_name,
                 "published": published,
@@ -349,6 +355,8 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
             "url": url,
             "video_id": str(it.get("video_id") or extract_youtube_video_id(url)),
             "published": str(it.get("published") or ""),
+            "duration": str(it.get("duration") or ""),
+            "duration_seconds": int(it.get("duration_seconds") or 0),
             "summary_html": summary_html,
             "lead": _lead_for(BeautifulSoup(summary_html, "html.parser").get_text(" ", strip=True) if summary_html else ""),
         })
@@ -397,7 +405,8 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
         "audio_seconds": audio_seconds,
         "brief": [
             {"title": v.get("title", ""), "url": v.get("url", ""),
-             "video_id": v.get("video_id", ""), "lead": v.get("lead", "")}
+             "video_id": v.get("video_id", ""), "duration": v.get("duration", ""),
+             "duration_seconds": v.get("duration_seconds", 0), "lead": v.get("lead", "")}
             for v in videos
         ],
     }
@@ -437,11 +446,17 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
         summary_html = str(summary_div) if summary_div else ""
         card_text = summary_div.get_text(" ", strip=True) if summary_div else ""
 
+        dur_elem = card.find(class_=re.compile(r"duration", re.I)) or card.find("span", attrs={"data-duration": True})
+        duration = card.get("data-duration", "") or (dur_elem.get_text(strip=True) if dur_elem else "")
+        dur_sec = card.get("data-duration-seconds", 0)
+
         videos.append({
             "title": title,
             "url": url,
             "video_id": video_id,
             "published": published,
+            "duration": str(duration),
+            "duration_seconds": int(dur_sec or 0),
             "summary_html": summary_html,
             "lead": _lead_for(card_text),
         })
@@ -496,7 +511,8 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
         "audio_seconds": audio_seconds,
         "brief": [
             {"title": v.get("title", ""), "url": v.get("url", ""),
-             "video_id": v.get("video_id", ""), "lead": v.get("lead", "")}
+             "video_id": v.get("video_id", ""), "duration": v.get("duration", ""),
+             "duration_seconds": v.get("duration_seconds", 0), "lead": v.get("lead", "")}
             for v in videos
         ],
     }
@@ -792,6 +808,18 @@ def build_reader_site(
                         channels.append(ch_data)
 
         channels.sort(key=lambda c: c["name"])
+
+        # Cross-reference duration from channels for Top 20 items if not already set
+        vid_to_dur = {}
+        for ch in channels:
+            for v in ch.get("videos", []):
+                vid = v.get("video_id") or v.get("url")
+                if vid and v.get("duration"):
+                    vid_to_dur[vid] = (v.get("duration"), v.get("duration_seconds", 0))
+        for it in top20_data.get("items", []):
+            vid = it.get("video_id") or it.get("url")
+            if not it.get("duration") and vid in vid_to_dur:
+                it["duration"], it["duration_seconds"] = vid_to_dur[vid]
 
         weeks_data[week_key] = {
             "run_date": run_date_label,

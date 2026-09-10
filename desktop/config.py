@@ -139,6 +139,10 @@ class Config:
     # Default browser for NotebookLM extraction (chrome, edge, safari, firefox, opera, etc.)
     notebooklm_browser: str = "chrome"
 
+    # Neural summary narration (Edge-TTS)
+    tts_voice: str = "en-US-BrianMultilingualNeural"
+    tts_rate: str = "+0%"
+
     # Derived: use SSL (port 465) or STARTTLS (port 587)
     use_ssl: bool = field(init=False)
 
@@ -216,4 +220,6 @@ def load_config() -> Config:
         compress_audio=_get_bool("COMPRESS_AUDIO", True),
         generate_top_article_videos=_get_bool("GENERATE_TOP_ARTICLE_VIDEOS", False),
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
+        tts_voice=_get_optional("TTS_VOICE", "en-US-BrianMultilingualNeural"),
+        tts_rate=_get_optional("TTS_RATE", "+0%"),
     )

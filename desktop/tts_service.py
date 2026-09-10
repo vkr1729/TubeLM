@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -17,16 +18,27 @@ import edge_tts
 
 logger = logging.getLogger(__name__)
 
-# High-signal, natural professional voice
-DEFAULT_VOICE = "en-US-ChristopherNeural"
+# High-signal, natural expressive voice (Brian Multilingual default)
+DEFAULT_VOICE = "en-US-BrianMultilingualNeural"
+DEFAULT_RATE = "+0%"
+
+
+def get_configured_voice() -> str:
+    return os.getenv("TTS_VOICE", "").strip() or DEFAULT_VOICE
+
+
+def get_configured_rate() -> str:
+    return os.getenv("TTS_RATE", "").strip() or DEFAULT_RATE
 
 
 def clean_text_for_speech(text: str) -> str:
     """Strip markdown links, citations, and headers for smooth narration."""
     if not text:
         return ""
+    # Strip citation brackets like [1], [1, 2], [1-3]
+    t = re.sub(r"\s*\[\d+(?:[\s\d,\-–—]*\d+)*\]", "", text)
     # Remove markdown links, leave link text: [text](url) -> text
-    t = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
+    t = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", t)
     # Remove headers #, ##, ###
     t = re.sub(r"^#{1,6}\s+", "", t, flags=re.MULTILINE)
     # Remove bold/italics
@@ -37,23 +49,36 @@ def clean_text_for_speech(text: str) -> str:
     return " ".join(t.split())
 
 
-async def _generate_audio_async(text: str, output_path: Path, voice: str = DEFAULT_VOICE) -> bool:
-    if output_path.exists() and output_path.stat().st_size > 0:
+async def _generate_audio_async(
+    text: str,
+    output_path: Path,
+    voice: str | None = None,
+    rate: str | None = None,
+    force: bool = False,
+) -> bool:
+    if not force and output_path.exists() and output_path.stat().st_size > 0:
         return True
     clean = clean_text_for_speech(text)
     if not clean or len(clean) < 20:
         return False
+    effective_voice = voice or get_configured_voice()
+    effective_rate = rate or get_configured_rate()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    import os
     temp_out = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp.mp3")
     try:
-        communicate = edge_tts.Communicate(clean, voice)
+        communicate = edge_tts.Communicate(clean, effective_voice, rate=effective_rate)
         await communicate.save(str(temp_out))
-        if output_path.exists() and output_path.stat().st_size > 0:
+        if not force and output_path.exists() and output_path.stat().st_size > 0:
             temp_out.unlink(missing_ok=True)
             return True
         temp_out.replace(output_path)
-        logger.info("Generated summary TTS audio: %s (%d bytes)", output_path.name, output_path.stat().st_size)
+        logger.info(
+            "Generated summary TTS audio: %s (%d bytes, voice=%s, rate=%s)",
+            output_path.name,
+            output_path.stat().st_size,
+            effective_voice,
+            effective_rate,
+        )
         return True
     except Exception as e:
         logger.warning("edge-tts generation failed: %s", e)
@@ -61,12 +86,18 @@ async def _generate_audio_async(text: str, output_path: Path, voice: str = DEFAU
         return False
 
 
-def generate_summary_tts(text: str, output_path: Path, voice: str = DEFAULT_VOICE) -> bool:
+def generate_summary_tts(
+    text: str,
+    output_path: Path,
+    voice: str | None = None,
+    rate: str | None = None,
+    force: bool = False,
+) -> bool:
     """Synchronous entrypoint for pipeline calls."""
-    if output_path.exists() and output_path.stat().st_size > 0:
+    if not force and output_path.exists() and output_path.stat().st_size > 0:
         return True
     try:
-        return asyncio.run(_generate_audio_async(text, output_path, voice))
+        return asyncio.run(_generate_audio_async(text, output_path, voice=voice, rate=rate, force=force))
     except Exception as e:
         logger.warning("Failed running async TTS: %s", e)
         return False
@@ -104,8 +135,15 @@ def _plain_text_from_digest(path: Path) -> str:
     return body.get_text(" ", strip=True) if body else ""
 
 
-def backfill_week(summaries_dir: Path, audio_dir: Path, run_date: str) -> dict[str, int]:
-    """Generate missing summary_*.mp3 files for one run date. Returns counts."""
+def backfill_week(
+    summaries_dir: Path,
+    audio_dir: Path,
+    run_date: str,
+    voice: str | None = None,
+    rate: str | None = None,
+    force: bool = False,
+) -> dict[str, int]:
+    """Generate missing (or force-regenerated) summary_*.mp3 files for one run date. Returns counts."""
     from paths import safe_channel_name
 
     stats = {"scanned": 0, "generated": 0, "skipped": 0, "failed": 0}
@@ -122,11 +160,11 @@ def backfill_week(summaries_dir: Path, audio_dir: Path, run_date: str) -> dict[s
         seen.add(safe)
         stats["scanned"] += 1
         tts_path = audio_dir / f"summary_{run_date}_{safe}.mp3"
-        if tts_path.exists() and tts_path.stat().st_size > 0:
+        if not force and tts_path.exists() and tts_path.stat().st_size > 0:
             stats["skipped"] += 1
             continue
         text = _plain_text_from_digest(digest)
-        if generate_summary_tts(text, tts_path):
+        if generate_summary_tts(text, tts_path, voice=voice, rate=rate, force=force):
             stats["generated"] += 1
         else:
             stats["failed"] += 1
@@ -137,6 +175,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Backfill neural summary TTS audio.")
     parser.add_argument("--backfill", action="store_true", help="Generate missing summary MP3s.")
     parser.add_argument("--date", default=None, help="Run date YYYY-MM-DD (default: latest in summaries dir).")
+    parser.add_argument("--force", action="store_true", help="Force re-generation of existing summary MP3s.")
+    parser.add_argument("--voice", default=None, help="TTS voice override (e.g. en-US-BrianMultilingualNeural).")
+    parser.add_argument("--rate", default=None, help="TTS rate override (e.g. +5%%).")
     args = parser.parse_args(argv)
 
     if not args.backfill:
@@ -159,7 +200,14 @@ def main(argv: list[str] | None = None) -> int:
             print("No digests found.")
             return 1
         run_date = dates[0]
-    stats = backfill_week(summaries_dir, audio_dir, run_date)
+    stats = backfill_week(
+        summaries_dir,
+        audio_dir,
+        run_date,
+        voice=args.voice,
+        rate=args.rate,
+        force=args.force,
+    )
     print(f"Backfill {run_date}: scanned={stats['scanned']} generated={stats['generated']} "
           f"skipped={stats['skipped']} failed={stats['failed']}")
     return 0
