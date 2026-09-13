@@ -1372,6 +1372,13 @@
       display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer}
     .mini-meta{flex:1 1 0%;min-width:0;cursor:pointer}
     .mini-title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .mini-controls {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
     .mini-btn {
       width: 32px;
       height: 32px;
@@ -1384,6 +1391,7 @@
       justify-content: center;
       border-radius: 8px;
       padding: 0;
+      margin: 0;
       flex-shrink: 0;
       transition: color 0.15s ease, background 0.15s ease, transform 0.1s ease;
     }
@@ -1411,7 +1419,7 @@
       cursor: pointer;
       flex-shrink: 0;
       padding: 0;
-      margin: 0 3px;
+      margin: 0;
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
       transition: transform 0.12s ease, filter 0.16s ease, background 0.15s ease;
     }
@@ -1467,8 +1475,69 @@
       padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;transition:none!important}
     .btn-seen.is-seen{background:rgba(158,232,36,0.1)!important;border-color:rgba(158,232,36,0.35)!important;color:#9fe824!important;font-weight:600}
     :root[data-theme="light"] .btn-seen.is-seen{background:rgba(92,122,16,0.12)!important;border-color:rgba(92,122,16,0.4)!important;color:#4a6809!important}
-    .pref-chip{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
-      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
+    /* --- Cloud Sync Modal & Status --- */
+    .sync-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .sync-modal-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 440px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      color: var(--text-primary);
+    }
+    .sync-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sync-input {
+      width: 100%;
+      background: var(--bg-dark);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: var(--text-primary);
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .sync-input:focus {
+      border-color: var(--border-focus);
+    }
+    .sync-dot {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+    .sync-dot.synced {
+      background: var(--success);
+      box-shadow: 0 0 5px var(--success);
+    }
+    .sync-dot.syncing {
+      background: var(--warning);
+      animation: pulse 1s infinite;
+    }
+    .sync-dot.error {
+      background: var(--danger);
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
@@ -1483,6 +1552,11 @@
 
     <!-- Global Controls -->
     <div class="header-controls">
+      <button id="btn-sync" onclick="openSyncModal()" class="theme-toggle-btn" title="Cross-Device Cloud Sync" style="position: relative;">
+        <svg id="sync-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+        <span id="sync-status-dot" class="sync-dot"></span>
+      </button>
+
       <button id="btn-refresh" onclick="forceRefreshApp()" class="theme-toggle-btn" title="Refresh App & Cache">
         <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
       </button>
@@ -1582,20 +1656,69 @@
       <div id="mini-title" class="mini-title">—</div>
       <div id="mini-sub" class="mini-sub">—</div>
     </div>
-    <button class="mini-btn" onclick="queuePrev()" title="Previous" aria-label="Previous">
-      <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm12 12V6l-8.5 6 8.5 6z"/></svg>
-    </button>
-    <button class="mini-play-btn" id="mini-play" onclick="toggleMiniPlay()" title="Play" aria-label="Play or pause">
-      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-    </button>
-    <button class="mini-btn" onclick="queueNext()" title="Next" aria-label="Next">
-      <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm10-12v12h2V6h-2z"/></svg>
-    </button>
+    <div class="mini-controls">
+      <button class="mini-btn" onclick="queuePrev()" title="Previous" aria-label="Previous">
+        <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm12 12V6l-8.5 6 8.5 6z"/></svg>
+      </button>
+      <button class="mini-play-btn" id="mini-play" onclick="toggleMiniPlay()" title="Play" aria-label="Play or pause">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <button class="mini-btn" onclick="queueNext()" title="Next" aria-label="Next">
+        <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm10-12v12h2V6h-2z"/></svg>
+      </button>
+    </div>
     <button class="mini-speed" id="mini-speed" onclick="cyclePlayerSpeed()" title="Playback speed">1x</button>
   </div>
 
   <!-- Global Audio Element -->
   <audio id="global-audio-element" preload="none"></audio>
+
+  <!-- Cloud Sync Settings Modal -->
+  <div id="sync-modal" class="sync-modal" style="display: none;" onclick="if(event.target===this)closeSyncModal()">
+    <div class="sync-modal-card">
+      <div class="sync-modal-header mb-2">
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+          <h3 class="font-bold text-sm text-[var(--text-primary)]">Cross-Device Cloud Sync</h3>
+        </div>
+        <button onclick="closeSyncModal()" class="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg px-1 font-bold leading-none">&times;</button>
+      </div>
+
+      <p class="text-xs text-[var(--text-secondary)] mb-3 leading-relaxed">
+        Synchronize your watch history and read states across your phone, laptop, and workplace devices via Cloudflare R2 / Worker.
+      </p>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1">Cloudflare Worker URL</label>
+          <input type="url" id="sync-endpoint-input" placeholder="https://tubelm-sync.<subdomain>.workers.dev" class="sync-input">
+        </div>
+
+        <div>
+          <label class="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1">Private Sync Passphrase</label>
+          <input type="password" id="sync-key-input" placeholder="Enter private passphrase (e.g. my-tube-passphrase)" class="sync-input">
+        </div>
+
+        <div id="sync-status-text" class="text-xs text-[var(--text-muted)] py-0.5">
+          Status: Local storage only
+        </div>
+
+        <div class="flex gap-2 pt-1">
+          <button onclick="saveAndTriggerSync()" class="flex-1 py-2 px-3 rounded-lg text-xs font-semibold bg-[var(--accent)] text-[var(--accent-text,#171815)] hover:opacity-90 transition">Save & Sync Now</button>
+          <button onclick="disconnectSync()" id="btn-disconnect-sync" class="py-2 px-3 rounded-lg text-xs font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--danger)] transition hidden">Disconnect</button>
+        </div>
+
+        <div id="pairing-section" class="pt-3 mt-1 border-t border-[var(--border-color)] hidden">
+          <div class="font-semibold text-xs mb-1 text-[var(--text-primary)]">Pair Mobile / Workplace Device:</div>
+          <p class="text-[11px] text-[var(--text-secondary)] mb-2 leading-normal">Open this one-click link on your phone to pair instantly without entering credentials again:</p>
+          <div class="flex gap-2">
+            <input type="text" id="pairing-url-display" readonly class="sync-input text-[11px] font-mono flex-1">
+            <button onclick="copyPairingUrl()" id="btn-copy-pairing" class="py-1 px-3 text-xs font-medium rounded-lg border border-[var(--border-color)] hover:border-[var(--border-focus)] transition">Copy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Embed Raw Site Data -->
   <script>
@@ -1627,8 +1750,227 @@
     let hideSeen = false;
     try { hideSeen = localStorage.getItem('tubelm_hide_seen') === '1'; } catch (_) {}
 
+    // ── Cross-Device Cloudflare Sync Engine ──────────────────────────────────
+    let syncEndpoint = (localStorage.getItem('tubelm_sync_endpoint') || '').trim().replace(/\/+$/, '');
+    let syncKey = (localStorage.getItem('tubelm_sync_key') || '').trim();
+    let syncDebounceTimer = null;
+    let lastSyncTime = parseInt(localStorage.getItem('tubelm_sync_last') || '0', 10);
+
+    function openSyncModal() {
+      const modal = document.getElementById('sync-modal');
+      if (!modal) return;
+      const epInput = document.getElementById('sync-endpoint-input');
+      const keyInput = document.getElementById('sync-key-input');
+      if (epInput) epInput.value = syncEndpoint;
+      if (keyInput) keyInput.value = syncKey;
+      updateSyncUI();
+      modal.style.display = 'flex';
+    }
+
+    function closeSyncModal() {
+      const modal = document.getElementById('sync-modal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function updateSyncUI(status, message) {
+      const dot = document.getElementById('sync-status-dot');
+      const statusText = document.getElementById('sync-status-text');
+      const pairingSection = document.getElementById('pairing-section');
+      const disconnectBtn = document.getElementById('btn-disconnect-sync');
+      
+      if (dot) {
+        dot.className = 'sync-dot' + (status ? ' ' + status : (syncEndpoint && syncKey ? ' synced' : ''));
+      }
+      if (statusText) {
+        if (message) {
+          statusText.textContent = 'Status: ' + message;
+        } else if (syncEndpoint && syncKey) {
+          const ago = lastSyncTime ? `${Math.max(1, Math.round((Date.now() - lastSyncTime) / 60000))}m ago` : 'recently';
+          statusText.textContent = `Status: Connected (synced ${ago} · ${readIds.size} digests, ${top20Read.size} items)`;
+        } else {
+          statusText.textContent = 'Status: Local storage only (unpaired)';
+        }
+      }
+      const isConfigured = Boolean(syncEndpoint && syncKey);
+      if (pairingSection) pairingSection.classList.toggle('hidden', !isConfigured);
+      if (disconnectBtn) disconnectBtn.classList.toggle('hidden', !isConfigured);
+      
+      if (isConfigured) {
+        const pairingUrlDisplay = document.getElementById('pairing-url-display');
+        if (pairingUrlDisplay) {
+          const origin = window.location.origin + window.location.pathname;
+          pairingUrlDisplay.value = `${origin}#sync_endpoint=${encodeURIComponent(syncEndpoint)}&sync_key=${encodeURIComponent(syncKey)}`;
+        }
+      }
+    }
+
+    function copyPairingUrl() {
+      const display = document.getElementById('pairing-url-display');
+      if (!display || !display.value) return;
+      navigator.clipboard.writeText(display.value).then(() => {
+        const btn = document.getElementById('btn-copy-pairing');
+        if (btn) {
+          const orig = btn.textContent;
+          btn.textContent = 'Copied! ✓';
+          setTimeout(() => { btn.textContent = orig; }, 2000);
+        }
+      }).catch(() => {
+        display.select();
+      });
+    }
+
+    function saveAndTriggerSync() {
+      const epInput = document.getElementById('sync-endpoint-input');
+      const keyInput = document.getElementById('sync-key-input');
+      const ep = (epInput?.value || '').trim().replace(/\/+$/, '');
+      const k = (keyInput?.value || '').trim();
+
+      if (!ep || !k) {
+        alert('Please enter both the Cloudflare Worker URL and a private sync passphrase.');
+        return;
+      }
+      syncEndpoint = ep;
+      syncKey = k;
+      localStorage.setItem('tubelm_sync_endpoint', syncEndpoint);
+      localStorage.setItem('tubelm_sync_key', syncKey);
+      updateSyncUI('syncing', 'Connecting to Cloudflare...');
+      
+      pullRemoteState().then(() => {
+        return pushRemoteState();
+      }).then(() => {
+        updateSyncUI('synced', 'Synced & connected successfully!');
+      }).catch((err) => {
+        updateSyncUI('error', 'Sync failed: ' + (err.message || 'network error'));
+      });
+    }
+
+    function disconnectSync() {
+      if (!confirm('Disconnect cloud sync from this device? Your local watch history will be preserved.')) return;
+      syncEndpoint = '';
+      syncKey = '';
+      localStorage.removeItem('tubelm_sync_endpoint');
+      localStorage.removeItem('tubelm_sync_key');
+      localStorage.removeItem('tubelm_sync_last');
+      const epInput = document.getElementById('sync-endpoint-input');
+      const keyInput = document.getElementById('sync-key-input');
+      if (epInput) epInput.value = '';
+      if (keyInput) keyInput.value = '';
+      updateSyncUI('', 'Local storage only (unpaired)');
+    }
+
+    function checkUrlPairing() {
+      if (!window.location.hash || !window.location.hash.includes('sync_key=')) return;
+      try {
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const ep = params.get('sync_endpoint');
+        const k = params.get('sync_key');
+        if (ep && k) {
+          syncEndpoint = ep.trim().replace(/\/+$/, '');
+          syncKey = k.trim();
+          localStorage.setItem('tubelm_sync_endpoint', syncEndpoint);
+          localStorage.setItem('tubelm_sync_key', syncKey);
+          history.replaceState(null, document.title, window.location.pathname + window.location.search);
+          updateSyncUI('syncing', 'Pairing from link... syncing state...');
+          pullRemoteState().then(() => {
+            pushRemoteState();
+          });
+        }
+      } catch (err) {
+        console.warn('Pairing URL error:', err);
+      }
+    }
+
+    async function pullRemoteState() {
+      if (!syncEndpoint || !syncKey) return;
+      updateSyncUI('syncing', 'Syncing...');
+      try {
+        const sep = syncEndpoint.includes('?') ? '&' : '?';
+        const resp = await fetch(`${syncEndpoint}${sep}key=${encodeURIComponent(syncKey)}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${syncKey}`,
+            'X-Sync-Key': syncKey,
+          },
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        
+        let changed = false;
+        if (Array.isArray(data.read_ids)) {
+          data.read_ids.forEach(id => {
+            if (typeof id === 'string' && !readIds.has(id)) {
+              readIds.add(id);
+              changed = true;
+            }
+          });
+        }
+        if (Array.isArray(data.top20_read)) {
+          data.top20_read.forEach(k => {
+            if (typeof k === 'string' && !top20Read.has(k)) {
+              top20Read.add(k);
+              changed = true;
+            }
+          });
+        }
+
+        if (changed) {
+          try { localStorage.setItem('tubelm_read_ids', JSON.stringify(Array.from(readIds))); } catch (_) {}
+          try { localStorage.setItem('tubelm_top20_read', JSON.stringify(Array.from(top20Read))); } catch (_) {}
+          renderSidebar();
+          renderActiveView();
+        }
+        lastSyncTime = Date.now();
+        try { localStorage.setItem('tubelm_sync_last', String(lastSyncTime)); } catch (_) {}
+        updateSyncUI('synced', `Connected (synced just now)`);
+      } catch (err) {
+        console.warn('Sync pull offline/blocked (using local):', err);
+        updateSyncUI('error', 'Offline / Workplace firewall active');
+      }
+    }
+
+    async function pushRemoteState() {
+      if (!syncEndpoint || !syncKey) return;
+      updateSyncUI('syncing', 'Saving to cloud...');
+      try {
+        const payload = {
+          read_ids: Array.from(readIds),
+          top20_read: Array.from(top20Read),
+        };
+        const sep = syncEndpoint.includes('?') ? '&' : '?';
+        const resp = await fetch(`${syncEndpoint}${sep}key=${encodeURIComponent(syncKey)}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${syncKey}`,
+            'X-Sync-Key': syncKey,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.ok) {
+          lastSyncTime = Date.now();
+          try { localStorage.setItem('tubelm_sync_last', String(lastSyncTime)); } catch (_) {}
+          updateSyncUI('synced', 'Connected (synced just now)');
+        }
+      } catch (err) {
+        console.warn('Sync push offline/blocked (using local):', err);
+        updateSyncUI('error', 'Offline / Workplace firewall active');
+      }
+    }
+
+    function scheduleSyncPush() {
+      if (!syncEndpoint || !syncKey) return;
+      clearTimeout(syncDebounceTimer);
+      syncDebounceTimer = setTimeout(() => {
+        pushRemoteState();
+      }, 1200);
+    }
+
     function saveTop20Read() {
       try { localStorage.setItem('tubelm_top20_read', JSON.stringify(Array.from(top20Read))); } catch (_) {}
+      scheduleSyncPush();
     }
     function normalizeVideoUrl(url) {
       if (!url) return '';
@@ -1685,6 +2027,7 @@
       try {
         localStorage.setItem('tubelm_read_ids', JSON.stringify(Array.from(readIds)));
       } catch (_) {}
+      scheduleSyncPush();
       // Persist to local desktop backend if running locally
       if (window.location.protocol.startsWith('http')) {
         fetch('/api/reader/read-state', {
@@ -3076,10 +3419,23 @@
       updateBriefButton();
       renderSidebar();
       selectTop20();
+      checkUrlPairing();
+      updateSyncUI();
+      if (syncEndpoint && syncKey) {
+        pullRemoteState();
+      }
       if (window.innerWidth < 768) {
         showSidebarMobile();
       }
     }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && syncEndpoint && syncKey) {
+        if (Date.now() - lastSyncTime > 30000) {
+          pullRemoteState();
+        }
+      }
+    });
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initApp);

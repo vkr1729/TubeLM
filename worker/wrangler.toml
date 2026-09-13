@@ -1,0 +1,9 @@
+name = "tubelm-sync"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+# Connect to your existing Cloudflare R2 bucket
+# Default name matches your TubeLM .env file: R2_BUCKET_NAME
+[[r2_buckets]]
+binding = "SYNC_BUCKET"
+bucket_name = "instagram-digest"
