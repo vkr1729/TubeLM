@@ -1755,6 +1755,8 @@
     let syncKey = (localStorage.getItem('tubelm_sync_key') || '').trim();
     let syncDebounceTimer = null;
     let lastSyncTime = parseInt(localStorage.getItem('tubelm_sync_last') || '0', 10);
+    let currentSyncStatus = ''; // 'synced', 'syncing', 'error', ''
+    let lastSyncMessage = '';
 
     function openSyncModal() {
       const modal = document.getElementById('sync-modal');
@@ -1763,32 +1765,58 @@
       const keyInput = document.getElementById('sync-key-input');
       if (epInput) epInput.value = syncEndpoint;
       if (keyInput) keyInput.value = syncKey;
-      updateSyncUI();
+      updateSyncUI(currentSyncStatus, lastSyncMessage);
       modal.style.display = 'flex';
     }
 
     function closeSyncModal() {
       const modal = document.getElementById('sync-modal');
-      if (modal) modal.style.display = 'none';
+      if (!modal) return;
+      modal.style.display = 'none';
     }
 
     function updateSyncUI(status, message) {
+      if (status !== undefined && status !== null) {
+        currentSyncStatus = status;
+      }
+      if (message !== undefined && message !== null) {
+        lastSyncMessage = message;
+      }
       const dot = document.getElementById('sync-status-dot');
       const statusText = document.getElementById('sync-status-text');
       const pairingSection = document.getElementById('pairing-section');
       const disconnectBtn = document.getElementById('btn-disconnect-sync');
       
       if (dot) {
-        dot.className = 'sync-dot' + (status ? ' ' + status : (syncEndpoint && syncKey ? ' synced' : ''));
-      }
-      if (statusText) {
-        if (message) {
-          statusText.textContent = 'Status: ' + message;
+        let cls = 'sync-dot';
+        if (currentSyncStatus === 'error') {
+          cls += ' error';
+        } else if (currentSyncStatus === 'syncing') {
+          cls += ' syncing';
+        } else if (currentSyncStatus === 'synced') {
+          cls += ' synced';
         } else if (syncEndpoint && syncKey) {
-          const ago = lastSyncTime ? `${Math.max(1, Math.round((Date.now() - lastSyncTime) / 60000))}m ago` : 'recently';
-          statusText.textContent = `Status: Connected (synced ${ago} · ${readIds.size} digests, ${top20Read.size} items)`;
+          cls += ' synced';
+        }
+        dot.className = cls;
+      }
+
+      if (statusText) {
+        if (currentSyncStatus === 'error') {
+          statusText.textContent = 'Status: ' + (lastSyncMessage || 'Sync failed');
+          statusText.style.color = 'var(--text-danger, #ef4444)';
         } else {
-          statusText.textContent = 'Status: Local storage only (unpaired)';
+          statusText.style.color = '';
+          if (currentSyncStatus === 'syncing') {
+            statusText.textContent = 'Status: ' + (lastSyncMessage || 'Syncing...');
+          } else if (currentSyncStatus === 'synced') {
+            statusText.textContent = 'Status: ' + (lastSyncMessage || 'Connected (synced just now)');
+          } else if (syncEndpoint && syncKey) {
+            const ago = lastSyncTime ? `${Math.max(1, Math.round((Date.now() - lastSyncTime) / 60000))}m ago` : 'recently';
+            statusText.textContent = `Status: Connected (synced ${ago} · ${readIds.size} digests, ${top20Read.size} items)`;
+          } else {
+            statusText.textContent = 'Status: Local storage only (unpaired)';
+          }
         }
       }
       const isConfigured = Boolean(syncEndpoint && syncKey);
@@ -1819,7 +1847,7 @@
       });
     }
 
-    function saveAndTriggerSync() {
+    async function saveAndTriggerSync() {
       const epInput = document.getElementById('sync-endpoint-input');
       const keyInput = document.getElementById('sync-key-input');
       const ep = (epInput?.value || '').trim().replace(/\/+$/, '');
@@ -1835,19 +1863,21 @@
       localStorage.setItem('tubelm_sync_key', syncKey);
       updateSyncUI('syncing', 'Connecting to Cloudflare...');
       
-      pullRemoteState().then(() => {
-        return pushRemoteState();
-      }).then(() => {
-        updateSyncUI('synced', 'Synced & connected successfully!');
-      }).catch((err) => {
-        updateSyncUI('error', 'Sync failed: ' + (err.message || 'network error'));
-      });
+      try {
+        await pullRemoteState();
+        await pushRemoteState();
+        updateSyncUI('synced', 'Connected & synced successfully!');
+      } catch (err) {
+        updateSyncUI('error', err.message || 'Sync connection failed');
+      }
     }
 
     function disconnectSync() {
       if (!confirm('Disconnect cloud sync from this device? Your local watch history will be preserved.')) return;
       syncEndpoint = '';
       syncKey = '';
+      currentSyncStatus = '';
+      lastSyncMessage = '';
       localStorage.removeItem('tubelm_sync_endpoint');
       localStorage.removeItem('tubelm_sync_key');
       localStorage.removeItem('tubelm_sync_last');
@@ -1873,8 +1903,8 @@
           history.replaceState(null, document.title, window.location.pathname + window.location.search);
           updateSyncUI('syncing', 'Pairing from link... syncing state...');
           pullRemoteState().then(() => {
-            pushRemoteState();
-          });
+            return pushRemoteState();
+          }).catch(() => {});
         }
       } catch (err) {
         console.warn('Pairing URL error:', err);
@@ -1893,7 +1923,15 @@
             'X-Sync-Key': syncKey,
           },
         });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) {
+          if (resp.status === 404) {
+            throw new Error('Worker not found (HTTP 404). Deploy "tubelm-sync" to Cloudflare first.');
+          } else if (resp.status === 401) {
+            throw new Error('Unauthorized (HTTP 401). Check your sync passphrase.');
+          } else {
+            throw new Error(`Cloudflare Worker HTTP ${resp.status}`);
+          }
+        }
         const data = await resp.json();
         
         let changed = false;
@@ -1923,9 +1961,12 @@
         lastSyncTime = Date.now();
         try { localStorage.setItem('tubelm_sync_last', String(lastSyncTime)); } catch (_) {}
         updateSyncUI('synced', `Connected (synced just now)`);
+        return data;
       } catch (err) {
-        console.warn('Sync pull offline/blocked (using local):', err);
-        updateSyncUI('error', 'Offline / Workplace firewall active');
+        console.warn('Sync pull error:', err);
+        const msg = err.message || 'Offline / Workplace firewall active';
+        updateSyncUI('error', msg);
+        throw err;
       }
     }
 
@@ -1947,7 +1988,15 @@
           },
           body: JSON.stringify(payload),
         });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) {
+          if (resp.status === 404) {
+            throw new Error('Worker not found (HTTP 404). Deploy "tubelm-sync" to Cloudflare first.');
+          } else if (resp.status === 401) {
+            throw new Error('Unauthorized (HTTP 401). Check your sync passphrase.');
+          } else {
+            throw new Error(`Cloudflare Worker HTTP ${resp.status}`);
+          }
+        }
         const data = await resp.json();
         if (data.ok) {
           let changed = false;
@@ -1976,10 +2025,13 @@
           lastSyncTime = Date.now();
           try { localStorage.setItem('tubelm_sync_last', String(lastSyncTime)); } catch (_) {}
           updateSyncUI('synced', 'Connected (synced just now)');
+          return data;
         }
       } catch (err) {
-        console.warn('Sync push offline/blocked (using local):', err);
-        updateSyncUI('error', 'Offline / Workplace firewall active');
+        console.warn('Sync push error:', err);
+        const msg = err.message || 'Offline / Workplace firewall active';
+        updateSyncUI('error', msg);
+        throw err;
       }
     }
 
@@ -1987,7 +2039,7 @@
       if (!syncEndpoint || !syncKey) return;
       clearTimeout(syncDebounceTimer);
       syncDebounceTimer = setTimeout(() => {
-        pushRemoteState();
+        pushRemoteState().catch(() => {});
       }, 1200);
     }
 
@@ -3445,7 +3497,7 @@
       checkUrlPairing();
       updateSyncUI();
       if (syncEndpoint && syncKey) {
-        pullRemoteState();
+        pullRemoteState().catch(() => {});
       }
       if (window.innerWidth < 768) {
         showSidebarMobile();
@@ -3455,7 +3507,7 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && syncEndpoint && syncKey) {
         if (Date.now() - lastSyncTime > 30000) {
-          pullRemoteState();
+          pullRemoteState().catch(() => {});
         }
       }
     });
