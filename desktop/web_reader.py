@@ -347,6 +347,7 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
     src_info = sources_map.get(channel_name) or sources_map.get(safe_name) or {}
     category = data.get("category") or src_info.get("category", "tech")
     subscribers = src_info.get("subscribers", "")
+    source_type = str(data.get("source_type") or src_info.get("type") or "youtube")
     notebook_url = str(data.get("notebook_url") or "")
     items = data.get("items") or []
     summary_text = str(data.get("summary_text") or "")
@@ -364,6 +365,7 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
             continue
         url = str(it.get("url") or "")
         title = str(it.get("title") or "")
+        it_source_type = str(it.get("source_type") or source_type)
         summary_html = ""
         if _md is not None:
             try:
@@ -374,6 +376,7 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
             "title": title,
             "url": url,
             "video_id": str(it.get("video_id") or extract_youtube_video_id(url)),
+            "source_type": it_source_type,
             "published": str(it.get("published") or ""),
             "duration": str(it.get("duration") or ""),
             "duration_seconds": int(it.get("duration_seconds") or 0),
@@ -410,10 +413,12 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
         "id": safe_name,
         "name": channel_name,
         "category": category,
+        "source_type": source_type,
         "subscribers": subscribers,
         "notebook_url": notebook_url,
         "video_count": len(videos),
         "videos": videos,
+        "summary_text": summary_text,
         "full_summary_html": full_summary_html,
         "summary_preview": summary_preview,
         "has_audio": has_audio,
@@ -426,7 +431,8 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
         "brief": [
             {"title": v.get("title", ""), "url": v.get("url", ""),
              "video_id": v.get("video_id", ""), "duration": v.get("duration", ""),
-             "duration_seconds": v.get("duration_seconds", 0), "lead": v.get("lead", "")}
+             "duration_seconds": v.get("duration_seconds", 0), "lead": v.get("lead", ""),
+             "source_type": v.get("source_type", source_type)}
             for v in videos
         ],
     }
@@ -444,6 +450,7 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
     src_info = sources_map.get(channel_name) or sources_map.get(safe_name) or {}
     category = src_info.get("category", "tech")
     subscribers = src_info.get("subscribers", "")
+    source_type = str(src_info.get("type", "youtube"))
 
     # Extract Notebook URL
     nb_elem = soup.find("a", href=lambda h: h and ("notebooklm.google.com" in h or "notebook.google.com" in h))
@@ -474,6 +481,7 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
             "title": title,
             "url": url,
             "video_id": video_id,
+            "source_type": source_type,
             "published": published,
             "duration": str(duration),
             "duration_seconds": int(dur_sec or 0),
@@ -516,10 +524,12 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
         "id": safe_name,
         "name": channel_name,
         "category": category,
+        "source_type": source_type,
         "subscribers": subscribers,
         "notebook_url": notebook_url,
         "video_count": len(videos),
         "videos": videos,
+        "summary_text": full_summary_text,
         "full_summary_html": full_summary_html,
         "summary_preview": summary_preview,
         "has_audio": has_audio,
@@ -532,7 +542,8 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
         "brief": [
             {"title": v.get("title", ""), "url": v.get("url", ""),
              "video_id": v.get("video_id", ""), "duration": v.get("duration", ""),
-             "duration_seconds": v.get("duration_seconds", 0), "lead": v.get("lead", "")}
+             "duration_seconds": v.get("duration_seconds", 0), "lead": v.get("lead", ""),
+             "source_type": v.get("source_type", source_type)}
             for v in videos
         ],
     }
@@ -880,7 +891,7 @@ def build_reader_site(
                                 from tts_service import generate_summary_tts
                                 # Build-time backfill: synthesize missing summary audio from existing text.
                                 if not tts_path.exists() or tts_path.stat().st_size == 0:
-                                    summary_text = ch_data.get("full_summary_html") or ch_data.get("summary_preview") or ""
+                                    summary_text = ch_data.get("summary_text") or ch_data.get("full_summary_html") or ch_data.get("summary_preview") or ""
                                     generate_summary_tts(summary_text, tts_path)
                             except Exception:
                                 logger.exception("Summary TTS backfill failed for %s.", ch_data.get("name"))

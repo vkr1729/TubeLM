@@ -74,8 +74,19 @@ def prepare_top10_batch(run_date: str) -> str:
     """Prepare or resume one unsent cross-source batch and return its date."""
     batch = _read_batch()
     if batch and not batch.get("sent_at"):
-        batch.setdefault("sources", {})
-        return str(batch.get("run_date") or run_date)
+        batch_date = str(batch.get("run_date") or "")
+        is_stale = False
+        if batch_date and run_date:
+            try:
+                b_dt = datetime.strptime(batch_date, "%Y-%m-%d").date()
+                r_dt = datetime.strptime(run_date, "%Y-%m-%d").date()
+                if (r_dt - b_dt).days >= 6:
+                    is_stale = True
+            except ValueError:
+                pass
+        if not is_stale:
+            batch.setdefault("sources", {})
+            return str(batch.get("run_date") or run_date)
 
     batch = {
         "run_date": run_date,
@@ -379,7 +390,7 @@ def rank_top10_candidates(
     )
     effective_target_count = min(requested_count, len(candidates))
     candidate_ids = [item["candidate_id"] for item in candidates]
-    agy_bin = shutil.which("agy")
+    agy_bin = paths.get_agy_bin()
     if not agy_bin:
         raise Top10DigestError("The Top digest is enabled, but `agy` is not installed.")
 

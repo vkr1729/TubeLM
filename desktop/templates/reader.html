@@ -1372,10 +1372,85 @@
       display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer}
     .mini-meta{flex:1 1 0%;min-width:0;cursor:pointer}
     .mini-title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .mini-sub{font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',ui-monospace,monospace}
-    .mini-btn{background:none;border:none;color:var(--text-primary);font-size:18px;cursor:pointer;padding:6px;flex-shrink:0}
-    .mini-speed{font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;border:1px solid var(--border-color);
-      border-radius:8px;padding:4px 8px;background:none;color:var(--text-primary);cursor:pointer;flex-shrink:0}
+    .mini-btn {
+      width: 32px;
+      height: 32px;
+      background: none;
+      border: none;
+      color: var(--text-primary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      padding: 0;
+      flex-shrink: 0;
+      transition: color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+    }
+    .mini-btn:hover {
+      background: var(--soft-hover);
+    }
+    .mini-btn:active {
+      transform: scale(0.92);
+    }
+    .mini-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+    .mini-play-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--accent-text, #171815);
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      padding: 0;
+      margin: 0 3px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+      transition: transform 0.12s ease, filter 0.16s ease, background 0.15s ease;
+    }
+    :root[data-theme="light"] .mini-play-btn {
+      background: #171815;
+      color: #d9ff63;
+    }
+    .mini-play-btn:hover {
+      filter: brightness(1.08);
+      transform: scale(1.06);
+    }
+    .mini-play-btn:active {
+      transform: scale(0.95);
+    }
+    .mini-play-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+    .mini-speed {
+      font-size: 12px;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 4px 8px;
+      background: none;
+      color: var(--text-primary);
+      cursor: pointer;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1.2;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .mini-speed:hover {
+      border-color: var(--border-focus);
+      background: var(--soft-hover);
+    }
     body.mini-visible #reading-pane,body.mini-visible #sidebar-list{padding-bottom:72px}
     .btn-play-all{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
       padding:3px 8px;color:var(--text-primary);cursor:pointer;white-space:nowrap}
@@ -1394,6 +1469,7 @@
     :root[data-theme="light"] .btn-seen.is-seen{background:rgba(92,122,16,0.12)!important;border-color:rgba(92,122,16,0.4)!important;color:#4a6809!important}
     .pref-chip{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
       padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -1407,6 +1483,10 @@
 
     <!-- Global Controls -->
     <div class="header-controls">
+      <button id="btn-refresh" onclick="forceRefreshApp()" class="theme-toggle-btn" title="Refresh App & Cache">
+        <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+      </button>
+
       <button id="btn-font-size" onclick="cycleFontSize()" class="theme-toggle-btn text-xs font-semibold" title="Adjust text size">Aa</button>
 
       <button id="theme-toggle" onclick="toggleTheme()" class="theme-toggle-btn" title="Toggle theme">
@@ -1502,9 +1582,15 @@
       <div id="mini-title" class="mini-title">—</div>
       <div id="mini-sub" class="mini-sub">—</div>
     </div>
-    <button class="mini-btn" onclick="queuePrev()" title="Previous">⏮</button>
-    <button class="mini-btn" id="mini-play" onclick="toggleMiniPlay()" title="Play / Pause">⏯</button>
-    <button class="mini-btn" onclick="queueNext()" title="Next">⏭</button>
+    <button class="mini-btn" onclick="queuePrev()" title="Previous" aria-label="Previous">
+      <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm12 12V6l-8.5 6 8.5 6z"/></svg>
+    </button>
+    <button class="mini-play-btn" id="mini-play" onclick="toggleMiniPlay()" title="Play" aria-label="Play or pause">
+      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </button>
+    <button class="mini-btn" onclick="queueNext()" title="Next" aria-label="Next">
+      <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm10-12v12h2V6h-2z"/></svg>
+    </button>
     <button class="mini-speed" id="mini-speed" onclick="cyclePlayerSpeed()" title="Playback speed">1x</button>
   </div>
 
@@ -1519,10 +1605,20 @@
     let selectedItemId = 'top20';
     let isAudioPlaying = false;
     function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-    let readIds = new Set([
+    const CANONICAL_KEY_RE = /^\d{4}-\d{2}-\d{2}_.+/;
+    let rawReadIds = [
       ...(SITE_DATA.read_ids || []),
       ...JSON.parse(localStorage.getItem('tubelm_read_ids') || '[]')
-    ]);
+    ];
+    let readIds = new Set(rawReadIds.filter(id => typeof id === 'string' && CANONICAL_KEY_RE.test(id)));
+    // Immediately prune legacy un-scoped or slot keys from localStorage
+    try {
+      const stored = JSON.parse(localStorage.getItem('tubelm_read_ids') || '[]');
+      const sanitized = stored.filter(id => typeof id === 'string' && CANONICAL_KEY_RE.test(id));
+      if (sanitized.length !== stored.length) {
+        localStorage.setItem('tubelm_read_ids', JSON.stringify(sanitized));
+      }
+    } catch (_) {}
 
     // Video watch history & Top 20 seen store
     let top20Read = new Set();
@@ -1582,7 +1678,7 @@
     function isChannelRead(chId, weekKey) {
       const wk = weekKey || currentWeekKey;
       const canonicalKey = getChannelReadKey(chId, wk);
-      return readIds.has(canonicalKey) || readIds.has(`${wk}_${chId}`) || readIds.has(chId);
+      return readIds.has(canonicalKey);
     }
 
     function saveReadState(id, isRead) {
@@ -1618,19 +1714,32 @@
 
       const allWatched = ch.videos.every(v => isVideoWatched(v.video_id, v.url));
       const canonicalKey = getChannelReadKey(ch.id, wk);
-      const slotKey = `${wk}_${ch.id}`;
 
       if (allWatched) {
         readIds.add(canonicalKey);
-        readIds.add(slotKey);
-        readIds.add(ch.id);
         saveReadState(canonicalKey, true);
       } else {
         readIds.delete(canonicalKey);
-        readIds.delete(slotKey);
-        readIds.delete(ch.id);
         saveReadState(canonicalKey, false);
       }
+    }
+
+    async function forceRefreshApp() {
+      const icon = document.getElementById('refresh-icon');
+      if (icon) icon.style.animation = 'spin 0.7s linear infinite';
+      try {
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister()));
+        }
+      } catch (err) {
+        console.warn('Cache purge failed:', err);
+      }
+      window.location.reload();
     }
 
     function toggleVideoWatched(vidKey, chId, btnEl) {
@@ -1640,15 +1749,16 @@
 
       if (btnEl) {
         const card = btnEl.closest('.video-card, .editorial-card');
+        const isVideo = btnEl.getAttribute('data-is-video') !== 'false';
         if (card) {
           if (willBeWatched) {
             card.classList.add('is-watched');
             btnEl.classList.add('is-seen');
-            btnEl.innerHTML = 'Watched ✓';
+            btnEl.innerHTML = isVideo ? 'Watched ✓' : 'Read ✓';
           } else {
             card.classList.remove('is-watched');
             btnEl.classList.remove('is-seen');
-            btnEl.innerHTML = '✓ Mark Watched';
+            btnEl.innerHTML = isVideo ? '✓ Mark Watched' : '✓ Mark Read';
           }
         }
       }
@@ -1665,15 +1775,16 @@
 
       if (btnEl) {
         const card = btnEl.closest('.editorial-card, .video-card');
+        const isVideo = btnEl.getAttribute('data-is-video') !== 'false';
         if (card) {
           if (willBeRead) {
             card.classList.add('is-watched');
             btnEl.classList.add('is-seen');
-            btnEl.innerHTML = 'Watched ✓';
+            btnEl.innerHTML = isVideo ? 'Watched ✓' : 'Read ✓';
           } else {
             card.classList.remove('is-watched');
             btnEl.classList.remove('is-seen');
-            btnEl.innerHTML = '✓ Mark Watched';
+            btnEl.innerHTML = isVideo ? '✓ Mark Watched' : '✓ Mark Read';
           }
         }
       }
@@ -1703,18 +1814,13 @@
         chId = targetId.split('_').slice(1).join('_');
       }
       const canonicalKey = getChannelReadKey(chId, wk);
-      const slotKey = `${wk}_${chId}`;
       let nowRead = false;
 
-      if (readIds.has(canonicalKey) || readIds.has(slotKey) || readIds.has(targetId)) {
+      if (readIds.has(canonicalKey)) {
         readIds.delete(canonicalKey);
-        readIds.delete(slotKey);
-        readIds.delete(targetId);
         nowRead = false;
       } else {
         readIds.add(canonicalKey);
-        readIds.add(slotKey);
-        readIds.add(targetId);
         nowRead = true;
       }
       saveReadState(canonicalKey, nowRead);
@@ -2013,8 +2119,8 @@
               <div class="editorial-footer">
                 <span class="date">${esc(item.published || '')}${item.duration ? ` · <span class="font-mono text-[11px] font-semibold text-[var(--text-primary)]">⏱ ${esc(item.duration)}</span>` : ''}</span>
                 <div class="flex items-center gap-2">
-                  ${seen ? `<span class="seen-tag">✓ Watched</span>` : ''}
-                  <button onclick="toggleTopItemRead('${key}', this)" class="btn-seen ${seen ? 'is-seen' : ''}" title="Toggle watched status">${seen ? 'Watched ✓' : '✓ Mark Watched'}</button>
+                  ${seen ? `<span class="seen-tag">✓ ${isVideo ? 'Watched' : 'Read'}</span>` : ''}
+                  <button onclick="toggleTopItemRead('${key}', this)" data-is-video="${isVideo}" class="btn-seen ${seen ? 'is-seen' : ''}" title="Toggle ${isVideo ? 'watched' : 'read'} status">${isVideo ? (seen ? 'Watched ✓' : '✓ Mark Watched') : (seen ? 'Read ✓' : '✓ Mark Read')}</button>
                   ${hasVideoId ? `
                     <button onclick="playVideo('${item.video_id}', '${escapeQuotes(item.title)}')" class="btn-play" title="Play Video">
                       Play ▶
@@ -2089,6 +2195,10 @@
           const safeTitle = escapeQuotes(v.title);
           const vidKey = escapeQuotes(v.video_id || v.url);
           const isWatched = isVideoWatched(v.video_id, v.url);
+          const isVideo = (v.source_type ? v.source_type === 'youtube' : true) && Boolean(v.video_id || (v.url && (v.url.includes('youtube.com') || v.url.includes('youtu.be'))));
+          const linkText = isVideo ? 'Watch on YouTube ↗' : 'Open Webpage ↗';
+          const markLabel = isVideo ? (isWatched ? 'Watched ✓' : '✓ Mark Watched') : (isWatched ? 'Read ✓' : '✓ Mark Read');
+          const markTitle = isVideo ? 'Toggle watched status' : 'Toggle read status';
           videosHtml += `
             <div class="video-card ${isWatched ? 'is-watched' : ''}">
               <div class="video-card-header">
@@ -2097,15 +2207,15 @@
                     <h3 class="video-card-title">
                       <a href="${v.url}" target="_blank">${esc(v.title)}</a>
                     </h3>
-                    <button onclick="toggleVideoWatched('${vidKey}', '${ch.id}', this)" class="btn-seen-sm ${isWatched ? 'is-seen' : ''}" title="Toggle watched status">
-                      ${isWatched ? 'Watched ✓' : '✓ Mark Watched'}
+                    <button onclick="toggleVideoWatched('${vidKey}', '${ch.id}', this)" data-is-video="${isVideo}" class="btn-seen-sm ${isWatched ? 'is-seen' : ''}" title="${markTitle}">
+                      ${markLabel}
                     </button>
                   </div>
                   <div class="video-card-meta">
                     <span>${esc(v.published || '')}</span>
                     ${v.duration ? `<span>·</span><span class="video-duration-tag font-mono">⏱ ${esc(v.duration)}</span>` : ''}
                     <span>·</span>
-                    <a href="${v.url}" target="_blank">Watch on YouTube ↗</a>
+                    <a href="${v.url}" target="_blank">${linkText}</a>
                   </div>
                 </div>
               </div>
@@ -2563,9 +2673,14 @@
         if (sameSrc && isFinite(globalAudio.duration) && globalAudio.duration) dur = globalAudio.duration;
         if (!dur && ch.audio_seconds) dur = ch.audio_seconds;
       } catch (_) {}
-      if (subEl) subEl.textContent = `${ch.category || t.category || ''} · ${fmtClock(cur)} / ${dur ? fmtClock(dur) : '--:--'}`;
-      if (playEl) playEl.textContent = (isAudioPlaying && !globalAudio.paused) ? '⏸' : '▶';
-      if (speedEl) speedEl.textContent = `${player.speed || 1.0}x`;
+      if (playEl) {
+        const isPlaying = isAudioPlaying && !globalAudio.paused;
+        playEl.innerHTML = isPlaying
+          ? '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>'
+          : '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+        playEl.setAttribute('title', isPlaying ? 'Pause' : 'Play');
+        playEl.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+      }
       if (progEl) progEl.style.width = dur > 0 ? `${(cur / dur) * 100}%` : '0%';
     }
 
@@ -2702,6 +2817,16 @@
       updatePlayIcon();
       updateMiniPlayer();
     };
+    globalAudio.addEventListener('play', () => {
+      isAudioPlaying = true;
+      updatePlayIcon();
+      updateMiniPlayer();
+    });
+    globalAudio.addEventListener('pause', () => {
+      isAudioPlaying = false;
+      updatePlayIcon();
+      updateMiniPlayer();
+    });
     globalAudio.addEventListener('seeked', updatePositionState);
     globalAudio.addEventListener('ratechange', updatePositionState);
     globalAudio.addEventListener('playing', updatePositionState);

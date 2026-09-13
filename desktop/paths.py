@@ -1,9 +1,21 @@
 """Central path helpers for the source-checkout TubeLM application."""
 
+import os
 from pathlib import Path
 import re
 import shutil
 
+
+def ensure_user_bin_on_path() -> None:
+    """Ensure ~/.local/bin is on PATH so systemd/cron services can find user tools."""
+    user_bin = str(Path.home() / ".local" / "bin")
+    current_path = os.environ.get("PATH", "")
+    path_parts = current_path.split(os.pathsep) if current_path else []
+    if user_bin not in path_parts and Path(user_bin).exists():
+        os.environ["PATH"] = f"{user_bin}{os.pathsep}{current_path}" if current_path else user_bin
+
+
+ensure_user_bin_on_path()
 
 DESKTOP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = DESKTOP_DIR.parent
@@ -146,6 +158,22 @@ def get_notebooklm_bin() -> str:
     if local.exists():
         return str(local)
     return shutil.which("notebooklm") or "notebooklm"
+
+
+def get_agy_bin() -> str | None:
+    """Resolve the agy CLI from the system PATH or standard install locations."""
+    found = shutil.which("agy")
+    if found:
+        return found
+    candidates = [
+        Path.home() / ".local" / "bin" / "agy",
+        Path("/usr/local/bin/agy"),
+        Path("/usr/bin/agy"),
+    ]
+    for candidate in candidates:
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 def safe_channel_name(name: str) -> str:

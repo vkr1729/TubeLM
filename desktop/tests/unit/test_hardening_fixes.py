@@ -88,6 +88,19 @@ class TestAtomicStateWrites:
         big = [f"id-{i}" for i in range(gui.MAX_READ_IDS + 100)]
         assert len(gui._sanitize_read_ids(big)) == gui.MAX_READ_IDS
 
+    def test_read_ids_canonical_only_filtering(self):
+        import gui
+        mixed = [
+            "2026-09-04_AI_Explained",
+            "AI_Explained",
+            "current_AI_Explained",
+            "2026-09-11_Bloomberg",
+            "prev_Two_Minute_Papers",
+            123,
+        ]
+        clean = gui._sanitize_read_ids(mixed, canonical_only=True)
+        assert clean == ["2026-09-04_AI_Explained", "2026-09-11_Bloomberg"]
+
 
 class TestRunnerStop:
     def test_stop_when_idle_reports_not_running(self):

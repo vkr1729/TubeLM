@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import paths
 import top10_service
 
 
@@ -275,4 +276,16 @@ def test_generate_and_send_top10_digest_final_with_new_candidates(monkeypatch, t
     assert sent_emails[1]["is_final_after_interim"] is True
     assert sent_emails[1]["candidate_count"] == 2
     assert (summaries_dir / "2026-09-04_TubeLM_Top_2_digest.html").exists()
+
+
+def test_get_agy_bin_fallbacks(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths.shutil, "which", lambda _: None)
+    fake_local_agy = tmp_path / ".local" / "bin" / "agy"
+    fake_local_agy.parent.mkdir(parents=True, exist_ok=True)
+    fake_local_agy.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_local_agy.chmod(0o755)
+
+    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    assert paths.get_agy_bin() == str(fake_local_agy)
+
 

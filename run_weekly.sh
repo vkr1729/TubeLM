@@ -2,6 +2,8 @@
 # run_weekly.sh — TubeLM Weekly Automated Pipeline Sync
 set -euo pipefail
 
+export PATH="$HOME/.local/bin:$PATH"
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 

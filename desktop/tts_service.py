@@ -12,8 +12,10 @@ import logging
 import os
 import re
 import sys
+import html
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 import edge_tts
 
 logger = logging.getLogger(__name__)
@@ -22,9 +24,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_VOICE = "en-US-AndrewMultilingualNeural"
 DEFAULT_RATE = "+0%"
 
-# Upper bound for one edge-tts synthesis so a hung websocket can never stall
-# the sequential per-channel pipeline loop (P1 hardening).
-TTS_TIMEOUT_SECONDS = 90
+# Upper bound for one edge-tts synthesis (default 300s / 5 minutes)
+# Dynamic scaling ensures long summaries (>1,000 words) get proportional time.
+TTS_TIMEOUT_SECONDS = int(os.getenv("TTS_TIMEOUT_SECONDS", "300"))
 
 
 def get_configured_voice() -> str:
@@ -36,19 +38,35 @@ def get_configured_rate() -> str:
 
 
 def clean_text_for_speech(text: str) -> str:
-    """Strip markdown links, citations, and headers for smooth narration."""
+    """Strip HTML, markdown links, citations, URLs, and formatting for clean natural narration."""
     if not text:
         return ""
+    t = text
+    # Strip HTML tags and unescape HTML entities if present
+    if "<" in t and ">" in t:
+        try:
+            soup = BeautifulSoup(t, "html.parser")
+            t = soup.get_text(" ", strip=True)
+        except Exception:
+            t = re.sub(r"<[^>]+>", " ", t)
+    t = html.unescape(t)
+
     # Strip citation brackets like [1], [1, 2], [1-3]
-    t = re.sub(r"\s*\[\d+(?:[\s\d,\-–—]*\d+)*\]", "", text)
+    t = re.sub(r"\s*\[\d+(?:[\s\d,\-–—]*\d+)*\]", "", t)
     # Remove markdown links, leave link text: [text](url) -> text
     t = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", t)
+    # Remove raw URLs so voice never spells out http/https
+    t = re.sub(r"https?://\S+", "", t)
+    t = re.sub(r"\bwww\.\S+", "", t)
     # Remove headers #, ##, ###
     t = re.sub(r"^#{1,6}\s+", "", t, flags=re.MULTILINE)
     # Remove bold/italics
     t = re.sub(r"[*_]{1,3}([^*_]+)[*_]{1,3}", r"\1", t)
-    # Remove raw URLs
-    t = re.sub(r"https?://\S+", "", t)
+    t = re.sub(r"[*_]", "", t)
+    # Remove list bullet markers
+    t = re.sub(r"^\s*[-*+]\s+", "", t, flags=re.MULTILINE)
+    # Strip remaining angle brackets
+    t = re.sub(r"[<>]", "", t)
     # Normalize whitespace
     return " ".join(t.split())
 
@@ -69,9 +87,10 @@ async def _generate_audio_async(
     effective_rate = rate or get_configured_rate()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_out = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp.mp3")
+    effective_timeout = max(TTS_TIMEOUT_SECONDS, int(len(clean.split()) * 0.4))
     try:
         communicate = edge_tts.Communicate(clean, effective_voice, rate=effective_rate)
-        await asyncio.wait_for(communicate.save(str(temp_out)), timeout=TTS_TIMEOUT_SECONDS)
+        await asyncio.wait_for(communicate.save(str(temp_out)), timeout=effective_timeout)
         if not force and output_path.exists() and output_path.stat().st_size > 0:
             temp_out.unlink(missing_ok=True)
             return True
@@ -87,7 +106,7 @@ async def _generate_audio_async(
     except asyncio.TimeoutError:
         logger.warning(
             "edge-tts generation timed out after %ds; skipping TTS for %s.",
-            TTS_TIMEOUT_SECONDS,
+            effective_timeout,
             output_path.name,
         )
         temp_out.unlink(missing_ok=True)
@@ -147,15 +166,16 @@ def _plain_text_from_digest(path: Path) -> str:
     return body.get_text(" ", strip=True) if body else ""
 
 
-def backfill_week(
+async def _backfill_week_async(
     summaries_dir: Path,
     audio_dir: Path,
     run_date: str,
     voice: str | None = None,
     rate: str | None = None,
     force: bool = False,
+    concurrency: int = 3,
 ) -> dict[str, int]:
-    """Generate missing (or force-regenerated) summary_*.mp3 files for one run date. Returns counts."""
+    """Generate missing summary_*.mp3 files concurrently."""
     from paths import safe_channel_name
 
     stats = {"scanned": 0, "generated": 0, "skipped": 0, "failed": 0}
@@ -163,6 +183,16 @@ def backfill_week(
         return stats
     seen: set[str] = set()
     files = sorted(summaries_dir.glob(f"{run_date}_*.json")) + sorted(summaries_dir.glob(f"{run_date}_*.html"))
+    tasks = []
+    sem = asyncio.Semaphore(concurrency)
+
+    async def process_one(digest: Path, tts_path: Path):
+        async with sem:
+            text = _plain_text_from_digest(digest)
+            return await asyncio.to_thread(
+                generate_summary_tts, text, tts_path, voice=voice, rate=rate, force=force
+            )
+
     for digest in files:
         if "Top_20" in digest.name or "Top_10" in digest.name:
             continue
@@ -175,12 +205,33 @@ def backfill_week(
         if not force and tts_path.exists() and tts_path.stat().st_size > 0:
             stats["skipped"] += 1
             continue
-        text = _plain_text_from_digest(digest)
-        if generate_summary_tts(text, tts_path, voice=voice, rate=rate, force=force):
-            stats["generated"] += 1
-        else:
-            stats["failed"] += 1
+        tasks.append(process_one(digest, tts_path))
+
+    if tasks:
+        results = await asyncio.gather(*tasks)
+        for ok in results:
+            if ok:
+                stats["generated"] += 1
+            else:
+                stats["failed"] += 1
     return stats
+
+
+def backfill_week(
+    summaries_dir: Path,
+    audio_dir: Path,
+    run_date: str,
+    voice: str | None = None,
+    rate: str | None = None,
+    force: bool = False,
+    concurrency: int = 3,
+) -> dict[str, int]:
+    """Generate missing (or force-regenerated) summary_*.mp3 files for one run date. Returns counts."""
+    return asyncio.run(
+        _backfill_week_async(
+            summaries_dir, audio_dir, run_date, voice=voice, rate=rate, force=force, concurrency=concurrency
+        )
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
