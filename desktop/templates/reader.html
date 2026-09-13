@@ -1758,6 +1758,77 @@
     let currentSyncStatus = ''; // 'synced', 'syncing', 'error', ''
     let lastSyncMessage = '';
 
+    // LWW-Element-Set CRDT state map: key -> signed timestamp
+    // positive (> 0): marked WATCHED / READ
+    // negative (< 0): marked UNWATCHED / UNREAD
+    let itemStates = {};
+    try {
+      const savedStates = localStorage.getItem('tubelm_item_states');
+      if (savedStates) itemStates = JSON.parse(savedStates);
+    } catch (_) { itemStates = {}; }
+
+    function recordItemState(id, isRead) {
+      if (!id) return;
+      const now = Date.now();
+      itemStates[id] = isRead ? now : -now;
+      try { localStorage.setItem('tubelm_item_states', JSON.stringify(itemStates)); } catch (_) {}
+    }
+
+    function applyRemoteItemStates(remoteStates, remoteReadIds, remoteTop20) {
+      let changed = false;
+      const isChannelKey = (k) => k.includes('_') && /^\d{4}-\d{2}-\d{2}_/.test(k);
+
+      if (remoteStates && typeof remoteStates === 'object' && Object.keys(remoteStates).length > 0) {
+        for (const [k, ts] of Object.entries(remoteStates)) {
+          if (typeof ts !== 'number') continue;
+          const localTs = itemStates[k] || 0;
+          if (Math.abs(ts) >= Math.abs(localTs)) {
+            itemStates[k] = ts;
+            if (ts > 0) {
+              const inRemoteReads = Array.isArray(remoteReadIds) && remoteReadIds.includes(k);
+              const inRemoteTop20 = Array.isArray(remoteTop20) && remoteTop20.includes(k);
+              if (inRemoteReads || (!inRemoteTop20 && isChannelKey(k))) {
+                if (!readIds.has(k)) { readIds.add(k); changed = true; }
+              } else {
+                if (!top20Read.has(k)) { top20Read.add(k); changed = true; }
+              }
+            } else {
+              // Item explicitly unmarked UNWATCHED/UNREAD on another device: remove from both sets
+              if (readIds.has(k)) { readIds.delete(k); changed = true; }
+              if (top20Read.has(k)) { top20Read.delete(k); changed = true; }
+            }
+          }
+        }
+      } else {
+        // Fallback for legacy state
+        if (Array.isArray(remoteReadIds)) {
+          remoteReadIds.forEach(id => {
+            if (typeof id === 'string' && !readIds.has(id)) {
+              readIds.add(id);
+              changed = true;
+            }
+          });
+        }
+        if (Array.isArray(remoteTop20)) {
+          remoteTop20.forEach(k => {
+            if (typeof k === 'string' && !top20Read.has(k)) {
+              top20Read.add(k);
+              changed = true;
+            }
+          });
+        }
+      }
+
+      try { localStorage.setItem('tubelm_item_states', JSON.stringify(itemStates)); } catch (_) {}
+      if (changed) {
+        try { localStorage.setItem('tubelm_read_ids', JSON.stringify(Array.from(readIds))); } catch (_) {}
+        try { localStorage.setItem('tubelm_top20_read', JSON.stringify(Array.from(top20Read))); } catch (_) {}
+        renderSidebar();
+        renderActiveView();
+      }
+      return changed;
+    }
+
     function openSyncModal() {
       const modal = document.getElementById('sync-modal');
       if (!modal) return;
@@ -1878,6 +1949,8 @@
       syncKey = '';
       currentSyncStatus = '';
       lastSyncMessage = '';
+      itemStates = {};
+      localStorage.removeItem('tubelm_item_states');
       localStorage.removeItem('tubelm_sync_endpoint');
       localStorage.removeItem('tubelm_sync_key');
       localStorage.removeItem('tubelm_sync_last');
@@ -1934,30 +2007,8 @@
         }
         const data = await resp.json();
         
-        let changed = false;
-        if (Array.isArray(data.read_ids)) {
-          data.read_ids.forEach(id => {
-            if (typeof id === 'string' && !readIds.has(id)) {
-              readIds.add(id);
-              changed = true;
-            }
-          });
-        }
-        if (Array.isArray(data.top20_read)) {
-          data.top20_read.forEach(k => {
-            if (typeof k === 'string' && !top20Read.has(k)) {
-              top20Read.add(k);
-              changed = true;
-            }
-          });
-        }
+        applyRemoteItemStates(data.item_states, data.read_ids, data.top20_read);
 
-        if (changed) {
-          try { localStorage.setItem('tubelm_read_ids', JSON.stringify(Array.from(readIds))); } catch (_) {}
-          try { localStorage.setItem('tubelm_top20_read', JSON.stringify(Array.from(top20Read))); } catch (_) {}
-          renderSidebar();
-          renderActiveView();
-        }
         lastSyncTime = Date.now();
         try { localStorage.setItem('tubelm_sync_last', String(lastSyncTime)); } catch (_) {}
         updateSyncUI('synced', `Connected (synced just now)`);
@@ -1977,6 +2028,7 @@
         const payload = {
           read_ids: Array.from(readIds),
           top20_read: Array.from(top20Read),
+          item_states: itemStates,
         };
         const sep = syncEndpoint.includes('?') ? '&' : '?';
         const resp = await fetch(`${syncEndpoint}${sep}key=${encodeURIComponent(syncKey)}`, {
@@ -1999,29 +2051,7 @@
         }
         const data = await resp.json();
         if (data.ok) {
-          let changed = false;
-          if (Array.isArray(data.read_ids)) {
-            data.read_ids.forEach(id => {
-              if (typeof id === 'string' && !readIds.has(id)) {
-                readIds.add(id);
-                changed = true;
-              }
-            });
-          }
-          if (Array.isArray(data.top20_read)) {
-            data.top20_read.forEach(k => {
-              if (typeof k === 'string' && !top20Read.has(k)) {
-                top20Read.add(k);
-                changed = true;
-              }
-            });
-          }
-          if (changed) {
-            try { localStorage.setItem('tubelm_read_ids', JSON.stringify(Array.from(readIds))); } catch (_) {}
-            try { localStorage.setItem('tubelm_top20_read', JSON.stringify(Array.from(top20Read))); } catch (_) {}
-            renderSidebar();
-            renderActiveView();
-          }
+          applyRemoteItemStates(data.item_states, data.read_ids, data.top20_read);
           lastSyncTime = Date.now();
           try { localStorage.setItem('tubelm_sync_last', String(lastSyncTime)); } catch (_) {}
           updateSyncUI('synced', 'Connected (synced just now)');
@@ -2082,6 +2112,7 @@
       keys.forEach(k => {
         if (makeWatched) top20Read.add(k);
         else top20Read.delete(k);
+        recordItemState(k, Boolean(makeWatched));
       });
       saveTop20Read();
     }
@@ -2099,6 +2130,7 @@
     }
 
     function saveReadState(id, isRead) {
+      if (id) recordItemState(id, isRead !== false);
       try {
         localStorage.setItem('tubelm_read_ids', JSON.stringify(Array.from(readIds)));
       } catch (_) {}

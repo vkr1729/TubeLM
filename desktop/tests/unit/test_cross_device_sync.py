@@ -171,3 +171,74 @@ def test_crdt_set_union_mathematical_invariants():
         "top20_read": ["2026-09-11_dwarkesh", "2026-09-11_huberman", "2026-09-11_lex"],
     }
     assert merge_states(dev1_laptop, dev2_iphone, dev3_office) == expected
+
+
+def test_lww_signed_timestamp_unmarking_simulation():
+    """Verify that unmarking a watched video is preserved and cannot be overwritten by stale reads."""
+    worker_path = Path(__file__).resolve().parents[3] / "worker" / "worker.js"
+    assert worker_path.exists()
+
+    node_script = """
+    import('./worker/worker.js').then(async (m) => {
+      const worker = m.default;
+      const storage = new Map();
+      const mockR2 = {
+        async get(key) {
+          if (!storage.has(key)) return null;
+          const data = storage.get(key);
+          return { json: async () => JSON.parse(data), text: async () => data };
+        },
+        async put(key, value) {
+          storage.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+        }
+      };
+      const env = { SYNC_BUCKET: mockR2 };
+
+      // 1. Device 1 marks video_A watched at t=1000
+      await worker.fetch(new Request('http://localhost/sync?key=secret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_states: { 'video_A': 1000 }, top20_read: ['video_A'] })
+      }), env);
+
+      // 2. Device 2 marks video_B watched at t=1500
+      await worker.fetch(new Request('http://localhost/sync?key=secret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_states: { 'video_B': 1500 }, top20_read: ['video_B'] })
+      }), env);
+
+      // 3. Device 1 unmarks video_A unwatched at t=2000 (negative timestamp)
+      const res3 = await worker.fetch(new Request('http://localhost/sync?key=secret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_states: { 'video_A': -2000 }, top20_read: [] })
+      }), env);
+      const data3 = await res3.json();
+      if (data3.top20_read.includes('video_A')) throw new Error('video_A should NOT be watched');
+      if (!data3.top20_read.includes('video_B')) throw new Error('video_B should still be watched');
+
+      // 4. Stale Device 3 connects with old state where video_A had t=1000
+      const res4 = await worker.fetch(new Request('http://localhost/sync?key=secret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_states: { 'video_A': 1000 }, top20_read: ['video_A'] })
+      }), env);
+      const data4 = await res4.json();
+      if (data4.top20_read.includes('video_A')) throw new Error('Stale push resurrected unmarked video_A!');
+
+      process.stdout.write('OK_UNMARK');
+    }).catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+
+    res = subprocess.run(
+        ["node", "-e", node_script],
+        cwd=Path(__file__).resolve().parents[3],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"Node unmarking test failed: {res.stderr}"
+    assert "OK_UNMARK" in res.stdout
