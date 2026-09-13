@@ -1703,9 +1703,10 @@
           Status: Local storage only
         </div>
 
-        <div class="flex gap-2 pt-1">
-          <button onclick="saveAndTriggerSync()" class="flex-1 py-2 px-3 rounded-lg text-xs font-semibold bg-[var(--accent)] text-[var(--accent-text,#171815)] hover:opacity-90 transition">Save & Sync Now</button>
-          <button onclick="disconnectSync()" id="btn-disconnect-sync" class="py-2 px-3 rounded-lg text-xs font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--danger)] transition hidden">Disconnect</button>
+        <div class="flex flex-wrap gap-2 pt-1">
+          <button type="button" onclick="saveAndTriggerSync()" class="flex-1 py-2 px-3 rounded-lg text-xs font-semibold bg-[var(--accent)] text-[var(--accent-text,#171815)] hover:opacity-90 transition">Save & Sync Now</button>
+          <button type="button" onclick="resetAllWatchedState()" id="btn-reset-watched" class="py-2 px-3 rounded-lg text-xs font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--danger)] hover:text-[var(--danger)] transition" title="Mark all channels and videos as unwatched across all devices">Reset All to Unwatched</button>
+          <button type="button" onclick="disconnectSync()" id="btn-disconnect-sync" class="py-2 px-3 rounded-lg text-xs font-medium border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--danger)] transition hidden">Disconnect</button>
         </div>
 
         <div id="pairing-section" class="pt-3 mt-1 border-t border-[var(--border-color)] hidden">
@@ -1766,6 +1767,14 @@
       const savedStates = localStorage.getItem('tubelm_item_states');
       if (savedStates) itemStates = JSON.parse(savedStates);
     } catch (_) { itemStates = {}; }
+
+    // Ensure any tombstoned (< 0) item state in localStorage is immediately pruned from read sets
+    for (const [k, ts] of Object.entries(itemStates)) {
+      if (typeof ts === 'number' && ts < 0) {
+        readIds.delete(k);
+        top20Read.delete(k);
+      }
+    }
 
     function recordItemState(id, isRead) {
       if (!id) return;
@@ -1940,6 +1949,68 @@
         updateSyncUI('synced', 'Connected & synced successfully!');
       } catch (err) {
         updateSyncUI('error', err.message || 'Sync connection failed');
+      }
+    }
+
+    async function resetAllWatchedState() {
+      if (!confirm('Mark all channels and videos as unwatched across all devices?')) return;
+      const now = Date.now();
+      const allKnownKeys = new Set([
+        ...Object.keys(itemStates),
+        ...Array.from(readIds),
+        ...Array.from(top20Read),
+      ]);
+      try {
+        if (SITE_DATA && SITE_DATA.weeks) {
+          for (const [wKey, wData] of Object.entries(SITE_DATA.weeks)) {
+            const runDate = wData.run_date && wData.run_date !== 'None' ? wData.run_date : wKey;
+            (wData.channels || []).forEach(ch => {
+              if (ch.channel_id) allKnownKeys.add(`${runDate}_${ch.channel_id}`);
+            });
+            (wData.top_items || []).forEach(it => {
+              if (it.video_id) allKnownKeys.add(it.video_id);
+              if (it.url) {
+                allKnownKeys.add(it.url);
+                const norm = normalizeVideoUrl(it.url);
+                if (norm) allKnownKeys.add(norm);
+              }
+            });
+          }
+        }
+      } catch (_) {}
+
+      allKnownKeys.forEach(k => {
+        if (k) itemStates[k] = -now;
+      });
+
+      readIds.clear();
+      top20Read.clear();
+
+      try { localStorage.setItem('tubelm_read_ids', '[]'); } catch (_) {}
+      try { localStorage.setItem('tubelm_top20_read', '[]'); } catch (_) {}
+      try { localStorage.setItem('tubelm_item_states', JSON.stringify(itemStates)); } catch (_) {}
+
+      if (window.location.protocol.startsWith('http')) {
+        fetch('/api/reader/read-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: null, is_read: false, read_ids: [] })
+        }).catch(() => {});
+      }
+
+      renderSidebar();
+      renderActiveView();
+
+      if (syncEndpoint && syncKey) {
+        updateSyncUI('syncing', 'Syncing reset to cloud...');
+        try {
+          await pushRemoteState();
+          updateSyncUI('synced', 'All items reset to unwatched across devices ✓');
+        } catch (err) {
+          updateSyncUI('error', 'Reset locally; cloud sync failed: ' + (err.message || 'offline'));
+        }
+      } else {
+        updateSyncUI('', 'All items reset to unwatched locally ✓');
       }
     }
 

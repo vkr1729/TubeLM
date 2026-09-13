@@ -35,6 +35,7 @@ def test_reader_html_sync_ui_elements():
     assert 'id="sync-key-input"' in content
     assert 'id="pairing-url-display"' in content
     assert 'id="btn-copy-pairing"' in content
+    assert 'id="btn-reset-watched"' in content
 
     # Core sync engine functions
     assert 'function checkUrlPairing()' in content
@@ -43,6 +44,7 @@ def test_reader_html_sync_ui_elements():
     assert 'function scheduleSyncPush()' in content
     assert 'function copyPairingUrl()' in content
     assert 'function disconnectSync()' in content
+    assert 'function resetAllWatchedState()' in content
     assert 'visibilitychange' in content
 
 
