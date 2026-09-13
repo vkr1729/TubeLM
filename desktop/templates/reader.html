@@ -1950,6 +1950,29 @@
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         if (data.ok) {
+          let changed = false;
+          if (Array.isArray(data.read_ids)) {
+            data.read_ids.forEach(id => {
+              if (typeof id === 'string' && !readIds.has(id)) {
+                readIds.add(id);
+                changed = true;
+              }
+            });
+          }
+          if (Array.isArray(data.top20_read)) {
+            data.top20_read.forEach(k => {
+              if (typeof k === 'string' && !top20Read.has(k)) {
+                top20Read.add(k);
+                changed = true;
+              }
+            });
+          }
+          if (changed) {
+            try { localStorage.setItem('tubelm_read_ids', JSON.stringify(Array.from(readIds))); } catch (_) {}
+            try { localStorage.setItem('tubelm_top20_read', JSON.stringify(Array.from(top20Read))); } catch (_) {}
+            renderSidebar();
+            renderActiveView();
+          }
           lastSyncTime = Date.now();
           try { localStorage.setItem('tubelm_sync_last', String(lastSyncTime)); } catch (_) {}
           updateSyncUI('synced', 'Connected (synced just now)');
