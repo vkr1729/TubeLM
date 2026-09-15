@@ -2217,9 +2217,14 @@
     }
 
     function findChannelForVideo(vidKey, weekKey) {
+      if (!vidKey) return null;
       const wk = weekKey || currentWeekKey;
       const channels = ((SITE_DATA.weeks[wk] || {}).channels || []);
-      return channels.find(c => (c.videos || []).some(v => (v.video_id && v.video_id === vidKey) || (v.url && v.url === vidKey)));
+      const normVidKey = normalizeVideoUrl(vidKey);
+      return channels.find(c => (c.videos || []).some(v => 
+        (v.video_id && (v.video_id === vidKey || (normVidKey && v.video_id === normVidKey))) || 
+        (v.url && (v.url === vidKey || (normVidKey && normalizeVideoUrl(v.url) === normVidKey)))
+      ));
     }
 
     function syncChannelReadStateForVideo(vidKey, chId, weekKey) {
@@ -2315,11 +2320,37 @@
       renderActiveView();
     }
 
-    function markTopSeen(id) {
-      if (!id || isVideoWatched(id)) return;
-      markVideoWatchedState(id, null, true);
-      syncChannelReadStateForVideo(id);
-      renderSidebar();
+    function handleVideoPlay(videoId, url, chId) {
+      const vidKey = videoId || url;
+      if (!vidKey) return;
+      try {
+        markVideoWatchedState(videoId, url, true);
+        syncChannelReadStateForVideo(vidKey, chId);
+        renderSidebar();
+        if (syncEndpoint && syncKey) {
+          pushRemoteState().catch(() => {});
+        }
+        if (window.event && window.event.target) {
+          const card = window.event.target.closest('.editorial-card, .video-card');
+          if (card) {
+            card.classList.add('is-watched');
+            const btn = card.querySelector('.btn-seen, .btn-seen-sm');
+            if (btn) {
+              btn.classList.add('is-seen');
+              const isVideo = btn.getAttribute('data-is-video') !== 'false';
+              btn.innerHTML = isVideo ? 'Watched ✓' : 'Read ✓';
+            }
+          }
+        }
+      } catch (_) {}
+      setTimeout(() => {
+        renderActiveView();
+      }, 300);
+    }
+
+    function markTopSeen(id, chId) {
+      if (!id) return;
+      handleVideoPlay(id, null, chId);
     }
 
     function toggleHideSeen() {
@@ -2623,6 +2654,8 @@
           const hasVideoId = Boolean(item.video_id);
           const seen = isTopItemRead(item.video_id, item.url);
           const key = escapeQuotes(item.video_id || item.url);
+          const safeUrl = escapeQuotes(item.url || '');
+          const safeTitle = escapeQuotes(item.title || '');
           html += `
             <div class="editorial-card ${seen ? 'is-watched' : ''}">
               <div>
@@ -2631,7 +2664,7 @@
                   <span class="editorial-source">${esc(item.source_name)}</span>
                 </div>
                 <h3 class="editorial-title">
-                  <a href="${item.url}" target="_blank">${esc(item.title)}</a>
+                  <a href="${item.url}" target="_blank" onclick="handleVideoPlay('${item.video_id || ''}', '${safeUrl}')">${esc(item.title)}</a>
                 </h3>
                 <div class="editorial-quote">
                   "${esc(item.why_it_matters)}"
@@ -2643,11 +2676,11 @@
                   ${seen ? `<span class="seen-tag">✓ ${isVideo ? 'Watched' : 'Read'}</span>` : ''}
                   <button onclick="toggleTopItemRead('${key}', this)" data-is-video="${isVideo}" class="btn-seen ${seen ? 'is-seen' : ''}" title="Toggle ${isVideo ? 'watched' : 'read'} status">${isVideo ? (seen ? 'Watched ✓' : '✓ Mark Watched') : (seen ? 'Read ✓' : '✓ Mark Read')}</button>
                   ${hasVideoId ? `
-                    <button onclick="playVideo('${item.video_id}', '${escapeQuotes(item.title)}')" class="btn-play" title="Play Video">
+                    <button onclick="playVideo('${item.video_id}', '${safeTitle}', {}, null, '${safeUrl}')" class="btn-play" title="Play Video">
                       Play ▶
                     </button>
                   ` : ''}
-                  <a href="${item.url}" target="_blank">
+                  <a href="${item.url}" target="_blank" onclick="handleVideoPlay('${item.video_id || ''}', '${safeUrl}')">
                     ${isVideo ? 'Watch Video' : 'Read Article'} ↗
                   </a>
                 </div>
@@ -2715,6 +2748,7 @@
           const playerId = `player-${ch.id}-${idx}`;
           const safeTitle = escapeQuotes(v.title);
           const vidKey = escapeQuotes(v.video_id || v.url);
+          const safeUrl = escapeQuotes(v.url || '');
           const isWatched = isVideoWatched(v.video_id, v.url);
           const isVideo = (v.source_type ? v.source_type === 'youtube' : true) && Boolean(v.video_id || (v.url && (v.url.includes('youtube.com') || v.url.includes('youtu.be'))));
           const linkText = isVideo ? 'Watch on YouTube ↗' : 'Open Webpage ↗';
@@ -2726,7 +2760,7 @@
                 <div class="w-full">
                   <div class="flex items-start justify-between gap-3">
                     <h3 class="video-card-title">
-                      <a href="${v.url}" target="_blank">${esc(v.title)}</a>
+                      <a href="${v.url}" target="_blank" onclick="handleVideoPlay('${v.video_id || ''}', '${safeUrl}', '${ch.id}')">${esc(v.title)}</a>
                     </h3>
                     <button onclick="toggleVideoWatched('${vidKey}', '${ch.id}', this)" data-is-video="${isVideo}" class="btn-seen-sm ${isWatched ? 'is-seen' : ''}" title="${markTitle}">
                       ${markLabel}
@@ -2736,14 +2770,14 @@
                     <span>${esc(v.published || '')}</span>
                     ${v.duration ? `<span>·</span><span class="video-duration-tag font-mono">⏱ ${esc(v.duration)}</span>` : ''}
                     <span>·</span>
-                    <a href="${v.url}" target="_blank">${linkText}</a>
+                    <a href="${v.url}" target="_blank" onclick="handleVideoPlay('${v.video_id || ''}', '${safeUrl}', '${ch.id}')">${linkText}</a>
                   </div>
                 </div>
               </div>
 
               ${v.video_id ? `
                 <div id="${playerId}" class="video-player-wrapper">
-                  <div class="video-thumb-cover" style="background-image: url('https://img.youtube.com/vi/${v.video_id}/hqdefault.jpg');" onclick="playVideo('${v.video_id}', '${safeTitle}')">
+                  <div class="video-thumb-cover" style="background-image: url('https://img.youtube.com/vi/${v.video_id}/hqdefault.jpg');" onclick="playVideo('${v.video_id}', '${safeTitle}', {}, '${ch.id}', '${safeUrl}')">
                     <div class="video-play-btn-overlay" title="Play Video">
                       <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                     </div>
@@ -2870,7 +2904,7 @@
           itemsHtml += `
             <div class="mt-3">
               <div class="flex items-center justify-between gap-2">
-                <a href="${b.url}" target="_blank" style="font-size:14px;font-weight:600">${esc(b.title)}</a>
+                <a href="${b.url}" target="_blank" onclick="handleVideoPlay('${b.video_id || ''}', '${escapeQuotes(b.url)}', '${ch.id}')" style="font-size:14px;font-weight:600">${esc(b.title)}</a>
                 ${b.duration ? `<span class="text-xs font-mono text-[var(--text-muted)] flex-shrink-0">⏱ ${esc(b.duration)}</span>` : ''}
               </div>
               ${b.lead ? `<p class="brief-lead">${esc(b.lead)}</p>` : ''}
@@ -2946,9 +2980,13 @@
     function updatePlayerPrefChips() {
       try { document.documentElement.setAttribute('data-player-pref', playerPref()); } catch (_) {}
     }
-    function playVideo(videoId, title, opts) {
+    function playVideo(videoId, title, opts, chId, url) {
+      if (typeof opts === 'string') {
+        chId = opts;
+        opts = {};
+      }
       opts = opts || {};
-      try { markTopSeen(videoId); } catch (_) {}
+      handleVideoPlay(videoId, url || null, chId);
       if (isAudioPlaying && globalAudio && !globalAudio.paused) {
         globalAudio.pause();
         isAudioPlaying = false;
@@ -2957,20 +2995,7 @@
       }
       const pref = opts.preferInline ? 'inline' : playerPref();
       if (pref === 'app' && isMobileDevice() && videoId) {
-        let appOpened = false;
-        const onDeactivate = () => {
-          appOpened = true;
-          window.removeEventListener('pagehide', onDeactivate);
-          window.removeEventListener('blur', onDeactivate);
-        };
-        window.addEventListener('pagehide', onDeactivate);
-        window.addEventListener('blur', onDeactivate);
         window.location.href = 'youtube://watch?v=' + encodeURIComponent(videoId);
-        setTimeout(() => {
-          window.removeEventListener('pagehide', onDeactivate);
-          window.removeEventListener('blur', onDeactivate);
-          if (!appOpened && document.visibilityState === 'visible') openVideoModal(videoId, title);
-        }, 600);
         return;
       }
       openVideoModal(videoId, title);
@@ -3608,8 +3633,10 @@
     }
 
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && syncEndpoint && syncKey) {
-        if (Date.now() - lastSyncTime > 30000) {
+      if (document.visibilityState === 'visible') {
+        renderSidebar();
+        renderActiveView();
+        if (syncEndpoint && syncKey && Date.now() - lastSyncTime > 30000) {
           pullRemoteState().catch(() => {});
         }
       }

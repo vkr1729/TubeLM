@@ -150,3 +150,10 @@ class TestTemplateMarkers:
         for marker in ("tubelm_top20_read", "isTopItemRead", "toggleTopItemRead",
                        "Hide Seen", "Seen", "unreadChannels", "sortedPicks"):
             assert marker in t, marker
+
+    def test_uat_play_and_auto_watch_markers(self):
+        t = TEMPLATE.read_text(encoding="utf-8")
+        for marker in ("handleVideoPlay", "findChannelForVideo", "normVidKey"):
+            assert marker in t, marker
+        assert "openVideoModal(videoId, title); }, 600" not in t
+        assert "openVideoModal(videoId, title);\n        }, 600" not in t
