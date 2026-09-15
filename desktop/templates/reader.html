@@ -1475,6 +1475,17 @@
       padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;transition:none!important}
     .btn-seen.is-seen{background:rgba(158,232,36,0.1)!important;border-color:rgba(158,232,36,0.35)!important;color:#9fe824!important;font-weight:600}
     :root[data-theme="light"] .btn-seen.is-seen{background:rgba(92,122,16,0.12)!important;border-color:rgba(92,122,16,0.4)!important;color:#4a6809!important}
+    .btn-bottom{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
+      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;transition:all 0.14s ease}
+    .btn-bottom:hover{color:var(--text-primary);border-color:var(--border-focus)}
+    .btn-bottom.is-deferred{background:rgba(251,191,36,0.12)!important;border-color:rgba(251,191,36,0.4)!important;color:#fbbf24!important;font-weight:600}
+    :root[data-theme="light"] .btn-bottom.is-deferred{background:rgba(217,119,6,0.12)!important;border-color:rgba(217,119,6,0.4)!important;color:#b45309!important}
+    .btn-bottom-sm{display:inline-flex;align-items:center;gap:3px;background:var(--btn-secondary-bg);border:1px solid var(--border-color);color:var(--text-muted);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all 0.14s ease}
+    .btn-bottom-sm:hover{color:var(--text-primary);border-color:var(--border-focus)}
+    .btn-bottom-sm.is-deferred{background:rgba(251,191,36,0.12)!important;border-color:rgba(251,191,36,0.4)!important;color:#fbbf24!important;font-weight:600}
+    :root[data-theme="light"] .btn-bottom-sm.is-deferred{background:rgba(217,119,6,0.12)!important;border-color:rgba(217,119,6,0.4)!important;color:#b45309!important}
+    .deferred-tag{font-size:10px;color:#fbbf24;background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:6px;padding:1px 6px;font-weight:600}
+    :root[data-theme="light"] .deferred-tag{color:#b45309;background:rgba(217,119,6,0.08);border-color:rgba(217,119,6,0.25)}
     /* --- Cloud Sync Modal & Status --- */
     .sync-modal {
       position: fixed;
@@ -1751,6 +1762,45 @@
     let hideSeen = false;
     try { hideSeen = localStorage.getItem('tubelm_hide_seen') === '1'; } catch (_) {}
 
+    // Deferred items store (videos moved to the bottom to watch later)
+    let deferredItems = new Set();
+    try {
+      const savedDef = localStorage.getItem('tubelm_deferred_items');
+      if (savedDef) deferredItems = new Set(JSON.parse(savedDef));
+    } catch (_) { deferredItems = new Set(); }
+
+    function saveDeferredItems() {
+      try {
+        localStorage.setItem('tubelm_deferred_items', JSON.stringify(Array.from(deferredItems)));
+      } catch (_) {}
+    }
+
+    function isDeferred(vid, url) {
+      if (vid && deferredItems.has(vid)) return true;
+      if (url && deferredItems.has(url)) return true;
+      const norm = normalizeVideoUrl(url || vid);
+      if (norm && deferredItems.has(norm)) return true;
+      return false;
+    }
+
+    function toggleItemDeferred(id, url) {
+      const key = id || url;
+      if (!key) return;
+      const norm = normalizeVideoUrl(url || id);
+      const willBeDeferred = !isDeferred(id, url);
+      const keys = [key];
+      if (id && !keys.includes(id)) keys.push(id);
+      if (url && !keys.includes(url)) keys.push(url);
+      if (norm && !keys.includes(norm)) keys.push(norm);
+
+      keys.forEach(k => {
+        if (willBeDeferred) deferredItems.add(k);
+        else deferredItems.delete(k);
+      });
+      saveDeferredItems();
+      renderActiveView();
+    }
+
     // ── Cross-Device Cloudflare Sync Engine ──────────────────────────────────
     let syncEndpoint = (localStorage.getItem('tubelm_sync_endpoint') || '').trim().replace(/\/+$/, '');
     let syncKey = (localStorage.getItem('tubelm_sync_key') || '').trim();
@@ -1985,6 +2035,8 @@
 
       readIds.clear();
       top20Read.clear();
+      deferredItems.clear();
+      saveDeferredItems();
 
       try { localStorage.setItem('tubelm_read_ids', '[]'); } catch (_) {}
       try { localStorage.setItem('tubelm_top20_read', '[]'); } catch (_) {}
@@ -2181,10 +2233,15 @@
       if (norm && !keys.includes(norm)) keys.push(norm);
 
       keys.forEach(k => {
-        if (makeWatched) top20Read.add(k);
-        else top20Read.delete(k);
+        if (makeWatched) {
+          top20Read.add(k);
+          deferredItems.delete(k);
+        } else {
+          top20Read.delete(k);
+        }
         recordItemState(k, Boolean(makeWatched));
       });
+      saveDeferredItems();
       saveTop20Read();
     }
 
@@ -2320,7 +2377,7 @@
       renderActiveView();
     }
 
-    function handleVideoPlay(videoId, url, chId) {
+    function handleVideoPlay(videoId, url, chId, immediateRender) {
       const vidKey = videoId || url;
       if (!vidKey) return;
       try {
@@ -2343,9 +2400,13 @@
           }
         }
       } catch (_) {}
-      setTimeout(() => {
+      if (immediateRender) {
         renderActiveView();
-      }, 300);
+      } else {
+        setTimeout(() => {
+          renderActiveView();
+        }, 100);
+      }
     }
 
     function markTopSeen(id, chId) {
@@ -2617,7 +2678,11 @@
         }
         const unreadPicks = items.filter(it => !isTopItemRead(it.video_id, it.url));
         const readPicks = items.filter(it => isTopItemRead(it.video_id, it.url));
-        const sortedPicks = hideSeen ? unreadPicks : [...unreadPicks, ...readPicks];
+        const normalUnread = unreadPicks.filter(it => !isDeferred(it.video_id, it.url));
+        const deferredUnread = unreadPicks.filter(it => isDeferred(it.video_id, it.url));
+        const sortedPicks = hideSeen
+          ? [...normalUnread, ...deferredUnread]
+          : [...normalUnread, ...deferredUnread, ...readPicks];
         const seenCount = readPicks.length;
 
         let html = `
@@ -2653,6 +2718,7 @@
           const isVideo = item.source_type === 'youtube' || Boolean(item.video_id);
           const hasVideoId = Boolean(item.video_id);
           const seen = isTopItemRead(item.video_id, item.url);
+          const deferred = isDeferred(item.video_id, item.url);
           const key = escapeQuotes(item.video_id || item.url);
           const safeUrl = escapeQuotes(item.url || '');
           const safeTitle = escapeQuotes(item.title || '');
@@ -2661,7 +2727,10 @@
               <div>
                 <div class="flex items-center justify-between text-xs mb-1.5">
                   <span class="editorial-rank">#${String(item.rank).padStart(2, '0')}</span>
-                  <span class="editorial-source">${esc(item.source_name)}</span>
+                  <div class="flex items-center gap-1.5">
+                    ${deferred && !seen ? `<span class="deferred-tag">↓ At Bottom</span>` : ''}
+                    <span class="editorial-source">${esc(item.source_name)}</span>
+                  </div>
                 </div>
                 <h3 class="editorial-title">
                   <a href="${item.url}" target="_blank" onclick="handleVideoPlay('${item.video_id || ''}', '${safeUrl}')">${esc(item.title)}</a>
@@ -2675,14 +2744,16 @@
                 <div class="flex items-center gap-2">
                   ${seen ? `<span class="seen-tag">✓ ${isVideo ? 'Watched' : 'Read'}</span>` : ''}
                   <button onclick="toggleTopItemRead('${key}', this)" data-is-video="${isVideo}" class="btn-seen ${seen ? 'is-seen' : ''}" title="Toggle ${isVideo ? 'watched' : 'read'} status">${isVideo ? (seen ? 'Watched ✓' : '✓ Mark Watched') : (seen ? 'Read ✓' : '✓ Mark Read')}</button>
+                  ${!seen ? `
+                    <button onclick="toggleItemDeferred('${key}', '${safeUrl}')" class="btn-bottom ${deferred ? 'is-deferred' : ''}" title="${deferred ? 'Return to original rank order' : 'Move to bottom of unread list to watch later'}">
+                      ${deferred ? '↑ Return to Top' : '↓ Move to Bottom'}
+                    </button>
+                  ` : ''}
                   ${hasVideoId ? `
                     <button onclick="playVideo('${item.video_id}', '${safeTitle}', {}, null, '${safeUrl}')" class="btn-play" title="Play Video">
                       Play ▶
                     </button>
                   ` : ''}
-                  <a href="${item.url}" target="_blank" onclick="handleVideoPlay('${item.video_id || ''}', '${safeUrl}')">
-                    ${isVideo ? 'Watch Video' : 'Read Article'} ↗
-                  </a>
                 </div>
               </div>
             </div>
@@ -2744,14 +2815,21 @@
         }
 
         let videosHtml = '';
-        (ch.videos || []).forEach((v, idx) => {
+        const chVideos = ch.videos || [];
+        const unreadVideos = chVideos.filter(v => !isVideoWatched(v.video_id, v.url));
+        const readVideos = chVideos.filter(v => isVideoWatched(v.video_id, v.url));
+        const normalUnreadVideos = unreadVideos.filter(v => !isDeferred(v.video_id, v.url));
+        const deferredUnreadVideos = unreadVideos.filter(v => isDeferred(v.video_id, v.url));
+        const sortedVideos = [...normalUnreadVideos, ...deferredUnreadVideos, ...readVideos];
+
+        sortedVideos.forEach((v, idx) => {
           const playerId = `player-${ch.id}-${idx}`;
           const safeTitle = escapeQuotes(v.title);
           const vidKey = escapeQuotes(v.video_id || v.url);
           const safeUrl = escapeQuotes(v.url || '');
           const isWatched = isVideoWatched(v.video_id, v.url);
+          const vDeferred = isDeferred(v.video_id, v.url);
           const isVideo = (v.source_type ? v.source_type === 'youtube' : true) && Boolean(v.video_id || (v.url && (v.url.includes('youtube.com') || v.url.includes('youtu.be'))));
-          const linkText = isVideo ? 'Watch on YouTube ↗' : 'Open Webpage ↗';
           const markLabel = isVideo ? (isWatched ? 'Watched ✓' : '✓ Mark Watched') : (isWatched ? 'Read ✓' : '✓ Mark Read');
           const markTitle = isVideo ? 'Toggle watched status' : 'Toggle read status';
           videosHtml += `
@@ -2762,15 +2840,21 @@
                     <h3 class="video-card-title">
                       <a href="${v.url}" target="_blank" onclick="handleVideoPlay('${v.video_id || ''}', '${safeUrl}', '${ch.id}')">${esc(v.title)}</a>
                     </h3>
-                    <button onclick="toggleVideoWatched('${vidKey}', '${ch.id}', this)" data-is-video="${isVideo}" class="btn-seen-sm ${isWatched ? 'is-seen' : ''}" title="${markTitle}">
-                      ${markLabel}
-                    </button>
+                    <div class="flex items-center gap-1.5 flex-shrink-0">
+                      ${vDeferred && !isWatched ? `<span class="deferred-tag">↓ Bottom</span>` : ''}
+                      ${!isWatched ? `
+                        <button onclick="toggleItemDeferred('${vidKey}', '${safeUrl}')" class="btn-bottom-sm ${vDeferred ? 'is-deferred' : ''}" title="${vDeferred ? 'Return to original order' : 'Move to bottom of channel to watch later'}">
+                          ${vDeferred ? '↑ Top' : '↓ Bottom'}
+                        </button>
+                      ` : ''}
+                      <button onclick="toggleVideoWatched('${vidKey}', '${ch.id}', this)" data-is-video="${isVideo}" class="btn-seen-sm ${isWatched ? 'is-seen' : ''}" title="${markTitle}">
+                        ${markLabel}
+                      </button>
+                    </div>
                   </div>
                   <div class="video-card-meta">
                     <span>${esc(v.published || '')}</span>
                     ${v.duration ? `<span>·</span><span class="video-duration-tag font-mono">⏱ ${esc(v.duration)}</span>` : ''}
-                    <span>·</span>
-                    <a href="${v.url}" target="_blank" onclick="handleVideoPlay('${v.video_id || ''}', '${safeUrl}', '${ch.id}')">${linkText}</a>
                   </div>
                 </div>
               </div>
@@ -2986,7 +3070,7 @@
         opts = {};
       }
       opts = opts || {};
-      handleVideoPlay(videoId, url || null, chId);
+      handleVideoPlay(videoId, url || null, chId, true);
       if (isAudioPlaying && globalAudio && !globalAudio.paused) {
         globalAudio.pause();
         isAudioPlaying = false;
@@ -3632,15 +3716,45 @@
       }
     }
 
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
+    let lastResumeTime = 0;
+    function handleAppResume() {
+      const now = Date.now();
+      if (now - lastResumeTime < 400) return;
+      lastResumeTime = now;
+      try {
         renderSidebar();
         renderActiveView();
-        if (syncEndpoint && syncKey && Date.now() - lastSyncTime > 30000) {
+        if (syncEndpoint && syncKey && now - lastSyncTime > 15000) {
           pullRemoteState().catch(() => {});
         }
+      } catch (_) {}
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        handleAppResume();
       }
     });
+
+    window.addEventListener('pageshow', () => {
+      handleAppResume();
+    });
+
+    window.addEventListener('focus', () => {
+      handleAppResume();
+    });
+
+    let appWasBlurred = false;
+    window.addEventListener('blur', () => {
+      appWasBlurred = true;
+    });
+
+    window.addEventListener('touchstart', () => {
+      if (appWasBlurred) {
+        appWasBlurred = false;
+        handleAppResume();
+      }
+    }, { passive: true });
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initApp);

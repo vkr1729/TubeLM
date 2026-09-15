@@ -157,3 +157,27 @@ class TestTemplateMarkers:
             assert marker in t, marker
         assert "openVideoModal(videoId, title); }, 600" not in t
         assert "openVideoModal(videoId, title);\n        }, 600" not in t
+
+    def test_deferred_bottom_and_resume_markers(self):
+        t = TEMPLATE.read_text(encoding="utf-8")
+        for marker in (
+            "deferredItems",
+            "toggleItemDeferred",
+            "isDeferred",
+            "btn-bottom",
+            "btn-bottom-sm",
+            "handleAppResume",
+            "pageshow",
+            "touchstart",
+            "↓ Move to Bottom",
+            "↑ Return to Top",
+        ):
+            assert marker in t, marker
+        for redundant in (
+            "Watch Video ↗",
+            "Read Article ↗",
+            "Watch on YouTube ↗",
+            "Open Webpage ↗",
+        ):
+            assert redundant not in t, redundant
+
