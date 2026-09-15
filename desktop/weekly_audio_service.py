@@ -48,7 +48,6 @@ def _save_batches(batches: list[dict]) -> None:
 
 
 def _record_audio_manifest(run_date: str, notebook_id: str, source_name: str, filename: str) -> None:
-    from pathlib import Path as _Path
     path = paths.get_audio_dir() / "manifest.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))

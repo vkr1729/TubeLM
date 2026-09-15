@@ -106,3 +106,21 @@ class TestStateManagement:
         data = json.loads(state_file.read_text())
         assert data["sources"][failed.state_key()] == original
         assert data["sources"][successful.state_key()] != original
+
+
+class TestZuluCheckpointParsing:
+    """BUG-015: legacy Z-suffixed checkpoints must be honored, not defaulted."""
+
+    def test_zulu_source_checkpoint_honored(self, tmp_path):
+        state_file = tmp_path / "state.json"
+        state_file.write_text(json.dumps({
+            "sources": {"rss:abc": "2026-09-01T00:00:00Z"},
+        }))
+        parsed = load_source_state(state_file, "rss:abc")
+        assert parsed == datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc)
+
+    def test_zulu_global_fallback_honored(self, tmp_path):
+        state_file = tmp_path / "state.json"
+        state_file.write_text(json.dumps({"last_run_time": "2026-09-01T00:00:00Z"}))
+        parsed = load_source_state(state_file, "rss:missing")
+        assert parsed == datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc)

@@ -1,5 +1,3 @@
-import pytest
-from pathlib import Path
 from email_service import (
     _render_artifact_completion_html,
     _render_artifact_completion_text,

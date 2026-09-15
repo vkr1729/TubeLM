@@ -1,7 +1,6 @@
 from unittest.mock import patch, MagicMock
 from source_handlers.extractor import (
     extract_article_text,
-    extract_metadata,
     extract_with_beautifulsoup,
     extract_clean_text,
 )
@@ -63,8 +62,8 @@ class TestCombinedExtraction:
         assert len(text) > 100, "Trafilatura should return substantial content"
 
     def test_bs4_fallback_on_short_trafilatura(self, js_heavy_html):
-        with patch("source_handlers.extractor.extract_article_text", return_value="short") as mock_tra, \
+        with patch("source_handlers.extractor.extract_article_text", return_value="short"), \
              patch("source_handlers.extractor.extract_with_beautifulsoup") as mock_bs4:
             mock_bs4.return_value = "Fallback content from BS4 with more than one hundred characters to pass the length check."
-            text = extract_clean_text(url="http://example.com", fallback_html=js_heavy_html)
+            extract_clean_text(url="http://example.com", fallback_html=js_heavy_html)
             assert mock_bs4.called, "BS4 fallback should be called when trafilatura returns short content"

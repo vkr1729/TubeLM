@@ -1,9 +1,7 @@
 """Unit tests for neural summary TTS (Feature 6) and reader integration markers."""
-import asyncio
 import json
 from pathlib import Path
 
-import pytest
 
 import tts_service
 from tts_service import backfill_week, clean_text_for_speech, generate_summary_tts
@@ -238,3 +236,23 @@ class TestTemplateMarkers:
         for marker in ("playSummaryAudio", "summary_audio_url", "Listen to Summary",
                        "(Summary)"):
             assert marker in t, marker
+
+
+class TestTimeoutParsing:
+    """A typo'd TTS_TIMEOUT_SECONDS warns and defaults; it never crashes import."""
+
+    def test_valid_value_honored(self):
+        assert tts_service.parse_tts_timeout_seconds("600") == 600
+
+    def test_blank_falls_back_to_default(self):
+        assert tts_service.parse_tts_timeout_seconds(None) == 300
+        assert tts_service.parse_tts_timeout_seconds("  ") == 300
+
+    def test_garbage_falls_back_to_default(self):
+        assert tts_service.parse_tts_timeout_seconds("probe-value") == 300
+        assert tts_service.parse_tts_timeout_seconds("0") == 300
+        assert tts_service.parse_tts_timeout_seconds("-5") == 300
+
+    def test_float_strings_accepted_and_absurd_clamped(self):
+        assert tts_service.parse_tts_timeout_seconds("300.0") == 300
+        assert tts_service.parse_tts_timeout_seconds("99999999") == tts_service.MAX_TTS_TIMEOUT_SECONDS

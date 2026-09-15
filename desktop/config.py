@@ -43,11 +43,67 @@ def _get_bool(key: str, default: bool = False) -> bool:
     if value is None or not value.strip():
         return default
     normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
+    if normalized in paths.BOOL_TRUE_VALUES:
         return True
-    if normalized in {"0", "false", "no", "off"}:
+    if normalized in paths.BOOL_FALSE_VALUES:
         return False
     raise ConfigurationError(f"{key} must be true or false, got: {value!r}")
+
+
+EMAIL_REQUIRED_KEYS = (
+    "SMTP_SERVER",
+    "SMTP_USERNAME",
+    "SMTP_PASSWORD",
+    "SENDER_EMAIL",
+    "RECIPIENT_EMAIL",
+)
+
+
+def email_config_attempted(cfg: "Config") -> bool:
+    """Return True when the operator set ANY email-related value.
+
+    Distinguishes "never configured email" (fully absent → the pipeline may
+    warn and run local-only) from "tried to configure it" (partial → a typo or
+    omission the pipeline must fail loudly on instead of silently skipping).
+    """
+    values = [getattr(cfg, key.lower(), "") for key in EMAIL_REQUIRED_KEYS]
+    values.append(getattr(cfg, "smtp_port", 0))
+    return any(bool(v) for v in values)
+
+
+def require_email_config(cfg: "Config") -> None:
+    """Fail loudly when email delivery is enabled but misconfigured.
+
+    Raises:
+        ConfigurationError: Naming every missing variable, or a missing/zero
+            SMTP port. Callers should abort rather than run a "green" pipeline
+            that silently delivers nothing.
+    """
+    missing = [key for key in EMAIL_REQUIRED_KEYS if not getattr(cfg, key.lower(), "")]
+    if missing:
+        raise ConfigurationError(
+            "Email delivery is enabled but required variables are missing: "
+            + ", ".join(missing)
+            + ". Fill them in .env (see .env.example) or pass --skip-email."
+        )
+    if not getattr(cfg, "smtp_port", 0):
+        raise ConfigurationError(
+            "Email delivery is enabled but SMTP_PORT is missing or 0. "
+            "Use 587 (STARTTLS) or 465 (SSL), or pass --skip-email."
+        )
+
+
+def require_youtube_api_key(cfg: "Config") -> None:
+    """Fail loudly when YouTube sources are selected but no API key exists.
+
+    Without the key, duration-based Shorts filtering is silently skipped and
+    Shorts pollute digests — wrong results rather than an honest error.
+    """
+    if not (getattr(cfg, "youtube_api_key", "") or "").strip():
+        raise ConfigurationError(
+            "This run includes YouTube sources but YOUTUBE_API_KEY is not set. "
+            "Add it to .env (see .env.example) or filter to non-YouTube sources."
+        )
 
 
 def _load_prompt_file(filename: str) -> str:

@@ -2,7 +2,6 @@
 import json
 from pathlib import Path
 
-import web_reader
 from web_reader import (
     _audio_seconds_for,
     _lead_for,

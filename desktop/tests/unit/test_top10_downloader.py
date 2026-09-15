@@ -1,6 +1,4 @@
-from pathlib import Path
 from types import SimpleNamespace
-import pytest
 
 import top10_downloader
 

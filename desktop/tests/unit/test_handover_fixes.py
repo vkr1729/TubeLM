@@ -1,7 +1,6 @@
 """Regression tests for T1/T2/T5 handover fixes."""
 import json
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import web_reader
 

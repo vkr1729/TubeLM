@@ -7,3 +7,18 @@ compatibility_date = "2024-09-01"
 [[r2_buckets]]
 binding = "SYNC_BUCKET"
 bucket_name = "tubelm"
+
+# Serializes concurrent sync pushes per passphrase so simultaneous devices
+# cannot silently drop each other's state (read-modify-write race fix).
+[[durable_objects.bindings]]
+name = "SYNC_COORDINATOR"
+class_name = "SyncCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SyncCoordinator"]
+
+# Optional extra browser origins for the sync API (comma-separated origins).
+# The reader origin (https://vkr1729.github.io) and localhost are built in.
+# [vars]
+# ALLOWED_ORIGINS = "https://staging.example.com"

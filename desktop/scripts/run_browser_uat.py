@@ -20,7 +20,6 @@ Performs browser-driven UAT on https://vkr1729.github.io/TubeLM/ (or local fallb
 
 import os
 import sys
-import json
 import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright

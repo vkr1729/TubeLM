@@ -18,11 +18,21 @@ jobs:
           cache: pip
           cache-dependency-path: desktop/requirements-dev.txt
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install dependencies
         run: pip install -r desktop/requirements-dev.txt
 
       - name: Compile
         run: python -m compileall -q desktop
+
+      - name: Lint (ruff)
+        run: ruff check desktop
+
+      - name: Worker syntax
+        run: node --check worker/worker.js
 
       - name: Test
         env:

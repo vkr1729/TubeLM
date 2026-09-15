@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import paths
@@ -43,7 +42,7 @@ def test_rank_top10_uses_requested_agy_model_and_validates_json(monkeypatch, tmp
             stderr="",
         )
 
-    monkeypatch.setattr(top10_service.shutil, "which", lambda _: "/usr/bin/agy")
+    monkeypatch.setattr(top10_service.paths, "get_agy_bin", lambda: "/usr/bin/agy")
     monkeypatch.setattr(top10_service.subprocess, "run", fake_run)
     monkeypatch.setattr(top10_service.paths, "get_data_dir", lambda: tmp_path)
 

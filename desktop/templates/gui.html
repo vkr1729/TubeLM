@@ -1521,6 +1521,11 @@
                         </select>
                     </div>
 
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 12px; cursor: pointer;" title="Unchecked sources follow the global GENERATE_PODCASTS default.">
+                        <input type="checkbox" id="add-source-podcast" style="accent-color: var(--accent);">
+                        Generate weekly podcast for this source (unchecked follows the global default)
+                    </label>
+
                     <button type="submit" class="btn" style="margin-top: 12px;">Add Source</button>
                 </form>
             </div>
@@ -1535,7 +1540,7 @@
                                 <th>Name</th>
                                 <th>Category</th>
                                 <th>Details</th>
-                                <th style="width: 110px;">Cinematic</th>
+                                <th style="width: 110px;">Podcast</th>
                                 <th>NotebookLM</th>
                                 <th style="width: 80px;">Actions</th>
                             </tr>
@@ -1614,15 +1619,6 @@
                             </select>
                             <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Select the browser used to log into NotebookLM for decrypting session cookies.</span>
                         </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Infographic Generation</label>
-                        <select name="GENERATE_INFOGRAPHICS" style="width: 100%; padding: 10px 14px;">
-                            <option value="false">Off — save NotebookLM compute</option>
-                            <option value="true">On — generate after video and audio</option>
-                        </select>
-                        <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Cinematic Video remains the primary artifact. Infographics are off by default.</span>
                     </div>
 
                     <div class="form-group">
@@ -2266,7 +2262,7 @@
                                     : `<span style="color: var(--text-muted); font-size: 12px;">—</span>`;
 
                                 const catDisplay = cat.replace(/_/g, ' ');
-                                const deleteId = encodeURIComponent(identifier);
+                                const safeIdentifier = inlineArg(identifier);
 
                                 tr.setAttribute('data-category', cat);
                                 if (activeSourceFilter !== 'all' && activeSourceFilter !== cat) {
@@ -2281,15 +2277,15 @@
                                     <td><span class="cat-pill" data-cat="${cat}"><span class="cat-dot" style="background:var(--cat-${cat.replace(/ /g,'-')});"></span> ${catDisplay}</span></td>
                                     <td>${detail}</td>
                                     <td>
-                                        <label title="Generate a weekly Cinematic Video for this source" style="min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">
-                                            <input type="checkbox" ${src.generate_cinematic_video ? 'checked' : ''}
-                                                aria-label="Generate Cinematic Video for ${escapeHtml(src.name)}"
-                                                onchange="toggleCinematic('${deleteId}', this)"
+                                        <label title="Generate a weekly NotebookLM Audio Overview for this source" style="min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">
+                                            <input type="checkbox" ${src.generate_podcast ? 'checked' : ''}
+                                                aria-label="Generate Podcast for ${escapeHtml(src.name)}"
+                                                onchange="togglePodcast(${safeIdentifier}, this)"
                                                 style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">
                                         </label>
                                     </td>
                                     <td>${notebookLink}</td>
-                                    <td><button class="btn btn-secondary btn-danger" style="padding: 4px 10px; font-size: 11px;" onclick="deleteSource('${deleteId}')">
+                                    <td><button class="btn btn-secondary btn-danger" style="padding: 4px 10px; font-size: 11px;" onclick="deleteSource(${safeIdentifier})">
                                         <svg width="14" height="14" aria-hidden="true"><use href="#icon-trash"/></svg>
                                     </button></td>
                                 `;
@@ -2314,8 +2310,7 @@
             });
         };
 
-        window.deleteSource = function(encodedIdentifier) {
-            const identifier = decodeURIComponent(encodedIdentifier);
+        window.deleteSource = function(identifier) {
             if (!confirm("Delete this source?")) return;
             fetch('/api/sources/delete', {
                 method: 'POST',
@@ -2330,11 +2325,10 @@
         };
         window.deleteChannel = window.deleteSource;
 
-        window.toggleCinematic = function(encodedIdentifier, checkbox) {
-            const identifier = decodeURIComponent(encodedIdentifier);
+        window.togglePodcast = function(identifier, checkbox) {
             const enabled = checkbox.checked;
             checkbox.disabled = true;
-            fetch('/api/sources/cinematic', {
+            fetch('/api/sources/podcast', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ identifier, enabled })
@@ -2380,6 +2374,10 @@
                 // Add selected category
                 const catSel = document.getElementById('add-source-category');
                 if (catSel) payload.category = catSel.value;
+
+                // Per-source podcast flag (pipeline-visible; global default otherwise)
+                const podBox = document.getElementById('add-source-podcast');
+                if (podBox) payload.generate_podcast = podBox.checked;
 
                 fetch('/api/sources', {
                     method: 'POST',

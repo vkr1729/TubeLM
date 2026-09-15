@@ -1,0 +1,4 @@
+# Ruff quality gate: pyflakes-class defects (unused imports, undefined names,
+# redefinitions) fail CI. Run locally with `ruff check desktop`.
+[lint]
+select = ["F"]

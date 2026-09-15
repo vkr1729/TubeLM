@@ -31,6 +31,32 @@ def get_bundle_dir() -> Path:
     return DESKTOP_DIR
 
 
+# Shared boolean vocabulary for every entry point (config loader, --build-only,
+# dashboard API) so one .env file cannot mean different things per caller.
+BOOL_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+BOOL_FALSE_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def resolve_bool_env(*names: str, default: bool = False) -> bool:
+    """Resolve a boolean flag from the first set variable among `names`.
+
+    Unset/blank variables are skipped; recognized true/false words decide; an
+    unrecognized value falls back to `default` so standalone tools (e.g. the
+    --build-only reader) stay lenient while the strict config loader raises.
+    """
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            continue
+        normalized = raw.strip().lower()
+        if normalized in BOOL_TRUE_VALUES:
+            return True
+        if normalized in BOOL_FALSE_VALUES:
+            return False
+        return default
+    return default
+
+
 def get_data_dir() -> Path:
     """Return the private runtime directory."""
     return (Path.home() / ".tubelm").resolve()

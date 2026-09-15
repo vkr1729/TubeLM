@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import feedparser
+import requests
 
 from source_handlers import BaseSourceHandler, SourceItem
 
@@ -12,6 +13,12 @@ if TYPE_CHECKING:
     from notebooklm import NotebookLMClient
 
 logger = logging.getLogger(__name__)
+
+# Bounded fetch so one dead feed host cannot hang discovery indefinitely.
+FEED_FETCH_TIMEOUT_SECONDS = 15
+# A feed bigger than this is abandoned, not buffered: 5 MiB is far beyond any
+# legitimate feed and bounds per-feed memory during discovery.
+MAX_FEED_BYTES = 5 * 1024 * 1024
 
 
 def _parse_feed_datetime(entry) -> datetime:
@@ -66,9 +73,30 @@ class GenericRSSHandler(BaseSourceHandler):
 
     def discover(self, since_dt: datetime, seen_urls: set[str] | None = None) -> list[SourceItem] | None:
         try:
-            feed = feedparser.parse(self._url)
+            # Fetch with a timeout first; feedparser itself only ever parses
+            # bytes, never a URL it would fetch unbounded.
+            resp = requests.get(
+                self._url,
+                headers={"User-Agent": "TubeLM/1.0 (+rss discovery)"},
+                timeout=FEED_FETCH_TIMEOUT_SECONDS,
+                stream=True,
+            )
+            resp.raise_for_status()
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in resp.iter_content(chunk_size=65536):
+                total += len(chunk)
+                if total > MAX_FEED_BYTES:
+                    logger.warning(
+                        "Feed %s exceeds %d bytes; abandoning.", self._url, MAX_FEED_BYTES
+                    )
+                    resp.close()
+                    return None
+                chunks.append(chunk)
+            resp.close()
+            feed = feedparser.parse(b"".join(chunks))
         except Exception as exc:
-            logger.warning("Failed to parse feed %s: %s", self._url, exc)
+            logger.warning("Failed to fetch/parse feed %s: %s", self._url, exc)
             return None
 
         if feed.bozo and not feed.entries:

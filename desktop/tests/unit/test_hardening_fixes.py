@@ -72,6 +72,39 @@ class TestFetchGuard:
         import gui
         assert gui._fetch_target_is_blocked("http://8.8.8.8/") is None
 
+    def test_unresolvable_host_fails_closed(self, monkeypatch):
+        """BUG-023: DNS failure must refuse the fetch, never allow it."""
+        import socket
+
+        import gui
+
+        def _boom(*args, **kwargs):
+            raise socket.gaierror("Name or service not known")
+
+        monkeypatch.setattr(gui.socket, "getaddrinfo", _boom)
+        assert gui._fetch_target_is_blocked("https://example.com/feed") is not None
+        with pytest.raises(ValueError):
+            gui._ensure_safe_fetch_url("https://example.com/feed")
+
+
+class TestBoundedInt:
+    def test_bool_and_fraction_rejected(self):
+        import gui
+
+        assert gui._bounded_int(True, 15) == 15
+        assert gui._bounded_int(False, 15) == 15
+        assert gui._bounded_int(3.9, 15) == 15
+        assert gui._bounded_int("nope", 15) == 15
+
+    def test_integral_values_clamped(self):
+        import gui
+
+        assert gui._bounded_int(10, 15) == 10
+        assert gui._bounded_int(10.0, 15) == 10
+        assert gui._bounded_int("7", 15) == 7
+        assert gui._bounded_int(999, 15) == 50
+        assert gui._bounded_int(0, 15) == 1
+
 
 class TestAtomicStateWrites:
     def test_atomic_write_round_trips(self, tmp_path):

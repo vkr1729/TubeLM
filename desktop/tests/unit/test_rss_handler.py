@@ -1,5 +1,5 @@
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from source_handlers.rss_handler import GenericRSSHandler
@@ -7,6 +7,46 @@ from source_handlers import SourceItem
 
 
 class TestRSSDiscovery:
+    @pytest.fixture(autouse=True)
+    def _mock_feed_fetch(self):
+        """discover() streams bytes first; keep feedparser mocks meaningful."""
+        with patch("source_handlers.rss_handler.requests.get") as mock_get:
+            mock_get.return_value.iter_content.return_value = [b"<feed />"]
+            yield mock_get
+
+    def test_fetch_is_time_bounded_and_parse_gets_bytes(self, _mock_feed_fetch):
+        """BUG-010: bounded requests.get, and feedparser parses bytes, not a URL."""
+        from source_handlers.rss_handler import FEED_FETCH_TIMEOUT_SECONDS
+
+        handler = GenericRSSHandler("Blog", "https://example.com/feed.xml")
+        with patch("source_handlers.rss_handler.feedparser.parse") as mock_parse:
+            mock_feed = MagicMock()
+            mock_feed.bozo = False
+            mock_feed.entries = []
+            mock_parse.return_value = mock_feed
+            assert handler.discover(datetime.now(timezone.utc)) == []
+
+        _, kwargs = _mock_feed_fetch.call_args
+        assert kwargs["timeout"] == FEED_FETCH_TIMEOUT_SECONDS
+        (parse_arg,), _ = mock_parse.call_args
+        assert isinstance(parse_arg, bytes)
+
+    def test_returns_none_on_fetch_failure(self, _mock_feed_fetch):
+        import requests as requests_lib
+
+        _mock_feed_fetch.side_effect = requests_lib.ConnectTimeout("black hole")
+        handler = GenericRSSHandler("Dead", "https://example.com/dead.xml")
+        assert handler.discover(datetime.now(timezone.utc)) is None
+
+    def test_oversized_feed_abandoned(self, _mock_feed_fetch):
+        from source_handlers.rss_handler import MAX_FEED_BYTES
+
+        _mock_feed_fetch.return_value.iter_content.return_value = [
+            b"x" * (MAX_FEED_BYTES + 1)
+        ]
+        handler = GenericRSSHandler("Huge", "https://example.com/huge.xml")
+        assert handler.discover(datetime.now(timezone.utc)) is None
+
     def test_discovers_entries_after_date(self, rss_techblog_xml):
         handler = GenericRSSHandler("TechBlog", "https://example.com/feed.xml")
         since_dt = datetime(2025, 5, 20, tzinfo=timezone.utc)

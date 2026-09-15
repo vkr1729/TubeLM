@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from sources_loader import load_sources
 
 
@@ -75,3 +74,67 @@ class TestCategoryField:
         result = load_sources(f)
         assert len(result) == 1
         assert "category" not in result[0]  # Factory handles the default
+
+
+class TestIdLessEntriesSkipped:
+    """BUG-006: entries missing their type-specific id must be skipped, not kept."""
+
+    def test_id_less_entries_skipped(self, tmp_path):
+        data = [
+            {"name": "YT No ID", "type": "youtube"},
+            {"name": "RSS No URL", "type": "rss"},
+            {"name": "Page Empty URL", "type": "webpage", "url": ""},
+            {"name": "Good", "type": "youtube", "channel_id": "UC123"},
+        ]
+        f = tmp_path / "sources.json"
+        f.write_text(json.dumps(data))
+        result = load_sources(f)
+        assert [e["name"] for e in result] == ["Good"]
+
+    def test_one_bad_entry_does_not_kill_handler_construction(self, tmp_path):
+        """End of BUG-006 chain: every loaded entry must build a handler."""
+        from source_handlers.factory import create_handler
+
+        data = [
+            {"name": "YT No ID", "type": "youtube"},
+            {"name": "Good RSS", "type": "rss", "url": "https://example.com/feed"},
+        ]
+        f = tmp_path / "sources.json"
+        f.write_text(json.dumps(data))
+        result = load_sources(f)
+        handlers = [create_handler(src) for src in result]  # must not raise
+        assert len(handlers) == 1
+
+
+class TestGeneratePodcastNotForced:
+    """BUG-007: absent per-source flag must stay absent so the global fallback applies."""
+
+    def test_absent_flag_stays_absent(self, tmp_path):
+        data = [{"name": "YT", "type": "youtube", "channel_id": "UC123"}]
+        f = tmp_path / "sources.json"
+        f.write_text(json.dumps(data))
+        result = load_sources(f)
+        assert "generate_podcast" not in result[0]
+
+    def test_explicit_flag_preserved_and_coerced(self, tmp_path):
+        data = [
+            {"name": "On", "type": "youtube", "channel_id": "UC1", "generate_podcast": 1},
+            {"name": "Off", "type": "youtube", "channel_id": "UC2", "generate_podcast": 0},
+        ]
+        f = tmp_path / "sources.json"
+        f.write_text(json.dumps(data))
+        result = load_sources(f)
+        assert result[0]["generate_podcast"] is True
+        assert result[1]["generate_podcast"] is False
+
+    def test_string_flags_use_shared_vocabulary(self, tmp_path):
+        data = [
+            {"name": "S1", "type": "youtube", "channel_id": "UC1", "generate_podcast": "false"},
+            {"name": "S2", "type": "youtube", "channel_id": "UC2", "generate_podcast": "YES"},
+            {"name": "S3", "type": "youtube", "channel_id": "UC3", "generate_podcast": "on"},
+            {"name": "S4", "type": "youtube", "channel_id": "UC4", "generate_podcast": "bogus"},
+        ]
+        f = tmp_path / "sources.json"
+        f.write_text(json.dumps(data))
+        result = load_sources(f)
+        assert [e["generate_podcast"] for e in result] == [False, True, True, False]

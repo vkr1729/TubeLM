@@ -2,7 +2,22 @@ import json
 import logging
 from pathlib import Path
 
+from paths import BOOL_FALSE_VALUES, BOOL_TRUE_VALUES
+
 logger = logging.getLogger(__name__)
+
+
+def _coerce_flag(value) -> bool:
+    """Coerce a hand-edited flag: bool("false") is True, so parse strings."""
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in BOOL_TRUE_VALUES:
+            return True
+        if normalized in BOOL_FALSE_VALUES:
+            return False
+        logger.warning("Unrecognized flag value %r; treating as false.", value)
+        return False
+    return bool(value)
 
 
 def load_sources(sources_file: Path) -> list[dict]:
@@ -31,9 +46,11 @@ def load_sources(sources_file: Path) -> list[dict]:
         required_field = "channel_id" if entry["type"] == "youtube" else "url"
         if not entry.get(required_field):
             logger.warning("Entry %d missing %r — skipping.", i, required_field)
-        entry["generate_podcast"] = bool(
-            entry.get("generate_podcast", False)
-        )
+            continue
+        # Normalize only when the author set the key: an absent flag must stay
+        # absent so main.py can fall back to the global GENERATE_PODCASTS value.
+        if "generate_podcast" in entry:
+            entry["generate_podcast"] = _coerce_flag(entry["generate_podcast"])
         if entry["type"] == "rss":
             entry["behind_paywall"] = bool(entry.get("behind_paywall", True))
         sources.append(entry)

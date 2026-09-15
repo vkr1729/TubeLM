@@ -1605,7 +1605,7 @@
         <svg id="theme-icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
       </button>
 
-      <a href="feed.xml" target="_blank" class="theme-toggle-btn hidden sm:inline-flex" title="RSS Feed">
+      <a href="feed.xml" target="_blank" rel="noopener noreferrer" class="theme-toggle-btn hidden sm:inline-flex" title="RSS Feed">
         <svg class="w-3.5 h-3.5 text-amber-400" fill="currentColor" viewBox="0 0 24 24"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83c0-8.59-6.97-15.56-15.56-15.56zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg>
       </a>
 
@@ -1766,6 +1766,14 @@
     let selectedItemId = 'top20';
     let isAudioPlaying = false;
     function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+    function safeExternalUrl(value) {
+      try {
+        const url = new URL(String(value), window.location.origin);
+        return ['http:', 'https:'].includes(url.protocol) ? esc(url.href) : '#';
+      } catch (_) {
+        return '#';
+      }
+    }
     const CANONICAL_KEY_RE = /^\d{4}-\d{2}-\d{2}_.+/;
     let rawReadIds = [
       ...(SITE_DATA.read_ids || []),
@@ -2013,6 +2021,14 @@
         alert('Please enter both the Cloudflare Worker URL and a private sync passphrase.');
         return;
       }
+      if (k.length < 16) {
+        alert('Sync passphrase must be at least 16 characters (the Worker rejects shorter keys).');
+        return;
+      }
+      if (k.length > 256 || /[\x00-\x1f\x7f]/.test(k)) {
+        alert('Sync passphrase must be at most 256 characters with no control characters.');
+        return;
+      }
       syncEndpoint = ep;
       syncKey = k;
       localStorage.setItem('tubelm_sync_endpoint', syncEndpoint);
@@ -2137,8 +2153,9 @@
       if (!syncEndpoint || !syncKey) return;
       updateSyncUI('syncing', 'Syncing...');
       try {
-        const sep = syncEndpoint.includes('?') ? '&' : '?';
-        const resp = await fetch(`${syncEndpoint}${sep}key=${encodeURIComponent(syncKey)}`, {
+        // Headers carry the credential; never put the sync key in the URL
+        // (it would leak into logs, history, and proxies).
+        const resp = await fetch(syncEndpoint, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${syncKey}`,
@@ -2179,8 +2196,7 @@
           top20_read: Array.from(top20Read),
           item_states: itemStates,
         };
-        const sep = syncEndpoint.includes('?') ? '&' : '?';
-        const resp = await fetch(`${syncEndpoint}${sep}key=${encodeURIComponent(syncKey)}`, {
+        const resp = await fetch(syncEndpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -2760,7 +2776,7 @@
                   </div>
                 </div>
                 <h3 class="editorial-title">
-                  <a href="${item.url}" target="_blank" onclick="handleVideoPlay('${item.video_id || ''}', '${safeUrl}')">${esc(item.title)}</a>
+                  <a href="${safeExternalUrl(item.url)}" target="_blank" rel="noopener noreferrer" onclick="handleVideoPlay('${item.video_id || ''}', '${safeUrl}')">${esc(item.title)}</a>
                 </h3>
                 <div class="editorial-quote">
                   ${esc(item.why_it_matters)}
@@ -2834,7 +2850,7 @@
                 </div>
                 <div class="audio-actions">
                   <button onclick="cycleAudioSpeed(this)" class="audio-speed-btn">1x</button>
-                  <a href="${ch.audio_url}" download class="audio-download-btn" title="Download MP3">
+                  <a href="${safeExternalUrl(ch.audio_url)}" download class="audio-download-btn" title="Download MP3">
                     <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                   </a>
                 </div>
@@ -2867,7 +2883,7 @@
                 <div class="w-full">
                   <div class="flex items-start justify-between gap-3">
                     <h3 class="video-card-title">
-                      <a href="${v.url}" target="_blank" onclick="handleVideoPlay('${v.video_id || ''}', '${safeUrl}', '${ch.id}')">${esc(v.title)}</a>
+                      <a href="${safeExternalUrl(v.url)}" target="_blank" rel="noopener noreferrer" onclick="handleVideoPlay('${v.video_id || ''}', '${safeUrl}', '${ch.id}')">${esc(v.title)}</a>
                     </h3>
                     <div class="flex items-center gap-1.5 flex-shrink-0">
                       ${vDeferred && !isWatched ? `<span class="deferred-tag">↓ Bottom</span>` : ''}
@@ -2905,7 +2921,7 @@
         });
 
         let notebookLinkBtn = ch.notebook_url ? `
-          <a href="${ch.notebook_url}" target="_blank" class="btn-subnav-nb" title="Open NotebookLM">
+          <a href="${safeExternalUrl(ch.notebook_url)}" target="_blank" rel="noopener noreferrer" class="btn-subnav-nb" title="Open NotebookLM">
             <span>Notebook ↗</span>
           </a>
         ` : '';
@@ -3017,7 +3033,7 @@
           itemsHtml += `
             <div class="mt-3">
               <div class="flex items-center justify-between gap-2">
-                <a href="${b.url}" target="_blank" onclick="handleVideoPlay('${b.video_id || ''}', '${escapeQuotes(b.url)}', '${ch.id}')" style="font-size:14px;font-weight:600">${esc(b.title)}</a>
+                <a href="${safeExternalUrl(b.url)}" target="_blank" rel="noopener noreferrer" onclick="handleVideoPlay('${b.video_id || ''}', '${escapeQuotes(b.url)}', '${ch.id}')" style="font-size:14px;font-weight:600">${esc(b.title)}</a>
                 ${b.duration ? `<span class="text-xs font-mono text-[var(--text-muted)] flex-shrink-0">⏱ ${esc(b.duration)}</span>` : ''}
               </div>
               ${b.lead ? `<p class="brief-lead">${esc(b.lead)}</p>` : ''}
@@ -3560,7 +3576,9 @@
 
     // Video Player & Fullscreen Controller Helpers
     function escapeQuotes(str) {
-      return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      // Backslashes FIRST: otherwise \' input defeats the quote escape and
+      // breaks out of the single-quoted inline handler argument at click time.
+      return (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
     }
 
     let activePlayerWrapper = null;
@@ -3632,7 +3650,7 @@
           <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] bg-[#171815]">
             <h4 class="text-sm font-bold text-white truncate max-w-[75%]">${esc(title)}</h4>
             <div class="flex items-center gap-2">
-              <a href="https://www.youtube.com/watch?v=${esc(videoId)}" target="_blank" rel="noopener" class="btn-fullscreen" title="Open in YouTube">Open in YouTube ↗</a>
+              <a href="https://www.youtube.com/watch?v=${esc(videoId)}" target="_blank" rel="noopener noreferrer" class="btn-fullscreen" title="Open in YouTube">Open in YouTube ↗</a>
               <button onclick="requestModalFullscreen()" class="btn-fullscreen" title="Full Screen">Full Screen ⛶</button>
               <button onclick="closeVideoModal()" class="text-gray-400 hover:text-white px-2 py-1 text-sm font-bold" title="Close">✕</button>
             </div>

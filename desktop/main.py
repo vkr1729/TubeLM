@@ -27,13 +27,12 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from config import ConfigurationError, load_config
+from config import ConfigurationError, email_config_attempted, load_config, require_email_config, require_youtube_api_key
 from email_service import send_artifact_completion_email, send_channel_email
 import paths
 from notebooklm_service import (
     NotebookLMAuthExpiredError,
     process_source_items,
-    resume_deferred_artifacts,
     schedule_artifacts_after_delivery,
     verify_notebooklm_auth,
 )
@@ -41,7 +40,6 @@ from notebooklm import NotebookLMClient
 from notebooklm.exceptions import NotebookLimitError
 from sources_loader import load_sources
 from source_handlers.factory import create_handler
-from source_handlers import SourceItem
 from run_control import (
     PipelineAlreadyRunningError,
     PipelineRunLock,
@@ -128,6 +126,19 @@ def refresh_cookies() -> bool:
 
 # ── State management ───────────────────────────────────────────────────────────
 
+def parse_checkpoint_timestamp(ts: str) -> datetime:
+    """Parse a checkpoint timestamp defensively (UTC, timezone-aware).
+
+    Accepts both `+00:00` offsets and the `Z` (Zulu) suffix the dashboard used
+    to store, so a `Z` checkpoint is honored instead of silently falling back
+    to the default lookback.
+    """
+    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def load_source_state(state_file: Path, state_key: str) -> datetime:
     """Return the last-run datetime for a specific source (UTC, timezone-aware).
 
@@ -147,17 +158,11 @@ def load_source_state(state_file: Path, state_key: str) -> datetime:
         if isinstance(sources_state, dict):
             ts = sources_state.get(state_key)
             if ts:
-                dt = datetime.fromisoformat(ts)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt
+                return parse_checkpoint_timestamp(ts)
 
         ts = data.get("last_run_time")
         if ts:
-            dt = datetime.fromisoformat(ts)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
+            return parse_checkpoint_timestamp(ts)
 
         return default
     except Exception as exc:
@@ -446,6 +451,16 @@ async def async_main(
 
     # ── Validate SMTP connection ───────────────────────────────────────────
     has_smtp = all([cfg.smtp_server, cfg.smtp_username, cfg.smtp_password, cfg.sender_email, cfg.recipient_email])
+    if not skip_email and not dry_run and email_config_attempted(cfg):
+        # Partial email config means a typo or omission: abort loudly naming
+        # the missing keys instead of running "green" while delivering nothing.
+        # Fully-absent email keeps the historical warn-and-skip below, so
+        # local-only installs (incl. the shipped weekly cron) keep working.
+        try:
+            require_email_config(cfg)
+        except ConfigurationError as exc:
+            logger.critical("Configuration error: %s", exc)
+            sys.exit(1)
     if not has_smtp:
         logger.warning("SMTP configuration is incomplete. Automatically skipping email delivery.")
         skip_email = True
@@ -502,7 +517,20 @@ async def async_main(
 
     # ── Load sources and state ────────────────────────────────────────────
     sources = load_sources(cfg.sources_file)
-    handlers = [create_handler(src, cfg) for src in sources]
+    # Per-source isolation: one unbuildable source must not abort the whole run.
+    # `sources` and `handlers` stay aligned for the zip() uses below.
+    valid_sources: list[dict] = []
+    handlers = []
+    for src in sources:
+        try:
+            handlers.append(create_handler(src, cfg))
+        except Exception:
+            logger.exception(
+                "Skipping source %r: handler construction failed.", src.get("name", "?")
+            )
+            continue
+        valid_sources.append(src)
+    sources = valid_sources
     channel_orders = {
         handler.state_key(): index
         for index, handler in enumerate(handlers, start=1)
@@ -534,6 +562,14 @@ async def async_main(
         if not handlers:
             logger.error("No configured sources matched the selective run filter.")
             return False
+
+    if not dry_run and any(h.source_type == "youtube" for h in handlers):
+        # Without the key, Shorts filtering is silently skipped (wrong results).
+        try:
+            require_youtube_api_key(cfg)
+        except ConfigurationError as exc:
+            logger.critical("Configuration error: %s", exc)
+            sys.exit(1)
 
     if not dry_run:
         materialize_source_checkpoints(cfg.state_file, handlers)
@@ -923,7 +959,7 @@ def main() -> None:
 
     if args.gui:
         try:
-            import flask
+            import flask  # noqa: F401 — availability probe, gui.py does the real import
         except ImportError:
             print("Error: TubeLM GUI requires additional dependencies to run.")
             print("Please install them by running:\n")

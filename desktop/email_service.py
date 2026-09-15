@@ -289,14 +289,18 @@ def _render_artifact_completion_text(artifact_kind: str, batch: dict) -> str:
     return "\n".join(lines).rstrip()
 
 
+# Bound every SMTP socket so one wedged MTA cannot stall the whole pipeline.
+SMTP_TIMEOUT_SECONDS = 15
+
+
 def _send_message(msg: MIMEMultipart, cfg: Config) -> None:
     if cfg.use_ssl:
         context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(cfg.smtp_server, cfg.smtp_port, context=context) as server:
+        with smtplib.SMTP_SSL(cfg.smtp_server, cfg.smtp_port, context=context, timeout=SMTP_TIMEOUT_SECONDS) as server:
             server.login(cfg.smtp_username, cfg.smtp_password)
             server.sendmail(cfg.sender_email, cfg.recipient_email, msg.as_string())
     else:
-        with smtplib.SMTP(cfg.smtp_server, cfg.smtp_port) as server:
+        with smtplib.SMTP(cfg.smtp_server, cfg.smtp_port, timeout=SMTP_TIMEOUT_SECONDS) as server:
             server.ehlo()
             server.starttls(context=ssl.create_default_context())
             server.ehlo()
@@ -452,10 +456,10 @@ def verify_smtp_connection(cfg: Config) -> None:
     )
     if cfg.use_ssl:
         context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(cfg.smtp_server, cfg.smtp_port, context=context, timeout=15) as server:
+        with smtplib.SMTP_SSL(cfg.smtp_server, cfg.smtp_port, context=context, timeout=SMTP_TIMEOUT_SECONDS) as server:
             server.login(cfg.smtp_username, cfg.smtp_password)
     else:
-        with smtplib.SMTP(cfg.smtp_server, cfg.smtp_port, timeout=15) as server:
+        with smtplib.SMTP(cfg.smtp_server, cfg.smtp_port, timeout=SMTP_TIMEOUT_SECONDS) as server:
             server.ehlo()
             server.starttls(context=ssl.create_default_context())
             server.ehlo()

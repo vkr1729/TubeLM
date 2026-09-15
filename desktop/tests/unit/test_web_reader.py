@@ -1,9 +1,5 @@
 import json
-import shutil
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-import pytest
-from bs4 import BeautifulSoup
 
 from web_reader import (
     purge_old_digests_and_audio,
@@ -11,11 +7,16 @@ from web_reader import (
     parse_channel_digest,
     generate_rss_feed,
     build_reader_site,
+    _clean_video_id,
 )
 
 
 class TestPurgeRetention:
-    def test_purge_older_than_14_days(self, tmp_path):
+    def test_purge_older_than_14_days(self, tmp_path, monkeypatch):
+        # RES-005: purge rewrites read_state.json — never the operator's real one.
+        import paths
+
+        monkeypatch.setattr(paths, "get_read_state_file", lambda: tmp_path / "read_state.json")
         summaries_dir = tmp_path / "summaries"
         audio_dir = tmp_path / "audio"
         summaries_dir.mkdir()
@@ -51,6 +52,12 @@ class TestPurgeRetention:
         a_15d = audio_dir / f"{d_15d}_StaleChannel.mp3"
         a_15d.write_bytes(b"stale_audio")
 
+        # BUG-009: TTS files carry a summary_ prefix and must purge identically.
+        tts_30d = audio_dir / f"summary_{d_30d}_AncientChannel.mp3"
+        tts_30d.write_bytes(b"stale_tts")
+        tts_13d = audio_dir / f"summary_{d_13d}_EdgeChannel.mp3"
+        tts_13d.write_bytes(b"fresh_tts")
+
         # Non-dated file should be preserved
         non_dated = summaries_dir / "index_template.html"
         non_dated.write_text("template")
@@ -60,16 +67,46 @@ class TestPurgeRetention:
         assert f_15d.name in purged
         assert f_30d.name in purged
         assert a_15d.name in purged
+        assert tts_30d.name in purged
 
         assert not f_15d.exists()
         assert not f_30d.exists()
         assert not a_15d.exists()
+        assert not tts_30d.exists()
 
         assert f_today.exists()
         assert f_5d.exists()
         assert f_13d.exists()
         assert a_today.exists()
+        assert tts_13d.exists()
         assert non_dated.exists()
+
+    def test_video_id_allowlist(self):
+        assert _clean_video_id("dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+        assert _clean_video_id("abc_DEF-123") == "abc_DEF-123"
+        assert _clean_video_id("x');alert(1)//") == ""
+        assert _clean_video_id("too-short") == ""
+        assert _clean_video_id(None) == ""
+        assert _clean_video_id(123) == ""
+
+    def test_purge_bounds_non_date_read_state_ids(self, tmp_path, monkeypatch):
+        """BUG-027: non-canonical read_state ids cannot grow without bound."""
+        import paths
+        import web_reader
+
+        summaries_dir = tmp_path / "summaries"
+        audio_dir = tmp_path / "audio"
+        summaries_dir.mkdir()
+        audio_dir.mkdir()
+        read_state_file = tmp_path / "read_state.json"
+        monkeypatch.setattr(paths, "get_read_state_file", lambda: read_state_file)
+
+        junk = [f"legacy-slot-{i}" for i in range(6000)]
+        read_state_file.write_text(json.dumps({"read_ids": junk}))
+        purge_old_digests_and_audio(summaries_dir, audio_dir, max_age_days=14)
+        kept = json.loads(read_state_file.read_text())["read_ids"]
+        assert len(kept) == web_reader.MAX_READ_IDS
+        assert all(len(rid) <= web_reader.MAX_READ_ID_LENGTH for rid in kept)
 
 
 class TestParseTop20:
@@ -268,7 +305,7 @@ class TestBuildReaderSite:
 
         # Current week digest: 3Blue1Brown (2 videos + audio)
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        ch1_html = f"""
+        ch1_html = """
         <html><body>
           <h1>3Blue1Brown</h1>
           <a href="https://notebooklm.google.com/notebook/3b1b">Notebook</a>
@@ -298,7 +335,7 @@ class TestBuildReaderSite:
 
         # Previous week digest: 7 days ago
         prev_str = (datetime.now(timezone.utc).date() - timedelta(days=7)).strftime("%Y-%m-%d")
-        ch2_html = f"""
+        ch2_html = """
         <html><body>
           <h1>ArxivSanity</h1>
           <a href="https://notebooklm.google.com/notebook/arxiv">Notebook</a>
@@ -416,7 +453,7 @@ class TestVideoExtractionAndOptimization:
         ]))
 
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        ch_html = f"""
+        ch_html = """
         <html><body>
           <h1>Think School</h1>
           <div class="item-card"><h2>Indian Railways Part 1</h2></div>
@@ -452,7 +489,7 @@ class TestVideoExtractionAndOptimization:
         ]))
 
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        ch_html = f"""
+        ch_html = """
         <html><body>
           <h1>Think School</h1>
           <div class="item-card"><h2>Indian Railways Part 1</h2></div>

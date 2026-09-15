@@ -26,7 +26,42 @@ DEFAULT_RATE = "+0%"
 
 # Upper bound for one edge-tts synthesis (default 300s / 5 minutes)
 # Dynamic scaling ensures long summaries (>1,000 words) get proportional time.
-TTS_TIMEOUT_SECONDS = int(os.getenv("TTS_TIMEOUT_SECONDS", "300"))
+DEFAULT_TTS_TIMEOUT_SECONDS = 300
+MAX_TTS_TIMEOUT_SECONDS = 86400  # a day; beyond this the value is a typo
+
+
+def parse_tts_timeout_seconds(raw: str | None) -> int:
+    """Parse TTS_TIMEOUT_SECONDS tolerantly: TTS degrades, never crashes.
+
+    A typo'd value warns and falls back to the default instead of killing the
+    module import (and the pipeline) with a bare ValueError. Float strings are
+    accepted; absurd magnitudes are clamped.
+    """
+    text = (raw or "").strip() or str(DEFAULT_TTS_TIMEOUT_SECONDS)
+    try:
+        value = int(float(text))
+    except ValueError:
+        logger.warning(
+            "Invalid TTS_TIMEOUT_SECONDS=%r; using default %d.",
+            raw, DEFAULT_TTS_TIMEOUT_SECONDS,
+        )
+        return DEFAULT_TTS_TIMEOUT_SECONDS
+    if value <= 0:
+        logger.warning(
+            "Non-positive TTS_TIMEOUT_SECONDS=%r; using default %d.",
+            raw, DEFAULT_TTS_TIMEOUT_SECONDS,
+        )
+        return DEFAULT_TTS_TIMEOUT_SECONDS
+    if value > MAX_TTS_TIMEOUT_SECONDS:
+        logger.warning(
+            "TTS_TIMEOUT_SECONDS=%r exceeds %d; clamping.",
+            raw, MAX_TTS_TIMEOUT_SECONDS,
+        )
+        return MAX_TTS_TIMEOUT_SECONDS
+    return value
+
+
+TTS_TIMEOUT_SECONDS = parse_tts_timeout_seconds(os.getenv("TTS_TIMEOUT_SECONDS"))
 
 
 def get_configured_voice() -> str:

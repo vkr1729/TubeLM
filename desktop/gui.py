@@ -10,6 +10,7 @@ import sys
 import json
 import re
 import ipaddress
+import signal
 import socket
 import logging
 import threading
@@ -80,18 +81,72 @@ class PipelineRunner:
             threading.Thread(target=self._run, args=(args_list,), daemon=True).start()
             return True, "Pipeline started."
 
+    @staticmethod
+    def _popen_kwargs():
+        """Launch the pipeline as a process-group leader for reliable cleanup."""
+        if os.name == "posix":
+            return {"start_new_session": True}
+        if os.name == "nt":
+            flag = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            return {"creationflags": flag} if flag else {}
+        return {}
+
+    @staticmethod
+    def _terminate_tree(proc, grace_seconds=5):
+        """Terminate the pipeline process and any grandchildren it spawned.
+
+        POSIX kills the whole process group (SIGTERM, then SIGKILL fallback) so
+        orphaned yt-dlp/ffmpeg children cannot hold files or the stdout pipe open.
+        Windows has no process-group kill; terminate/kill cover the direct child.
+        """
+        def _reaped():
+            try:
+                proc.wait(timeout=grace_seconds)
+                return True
+            except subprocess.TimeoutExpired:
+                return False
+
+        if os.name == "posix":
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(proc.pid, sig)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                if _reaped():
+                    return
+        else:
+            proc.terminate()
+            if _reaped():
+                return
+            try:
+                proc.kill()
+            except (ProcessLookupError, PermissionError):
+                pass
+            _reaped()
+
     def stop(self):
         """Terminate a running pipeline subprocess, if any."""
         with self.lock:
             proc = self.process
             if not self.is_running or proc is None:
                 return False, "Pipeline is not running."
+        # Kill outside the lock: _terminate_tree can block up to 2×grace while
+        # start()/status need the lock. The local proc reference stays valid
+        # even if _run's finally clears self.process concurrently.
+        try:
+            self._terminate_tree(proc)
+        except Exception as e:
+            return False, f"Could not terminate pipeline: {e}"
+        finally:
+            # Force-unblock the stdout reader loop in _run even if a pipe
+            # holder somehow survived; _run's finally still resets state.
             try:
-                proc.terminate()
-            except Exception as e:
-                return False, f"Could not terminate pipeline: {e}"
-            self._publish_log("\n--- Pipeline termination requested ---\n")
-            return True, "Pipeline termination requested."
+                if proc.stdout:
+                    proc.stdout.close()
+            except Exception:
+                pass
+        self._publish_log("\n--- Pipeline termination requested ---\n")
+        return True, "Pipeline termination requested."
 
     def _run(self, args_list):
         if paths.is_frozen():
@@ -107,28 +162,32 @@ class PipelineRunner:
         logger.info("Starting sync subprocess: %s", " ".join(cmd))
         
         try:
-            self.process = subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                cwd=str(PROJECT_DIR)
+                cwd=str(PROJECT_DIR),
+                **self._popen_kwargs()
             )
-            
-            for line in self.process.stdout:
+            with self.lock:
+                self.process = proc
+
+            for line in proc.stdout:
                 self._publish_log(line)
-                    
-            self.process.wait()
-            exit_code = self.process.returncode
+
+            proc.wait()
+            exit_code = proc.returncode
             end_msg = f"\n--- Pipeline finished with exit code {exit_code} ---\n"
             self._publish_log(end_msg)
         except Exception as e:
             err_msg = f"\n--- Pipeline execution error: {e} ---\n"
             self._publish_log(err_msg)
         finally:
-            self.is_running = False
-            self.process = None
+            with self.lock:
+                self.is_running = False
+                self.process = None
             with self.log_condition:
                 self.log_condition.notify_all()
 
@@ -213,8 +272,8 @@ def _fetch_target_is_blocked(url: str) -> str | None:
 
     Blocks non-http(s) schemes and hosts that resolve to loopback, private,
     link-local, reserved, or multicast addresses (cloud metadata endpoints,
-    intranet hosts). Unresolvable hosts fail open with a warning: DNS may be
-    unavailable offline, and literal-IP threats are already covered.
+    intranet hosts). Unresolvable hosts FAIL CLOSED: an SSRF guard must not
+    allow a fetch it cannot vet, and DNS is attacker-influenced by design.
     """
     try:
         parsed = urlparse(url)
@@ -227,8 +286,8 @@ def _fetch_target_is_blocked(url: str) -> str | None:
     try:
         addrinfo = socket.getaddrinfo(hostname, None)
     except OSError:
-        logger.warning("Could not resolve fetch host %s; allowing (offline?).", hostname)
-        return None
+        logger.warning("Could not resolve fetch host %s; refusing to fetch.", hostname)
+        return f"host {hostname} could not be resolved"
     for family, _, _, _, sockaddr in addrinfo:
         candidates.append(sockaddr[0])
     if not candidates:
@@ -272,20 +331,32 @@ def read_env_file():
                 config[k.strip()] = v.strip()
     return config
 
+#: Every key any loader reads (config.py, tts_service.py, web_reader.py,
+#: audio_storage.py). The dashboard must persist all of them — silently dropping
+#: a supported key while reporting success is a data-loss bug.
+WRITABLE_ENV_KEYS = frozenset({
+    "SMTP_SERVER", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD",
+    "SENDER_EMAIL", "RECIPIENT_EMAIL", "YOUTUBE_API_KEY",
+    "NOTEBOOKS_RETENTION_LIMIT", "NOTEBOOKLM_BROWSER",
+    "GENERATE_TOP_10_DIGEST", "TOP_DIGEST_COUNT",
+    "DOWNLOAD_TOP_10_VIDEOS", "TOP10_DOWNLOAD_DIR", "TOP10_PREV_DIR",
+    "SEND_CHANNEL_EMAILS", "DEPLOY_TO_GH_PAGES", "GH_PAGES_URL",
+    "COMPRESS_AUDIO", "TUBELM_COMPRESS_AUDIO", "GENERATE_PODCASTS",
+    "TTS_VOICE", "TTS_RATE", "TTS_TIMEOUT_SECONDS",
+    "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+    "R2_BUCKET_NAME", "R2_PUBLIC_DOMAIN",
+})
+
+
 def write_env_file(updates):
-    allowed_keys = {
-        "SMTP_SERVER", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD",
-        "SENDER_EMAIL", "RECIPIENT_EMAIL", "YOUTUBE_API_KEY",
-        "NOTEBOOKS_RETENTION_LIMIT", "NOTEBOOKLM_BROWSER",
-        "GENERATE_TOP_10_DIGEST",
-    }
+    allowed_keys = WRITABLE_ENV_KEYS
     if not isinstance(updates, dict):
         raise ValueError("Configuration payload must be a JSON object.")
 
     sanitized_updates = {}
     for key, value in updates.items():
         if key not in allowed_keys:
-            continue
+            raise ValueError(f"Unknown configuration key: {key}.")
         if not isinstance(value, (str, int, float, bool)):
             raise ValueError(f"Invalid value for {key}.")
         string_value = str(value).strip()
@@ -791,7 +862,13 @@ def serve_audio_file(filename):
 def api_build_reader():
     try:
         data = request.get_json(silent=True) or {}
-        compress_audio = bool(data.get("compress_audio", False))
+        # Absent flag resolves via TUBELM_COMPRESS_AUDIO/COMPRESS_AUDIO (default
+        # true); an explicit boolean always wins. Anything else is a 400 —
+        # bool("false") is True, so blind coercion would invert intent.
+        raw_compress = data.get("compress_audio", None)
+        if raw_compress is not None and not isinstance(raw_compress, bool):
+            return jsonify({"error": "compress_audio must be a boolean when provided."}), 400
+        compress_audio = raw_compress
         from web_reader import build_reader_site
         build_reader_site(
             paths.get_summaries_dir(),
@@ -1001,6 +1078,36 @@ def _load_existing_sources():
     return load_sources(src_file)
 
 
+def _load_raw_sources():
+    """Load the sources file WITHOUT read-path filtering, for write paths.
+
+    Write endpoints must operate on the raw list so they never vaporize entries
+    the display filter would skip (unknown/future types, legacy rows). Only the
+    targeted entry may be added/changed/removed; everything else round-trips.
+
+    Raises:
+        ValueError: If the file exists but is not a JSON array — callers must
+            refuse to overwrite rather than clobber a corrupt file.
+    """
+    src_file = _get_sources_path()
+    if not src_file.exists():
+        return []
+    try:
+        data = json.loads(src_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"sources file is not valid JSON: {exc}")
+    if not isinstance(data, list):
+        raise ValueError("sources file must contain a JSON array.")
+    return data
+
+
+def _match_source_identifier(entry, identifier):
+    return (
+        isinstance(entry, dict)
+        and (entry.get("channel_id") == identifier or entry.get("url") == identifier)
+    )
+
+
 def _write_sources(sources):
     dest = _get_sources_path()
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1015,6 +1122,15 @@ def _write_sources(sources):
 
 
 def _bounded_int(value, default: int, minimum: int = 1, maximum: int = 50) -> int:
+    # bool is an int subclass (True == 1): reject it explicitly so a misclicked
+    # checkbox cannot silently become max_items=1. Non-integral floats floor
+    # silently, so reject those too.
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, float):
+        if not value.is_integer():
+            return default
+        value = int(value)
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -1074,6 +1190,10 @@ def api_sources():
         if category not in valid_categories:
             return jsonify({"error": f"Unknown category: {category}"}), 400
 
+        # The per-source podcast flag stays ABSENT unless explicitly enabled, so
+        # main.py falls back to the global GENERATE_PODCASTS value. Storing an
+        # explicit false here would silently override a global true.
+        podcast_opt_in = bool(data.get("generate_podcast", False))
         if source_type == "youtube":
             channel_id = data.get("channel_id", "").strip()
             if not channel_id:
@@ -1083,9 +1203,6 @@ def api_sources():
                 "type": "youtube",
                 "channel_id": channel_id,
                 "category": category,
-                "generate_cinematic_video": bool(
-                    data.get("generate_cinematic_video", False)
-                ),
             }
         elif source_type == "rss":
             url = data.get("url", "").strip()
@@ -1093,12 +1210,9 @@ def api_sources():
                 return jsonify({"error": "A valid http(s) URL is required"}), 400
             entry = {
                 "name": name, "type": "rss", "url": url,
-                "force_text_extraction": data.get("force_text_extraction", False),
+                "force_text_extraction": bool(data.get("force_text_extraction", False)),
                 "max_items": _bounded_int(data.get("max_items"), 15),
                 "category": category,
-                "generate_cinematic_video": bool(
-                    data.get("generate_cinematic_video", False)
-                ),
             }
         elif source_type == "webpage":
             url = data.get("url", "").strip()
@@ -1106,62 +1220,68 @@ def api_sources():
                 return jsonify({"error": "A valid http(s) URL is required"}), 400
             entry = {
                 "name": name, "type": "webpage", "url": url,
-                "is_index_page": data.get("is_index_page", False),
-                "link_selector": data.get("link_selector", ""),
+                "is_index_page": bool(data.get("is_index_page", False)),
+                "link_selector": str(data.get("link_selector", "")),
                 "max_items": _bounded_int(data.get("max_items"), 10),
                 "category": category,
-                "generate_cinematic_video": bool(
-                    data.get("generate_cinematic_video", False)
-                ),
             }
         else:
             return jsonify({"error": f"Unknown source type: {source_type}"}), 400
+        if podcast_opt_in:
+            entry["generate_podcast"] = True
 
-        sources = _load_existing_sources()
+        try:
+            sources = _load_raw_sources()
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 500
 
         # Duplicate check
         if source_type == "youtube":
-            if any(s.get("channel_id") == channel_id for s in sources):
+            if any(isinstance(s, dict) and s.get("channel_id") == channel_id for s in sources):
                 return jsonify({"error": "Channel ID already exists"}), 400
         else:
             source_url = entry.get("url", "")
-            if any(s.get("url") == source_url for s in sources):
+            if any(isinstance(s, dict) and s.get("url") == source_url for s in sources):
                 return jsonify({"error": "URL already exists"}), 400
 
         sources.append(entry)
         _write_sources(sources)
-        return jsonify({"success": True, "sources": _enrich_sources_with_state_keys(sources)})
+        display = [s for s in sources if isinstance(s, dict)]
+        return jsonify({"success": True, "sources": _enrich_sources_with_state_keys(display)})
     else:
         sources = _load_existing_sources()
         return jsonify(_enrich_sources_with_state_keys(sources))
 
 
-@app.route("/api/sources/cinematic", methods=["POST"])
-def api_update_source_cinematic():
+@app.route("/api/sources/podcast", methods=["POST"])
+def api_update_source_podcast():
     data = request.json or {}
     identifier = data.get("identifier", "")
     enabled = data.get("enabled")
     if not identifier or not isinstance(enabled, bool):
         return jsonify({"error": "identifier and boolean enabled are required"}), 400
 
-    sources = _load_existing_sources()
+    try:
+        sources = _load_raw_sources()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 500
     source = next(
-        (
-            item
-            for item in sources
-            if item.get("channel_id") == identifier or item.get("url") == identifier
-        ),
+        (item for item in sources if _match_source_identifier(item, identifier)),
         None,
     )
     if source is None:
         return jsonify({"error": "Source not found"}), 404
-    source["generate_cinematic_video"] = enabled
+    source["generate_podcast"] = enabled
     _write_sources(sources)
     return jsonify({"success": True, "enabled": enabled})
 
 
 def _find_and_remove_source(sources, identifier):
-    """Find and remove a source by channel_id, url, or index.
+    """Find and remove a source by channel_id or url (never by position).
+
+    Numeric identifiers match only literal channel_id/url values; there is no
+    positional-index fallback, so an unmatched id is always a 404, never an
+    order-dependent deletion.
 
     Returns:
         (found, updated_sources_list)
@@ -1169,26 +1289,20 @@ def _find_and_remove_source(sources, identifier):
     updated = []
     found = False
     for s in sources:
-        if s.get("channel_id") == identifier or s.get("url") == identifier:
+        if _match_source_identifier(s, identifier):
             found = True
         else:
             updated.append(s)
-
-    if not found:
-        try:
-            idx = int(identifier)
-            if 0 <= idx < len(sources):
-                updated = [s for j, s in enumerate(sources) if j != idx]
-                found = True
-        except ValueError:
-            pass
 
     return found, updated
 
 
 @app.route("/api/sources/<identifier>", methods=["DELETE"])
 def api_delete_source(identifier):
-    sources = _load_existing_sources()
+    try:
+        sources = _load_raw_sources()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 500
     if not sources:
         return jsonify({"error": "No sources found"}), 404
 
@@ -1206,7 +1320,10 @@ def api_delete_source_post():
     if not identifier:
         return jsonify({"error": "Missing identifier"}), 400
 
-    sources = _load_existing_sources()
+    try:
+        sources = _load_raw_sources()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 500
     if not sources:
         return jsonify({"error": "No sources found"}), 404
 
@@ -1317,12 +1434,13 @@ def api_update_channel_state():
         if state_key in state["sources"]:
             del state["sources"][state_key]
     else:
-        # Validate timestamp format
+        # Validate timestamp format, normalizing Zulu to an explicit offset so
+        # the pipeline parser honors exactly what the dashboard stored.
         try:
             from datetime import datetime
-            ts_to_parse = timestamp.replace("Z", "+00:00")
-            datetime.fromisoformat(ts_to_parse)
-            state["sources"][state_key] = timestamp
+            normalized = timestamp.replace("Z", "+00:00")
+            datetime.fromisoformat(normalized)
+            state["sources"][state_key] = normalized
 
         except ValueError:
             return jsonify({"error": "Invalid timestamp format. Must be ISO8601."}), 400
@@ -1340,6 +1458,8 @@ def api_config():
         try:
             write_env_file(updates)
             return jsonify({"success": True})
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     else:
@@ -1591,12 +1711,8 @@ def api_auth_status():
                 await client.notebooks.list()
             return True
 
-        loop = asyncio.new_event_loop()
-        try:
-            authenticated = loop.run_until_complete(_check())
-            output = "Authentication check passed. Session is active."
-        finally:
-            loop.close()
+        authenticated = asyncio.run(_check())
+        output = "Authentication check passed. Session is active."
         payload = {
             "authenticated": authenticated,
             "output": output
@@ -1617,8 +1733,19 @@ def api_auth_login():
     _invalidate_runtime_caches()
     try:
         browser = os.getenv("NOTEBOOKLM_BROWSER", "chrome")
-        from notebooklm.paths import get_storage_path
-        from notebooklm.cli.services.login.refresh import _login_with_browser_cookies
+        try:
+            from notebooklm.paths import get_storage_path
+            from notebooklm.cli.services.login.refresh import _login_with_browser_cookies
+        except ImportError as exc:
+            # The login helper is a private upstream symbol (requirements pin
+            # notebooklm-py); fail with an actionable message, not a traceback.
+            return jsonify({
+                "success": False,
+                "error": (
+                    "NotebookLM login helper unavailable in the installed "
+                    f"notebooklm-py (expected _login_with_browser_cookies): {exc}"
+                ),
+            })
         import io
         from contextlib import redirect_stdout, redirect_stderr
 
@@ -1848,18 +1975,15 @@ def api_delete_notebook(notebook_id):
     try:
         from notebooklm import NotebookLMClient
         import asyncio
-        
+
         async def do_delete():
             async with NotebookLMClient.from_storage(keepalive=30) as client:
                 return await client.notebooks.delete(notebook_id)
-                
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            success = loop.run_until_complete(do_delete())
-        finally:
-            loop.close()
-            
+
+        # Scoped loop per request: never touch the thread-global loop, which
+        # concurrent Flask workers share.
+        success = asyncio.run(do_delete())
+
         if success:
             _invalidate_runtime_caches()
         return jsonify({"success": success})

@@ -31,6 +31,28 @@ except Exception:
 logger = logging.getLogger("TubeLM-WebReader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+# Audio filenames carry an optional producer prefix (TTS writes summary_...),
+# so retention matches the date with or without it.
+_AUDIO_DATE_RE = re.compile(r"^(?:summary_)?(\d{4}-\d{2}-\d{2})_")
+
+_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def _clean_video_id(value) -> str:
+    """Allowlist YouTube video ids at the producer boundary.
+
+    video_id flows into raw onclick arguments in reader.html; only genuine
+    11-char ids survive, everything else (LLM/feed garbage) becomes "" and the
+    item renders as a plain link.
+    """
+    text = str(value or "")
+    return text if _VIDEO_ID_RE.fullmatch(text) else ""
+
+# Same bound the dashboard sanitizer applies: read_state ids are truncated,
+# de-duplicated, and capped so legacy ids cannot grow the file without bound.
+MAX_READ_IDS = 5000
+MAX_READ_ID_LENGTH = 256
+
 
 def purge_old_digests_and_audio(summaries_dir: Path, audio_dir: Path, max_age_days: int = 14) -> list[str]:
     """Purge HTML digests and audio files older than max_age_days (strictly 2 weeks)."""
@@ -55,7 +77,7 @@ def purge_old_digests_and_audio(summaries_dir: Path, audio_dir: Path, max_age_da
     if audio_dir.exists():
         for f in audio_dir.iterdir():
             if f.is_file() and f.suffix.lower() in (".mp3", ".m4a", ".wav"):
-                match = re.match(r"^(\d{4}-\d{2}-\d{2})_", f.name)
+                match = _AUDIO_DATE_RE.match(f.name)
                 if match:
                     try:
                         file_date = datetime.strptime(match.group(1), "%Y-%m-%d").date()
@@ -66,7 +88,9 @@ def purge_old_digests_and_audio(summaries_dir: Path, audio_dir: Path, max_age_da
                     except ValueError:
                         pass
 
-    # Clean up stale entries in read_state.json older than cutoff
+    # Clean up stale entries in read_state.json older than cutoff. Non-date ids
+    # are truncated and the whole list is de-duplicated and capped, mirroring
+    # the dashboard sanitizer — nothing in this file may grow without bound.
     read_state_file = paths.get_read_state_file()
     if read_state_file.exists():
         try:
@@ -74,6 +98,9 @@ def purge_old_digests_and_audio(summaries_dir: Path, audio_dir: Path, max_age_da
             cur_ids = cur_data.get("read_ids", [])
             valid_ids = []
             for rid in cur_ids:
+                if not isinstance(rid, str) or not rid:
+                    continue
+                rid = rid[:MAX_READ_ID_LENGTH]
                 m = re.match(r"^(\d{4}-\d{2}-\d{2})_", rid)
                 if m:
                     try:
@@ -84,7 +111,8 @@ def purge_old_digests_and_audio(summaries_dir: Path, audio_dir: Path, max_age_da
                         valid_ids.append(rid)
                 else:
                     valid_ids.append(rid)
-            if len(valid_ids) != len(cur_ids):
+            valid_ids = list(dict.fromkeys(valid_ids))[:MAX_READ_IDS]
+            if valid_ids != cur_ids:
                 read_state_file.write_text(json.dumps({"read_ids": valid_ids}, indent=2), encoding="utf-8")
         except Exception:
             pass
@@ -375,7 +403,7 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
         videos.append({
             "title": title,
             "url": url,
-            "video_id": str(it.get("video_id") or extract_youtube_video_id(url)),
+            "video_id": _clean_video_id(it.get("video_id") or extract_youtube_video_id(url)),
             "source_type": it_source_type,
             "published": str(it.get("published") or ""),
             "duration": str(it.get("duration") or ""),
@@ -430,7 +458,7 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
         "audio_seconds": audio_seconds,
         "brief": [
             {"title": v.get("title", ""), "url": v.get("url", ""),
-             "video_id": v.get("video_id", ""), "duration": v.get("duration", ""),
+             "video_id": _clean_video_id(v.get("video_id", "")), "duration": v.get("duration", ""),
              "duration_seconds": v.get("duration_seconds", 0), "lead": v.get("lead", ""),
              "source_type": v.get("source_type", source_type)}
             for v in videos
@@ -541,7 +569,7 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
         "audio_seconds": audio_seconds,
         "brief": [
             {"title": v.get("title", ""), "url": v.get("url", ""),
-             "video_id": v.get("video_id", ""), "duration": v.get("duration", ""),
+             "video_id": _clean_video_id(v.get("video_id", "")), "duration": v.get("duration", ""),
              "duration_seconds": v.get("duration_seconds", 0), "lead": v.get("lead", ""),
              "source_type": v.get("source_type", source_type)}
             for v in videos
@@ -781,18 +809,24 @@ def build_reader_site(
     audio_dir: Path,
     site_dir: Path,
     sources_file: Path,
-    compress_audio: bool = False,
+    compress_audio: bool | None = None,
     generate_tts: bool = True,
 ) -> Path:
-    """Build the complete static Web Reader site from 2-week rolling digests."""
+    """Build the complete static Web Reader site from 2-week rolling digests.
+
+    compress_audio=None (default) resolves via TUBELM_COMPRESS_AUDIO, then
+    COMPRESS_AUDIO, defaulting to True — the same default config.py documents.
+    An explicit True/False always wins (callers pass pipeline config through).
+    """
     site_dir.mkdir(parents=True, exist_ok=True)
     site_audio_dir = site_dir / "audio"
     site_audio_dir.mkdir(exist_ok=True)
     generate_pwa_assets(site_dir)
 
-    if not compress_audio:
-        env_val = os.environ.get("TUBELM_COMPRESS_AUDIO") or os.environ.get("COMPRESS_AUDIO", "")
-        compress_audio = env_val.strip().lower() in ("1", "true", "yes")
+    if compress_audio is None:
+        compress_audio = paths.resolve_bool_env(
+            "TUBELM_COMPRESS_AUDIO", "COMPRESS_AUDIO", default=True
+        )
 
     logger.info("Building Web Reader site (compress_audio=%s)...", compress_audio)
 
@@ -1057,8 +1091,15 @@ def main() -> int:
     parser.add_argument(
         "--compress-audio",
         action="store_true",
-        default=False,
-        help="Enable optional lossy audio transcoding (64k mono MP3). Default: disabled (retains original high-fidelity audio).",
+        default=None,
+        help="Force lossy audio transcoding (64k mono MP3). Default: resolve from "
+        "TUBELM_COMPRESS_AUDIO/COMPRESS_AUDIO (default true).",
+    )
+    parser.add_argument(
+        "--no-compress-audio",
+        action="store_false",
+        dest="compress_audio",
+        help="Force retaining original high-fidelity audio.",
     )
     args = parser.parse_args()
 

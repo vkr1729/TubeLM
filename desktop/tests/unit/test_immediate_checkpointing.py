@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -28,6 +27,7 @@ async def test_each_channel_is_checkpointed_before_the_next_is_processed(tmp_pat
         smtp_password="pass",
         sender_email="from@example.com",
         recipient_email="to@example.com",
+        youtube_api_key="test-key",
         sources_file=tmp_path / "sources.json",
         state_file=tmp_path / "state.json",
         deploy_to_gh_pages=False,
@@ -39,7 +39,6 @@ async def test_each_channel_is_checkpointed_before_the_next_is_processed(tmp_pat
     monkeypatch.setattr(main, "create_handler", lambda source, _: handlers[0] if source == "first" else handlers[1])
     monkeypatch.setattr(main, "materialize_source_checkpoints", lambda *_: None)
     monkeypatch.setattr(main, "verify_notebooklm_auth", lambda: _true())
-    monkeypatch.setattr(main, "resume_deferred_artifacts", _no_deferred_artifacts)
     monkeypatch.setattr(main, "discover_sources", lambda selected, _: _discover(selected, item))
     monkeypatch.setattr(main, "process_source_items", lambda handler, items, _: _process(handler, events))
     monkeypatch.setattr(
@@ -82,9 +81,6 @@ async def _discover(handlers, item):
     return [(handler, [item]) for handler in handlers]
 
 
-async def _no_deferred_artifacts(**_kwargs):
-    return {"pending": 0, "rate_limited": False, "deferred_until": None}
-
 
 async def _process(handler, events):
     events.append(("process", handler.name))
@@ -125,6 +121,7 @@ async def test_interim_top10_triggered_at_seventy_percent_and_final_after_fast_r
         sender_email="from@example.com",
         recipient_email="to@example.com",
         use_ssl=False,
+        youtube_api_key="test-key",
         sources_file=tmp_path / "sources.json",
         state_file=tmp_path / "state.json",
         generate_top10_digest=True,
@@ -141,7 +138,6 @@ async def test_interim_top10_triggered_at_seventy_percent_and_final_after_fast_r
     monkeypatch.setattr(main, "create_handler", lambda src, _: name_to_handler[src])
     monkeypatch.setattr(main, "materialize_source_checkpoints", lambda *_: None)
     monkeypatch.setattr(main, "verify_notebooklm_auth", lambda: _true())
-    monkeypatch.setattr(main, "resume_deferred_artifacts", _no_deferred_artifacts)
     monkeypatch.setattr(main, "_finish_background_artifacts", lambda *_, **__: _true_tuple())
     monkeypatch.setattr(main, "discover_sources", lambda selected, _: _discover(selected, item))
 
