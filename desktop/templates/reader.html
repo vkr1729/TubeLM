@@ -642,7 +642,10 @@
 
     @media (max-width: 768px) {
       .reading-pane {
-        padding: 16px 20px;
+        padding: 14px 14px 90px 14px;
+      }
+      .editorial-card {
+        padding: 14px 14px;
       }
     }
 
@@ -769,17 +772,19 @@
     }
 
     .editorial-quote {
-      font-size: var(--summary-font-size, 15px);
-      color: var(--text-secondary);
-      line-height: var(--summary-line-height, 1.65);
-      border-left: 2px solid var(--accent);
-      padding-left: 10px;
-      font-style: italic;
+      font-size: var(--summary-font-size, 14.5px);
+      color: var(--text-primary);
+      line-height: var(--summary-line-height, 1.55);
+      border-left: 3px solid var(--accent);
+      padding-left: 11px;
+      font-style: normal;
+      margin-top: 6px;
       margin-bottom: 12px;
     }
 
     :root[data-theme="light"] .editorial-quote {
       border-left-color: var(--accent-ink);
+      color: #1c1917;
     }
 
     .editorial-footer {
@@ -790,6 +795,7 @@
       border-top: 1px solid var(--border-color);
       padding-top: 10px;
       margin-top: auto;
+      width: 100%;
     }
 
     .editorial-footer .date {
@@ -1217,7 +1223,27 @@
       height: 100%;
       border: 0;
     }
-    .btn-play,
+    .btn-play {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--accent);
+      color: var(--accent-text);
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.14s ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    :root[data-theme="light"] .btn-play {
+      background: var(--accent-ink);
+      color: #ffffff;
+    }
     .btn-fullscreen {
       display: inline-flex;
       align-items: center;
@@ -1231,15 +1257,8 @@
       font-weight: 600;
       cursor: pointer;
       transition: all 0.14s ease;
-    }
-    .btn-play:hover,
-    .btn-fullscreen:hover {
-      color: var(--text-primary);
-      border-color: var(--border-focus);
-    }
-    :root[data-theme="light"] .btn-play:hover,
-    :root[data-theme="light"] .btn-fullscreen:hover {
-      color: var(--accent-ink);
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
     .video-player-wrapper:fullscreen,
     .video-player-wrapper:-webkit-full-screen {
@@ -1472,18 +1491,25 @@
     .brief-sticky{position:sticky;bottom:0;padding:12px 0 4px;background:linear-gradient(transparent,var(--bg-dark) 40%)}
     .seen-tag{font-size:10px;color:var(--success);border:1px solid var(--border-color);border-radius:6px;padding:1px 6px}
     .btn-seen{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
-      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;transition:none!important}
+      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;transition:none!important;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     .btn-seen.is-seen{background:rgba(158,232,36,0.1)!important;border-color:rgba(158,232,36,0.35)!important;color:#9fe824!important;font-weight:600}
     :root[data-theme="light"] .btn-seen.is-seen{background:rgba(92,122,16,0.12)!important;border-color:rgba(92,122,16,0.4)!important;color:#4a6809!important}
     .btn-bottom{background:none;border:1px solid var(--border-color);border-radius:8px;font-size:11px;
-      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;transition:all 0.14s ease}
-    .btn-bottom:hover{color:var(--text-primary);border-color:var(--border-focus)}
+      padding:3px 8px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;transition:all 0.14s ease;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     .btn-bottom.is-deferred{background:rgba(251,191,36,0.12)!important;border-color:rgba(251,191,36,0.4)!important;color:#fbbf24!important;font-weight:600}
     :root[data-theme="light"] .btn-bottom.is-deferred{background:rgba(217,119,6,0.12)!important;border-color:rgba(217,119,6,0.4)!important;color:#b45309!important}
-    .btn-bottom-sm{display:inline-flex;align-items:center;gap:3px;background:var(--btn-secondary-bg);border:1px solid var(--border-color);color:var(--text-muted);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all 0.14s ease}
-    .btn-bottom-sm:hover{color:var(--text-primary);border-color:var(--border-focus)}
+    .btn-bottom-sm{display:inline-flex;align-items:center;gap:3px;background:var(--btn-secondary-bg);border:1px solid var(--border-color);color:var(--text-muted);border-radius:4px;padding:2px 7px;font-size:11px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all 0.14s ease;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     .btn-bottom-sm.is-deferred{background:rgba(251,191,36,0.12)!important;border-color:rgba(251,191,36,0.4)!important;color:#fbbf24!important;font-weight:600}
     :root[data-theme="light"] .btn-bottom-sm.is-deferred{background:rgba(217,119,6,0.12)!important;border-color:rgba(217,119,6,0.4)!important;color:#b45309!important}
+    @media (hover: hover) {
+      .btn-play:hover { filter: brightness(1.1); transform: translateY(-1px); }
+      .btn-fullscreen:hover { color: var(--text-primary); border-color: var(--border-focus); }
+      :root[data-theme="light"] .btn-fullscreen:hover { color: var(--accent-ink); }
+      .btn-seen:hover { color: var(--text-primary); border-color: var(--border-focus); }
+      .btn-bottom:hover { color: var(--text-primary); border-color: var(--border-focus); }
+      .btn-bottom-sm:hover { color: var(--text-primary); border-color: var(--border-focus); }
+      .editorial-card:hover { background: var(--card-bg-hover); border-color: var(--border-focus); }
+    }
     .deferred-tag{font-size:10px;color:#fbbf24;background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:6px;padding:1px 6px;font-weight:600}
     :root[data-theme="light"] .deferred-tag{color:#b45309;background:rgba(217,119,6,0.08);border-color:rgba(217,119,6,0.25)}
     /* --- Cloud Sync Modal & Status --- */
@@ -1579,7 +1605,7 @@
         <svg id="theme-icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
       </button>
 
-      <a href="feed.xml" target="_blank" class="theme-toggle-btn" title="RSS Feed">
+      <a href="feed.xml" target="_blank" class="theme-toggle-btn hidden sm:inline-flex" title="RSS Feed">
         <svg class="w-3.5 h-3.5 text-amber-400" fill="currentColor" viewBox="0 0 24 24"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83c0-8.59-6.97-15.56-15.56-15.56zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg>
       </a>
 
@@ -2402,10 +2428,6 @@
       } catch (_) {}
       if (immediateRender) {
         renderActiveView();
-      } else {
-        setTimeout(() => {
-          renderActiveView();
-        }, 100);
       }
     }
 
@@ -2725,35 +2747,42 @@
           html += `
             <div class="editorial-card ${seen ? 'is-watched' : ''}">
               <div>
-                <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="editorial-rank">#${String(item.rank).padStart(2, '0')}</span>
+                <div class="flex items-center justify-between text-xs mb-1.5 gap-2 flex-wrap">
                   <div class="flex items-center gap-1.5">
+                    <span class="editorial-rank">#${String(item.rank).padStart(2, '0')}</span>
                     ${deferred && !seen ? `<span class="deferred-tag">↓ At Bottom</span>` : ''}
-                    <span class="editorial-source">${esc(item.source_name)}</span>
+                    ${seen ? `<span class="seen-tag">✓ ${isVideo ? 'Watched' : 'Read'}</span>` : ''}
+                  </div>
+                  <div class="flex items-center gap-1.5 text-[var(--text-muted)] text-[11px]">
+                    <span class="editorial-source font-semibold">${esc(item.source_name)}</span>
+                    ${item.duration ? `<span>·</span><span class="font-mono font-medium text-[var(--text-primary)]">⏱ ${esc(item.duration)}</span>` : ''}
+                    ${item.published ? `<span>·</span><span>${esc(item.published)}</span>` : ''}
                   </div>
                 </div>
                 <h3 class="editorial-title">
                   <a href="${item.url}" target="_blank" onclick="handleVideoPlay('${item.video_id || ''}', '${safeUrl}')">${esc(item.title)}</a>
                 </h3>
                 <div class="editorial-quote">
-                  "${esc(item.why_it_matters)}"
+                  ${esc(item.why_it_matters)}
                 </div>
               </div>
               <div class="editorial-footer">
-                <span class="date">${esc(item.published || '')}${item.duration ? ` · <span class="font-mono text-[11px] font-semibold text-[var(--text-primary)]">⏱ ${esc(item.duration)}</span>` : ''}</span>
-                <div class="flex items-center gap-2">
-                  ${seen ? `<span class="seen-tag">✓ ${isVideo ? 'Watched' : 'Read'}</span>` : ''}
-                  <button onclick="toggleTopItemRead('${key}', this)" data-is-video="${isVideo}" class="btn-seen ${seen ? 'is-seen' : ''}" title="Toggle ${isVideo ? 'watched' : 'read'} status">${isVideo ? (seen ? 'Watched ✓' : '✓ Mark Watched') : (seen ? 'Read ✓' : '✓ Mark Read')}</button>
-                  ${!seen ? `
-                    <button onclick="toggleItemDeferred('${key}', '${safeUrl}')" class="btn-bottom ${deferred ? 'is-deferred' : ''}" title="${deferred ? 'Return to original rank order' : 'Move to bottom of unread list to watch later'}">
-                      ${deferred ? '↑ Return to Top' : '↓ Move to Bottom'}
-                    </button>
-                  ` : ''}
-                  ${hasVideoId ? `
-                    <button onclick="playVideo('${item.video_id}', '${safeTitle}', {}, null, '${safeUrl}')" class="btn-play" title="Play Video">
-                      Play ▶
-                    </button>
-                  ` : ''}
+                <div class="flex items-center justify-between w-full gap-2 flex-wrap">
+                  <div class="flex items-center gap-2">
+                    ${hasVideoId ? `
+                      <button onclick="playVideo('${item.video_id}', '${safeTitle}', {}, null, '${safeUrl}')" class="btn-play" type="button">
+                        Play ▶
+                      </button>
+                    ` : ''}
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button onclick="toggleTopItemRead('${key}', this)" data-is-video="${isVideo}" class="btn-seen ${seen ? 'is-seen' : ''}" type="button">${isVideo ? (seen ? 'Watched ✓' : '✓ Mark Watched') : (seen ? 'Read ✓' : '✓ Mark Read')}</button>
+                    ${!seen ? `
+                      <button onclick="toggleItemDeferred('${key}', '${safeUrl}')" class="btn-bottom ${deferred ? 'is-deferred' : ''}" type="button">
+                        ${deferred ? '↑ Return to Top' : '↓ Move to Bottom'}
+                      </button>
+                    ` : ''}
+                  </div>
                 </div>
               </div>
             </div>
@@ -2843,11 +2872,11 @@
                     <div class="flex items-center gap-1.5 flex-shrink-0">
                       ${vDeferred && !isWatched ? `<span class="deferred-tag">↓ Bottom</span>` : ''}
                       ${!isWatched ? `
-                        <button onclick="toggleItemDeferred('${vidKey}', '${safeUrl}')" class="btn-bottom-sm ${vDeferred ? 'is-deferred' : ''}" title="${vDeferred ? 'Return to original order' : 'Move to bottom of channel to watch later'}">
+                        <button onclick="toggleItemDeferred('${vidKey}', '${safeUrl}')" class="btn-bottom-sm ${vDeferred ? 'is-deferred' : ''}" type="button">
                           ${vDeferred ? '↑ Top' : '↓ Bottom'}
                         </button>
                       ` : ''}
-                      <button onclick="toggleVideoWatched('${vidKey}', '${ch.id}', this)" data-is-video="${isVideo}" class="btn-seen-sm ${isWatched ? 'is-seen' : ''}" title="${markTitle}">
+                      <button onclick="toggleVideoWatched('${vidKey}', '${ch.id}', this)" data-is-video="${isVideo}" class="btn-seen-sm ${isWatched ? 'is-seen' : ''}" type="button">
                         ${markLabel}
                       </button>
                     </div>
@@ -3070,7 +3099,7 @@
         opts = {};
       }
       opts = opts || {};
-      handleVideoPlay(videoId, url || null, chId, true);
+      handleVideoPlay(videoId, url || null, chId, false);
       if (isAudioPlaying && globalAudio && !globalAudio.paused) {
         globalAudio.pause();
         isAudioPlaying = false;
