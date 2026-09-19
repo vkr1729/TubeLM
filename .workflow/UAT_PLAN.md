@@ -670,9 +670,10 @@ Pass if: 8/8 sessions usable; end-of-week state matches peer.
 
 | Role | Name | Build (sha256, 12 chars) | Device / iOS | Date | Verdict |
 |---|---|---|---|---|---|
-| CI Builder & Packager | GitHub Actions (Run 35426194404) | `1423ad53c9f4` | macOS-15 (Xcode 16.2 / Swift 6.0.3) | 2026-09-19 | **PASS** (UAT-001..004 binary & plist verified) |
-| Core Test Runner | pytest + swift-test | Git commit `383ceb3` | Ubuntu 26.04 LTS | 2026-09-19 | **PASS** (276 Python + 7 Swift tests green) |
-| Owner | Kedarnath Reddy Vallaboina | `1423ad53c9f4` | iPhone 16 / iOS 26 (LiveContainer) | 2026-09-19 | Ready for Device Acceptance |
+| Automated iOS Simulator UAT | GitHub Actions (Run 35427394154) | `539da4f98e6d` | iPhone 16 Pro Simulator (iOS 18.5) / macOS-15 (Xcode 16.2) | 2026-09-19 | **PASS** (17/17 Swift acceptance + unit tests green; Live install & launch PID 20105 verified with screenshot) |
+| CI Builder & Packager | GitHub Actions (Run 35427394154) | `539da4f98e6d` | macOS-15 (Xcode 16.2 / Swift 6.0.3) | 2026-09-19 | **PASS** (UAT-001..004 binary & plist verified; Mach-O 64-bit arm64 PIE) |
+| Core Test Runner | pytest + swift-test | Git commit `9d62b1f` | Ubuntu 26.04 LTS | 2026-09-19 | **PASS** (276 Python + 17 Swift tests green) |
+| Owner | Kedarnath Reddy Vallaboina | `539da4f98e6d` | iPhone 16 / iOS 26 (LiveContainer) | 2026-09-19 | **Ready for Device Acceptance** |
 
 Accepted only when §2.5 holds. Dissenting notes go here, not in chat threads.
 
