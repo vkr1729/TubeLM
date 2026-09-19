@@ -70,12 +70,9 @@ jobs:
           xcodebuild -list || true
           
           # Run xcodebuild test targeting the booted iOS Simulator
-          if xcodebuild test -scheme TubeLMCoreTests -destination "platform=iOS Simulator,id=$UDID" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""; then
-            echo "UAT simulator test passed with scheme TubeLMCoreTests"
-          elif xcodebuild test -scheme TubeLM-Package -destination "platform=iOS Simulator,id=$UDID" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""; then
-            echo "UAT simulator test passed with scheme TubeLM-Package"
-          elif xcodebuild test -scheme TubeLMCore -destination "platform=iOS Simulator,id=$UDID" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""; then
-            echo "UAT simulator test passed with scheme TubeLMCore"
+          echo "Executing test suite on iOS Simulator destination id=$UDID..."
+          if xcodebuild test -scheme TubeLM-Package -destination "platform=iOS Simulator,id=$UDID" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""; then
+            echo "UAT simulator test suite passed on iOS Simulator!"
           else
             echo "::error::Automated iOS Simulator UAT tests failed"
             exit 1

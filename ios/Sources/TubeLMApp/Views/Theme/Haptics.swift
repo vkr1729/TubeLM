@@ -4,6 +4,7 @@ import SwiftUI
 import UIKit
 #endif
 
+@MainActor
 public enum Haptics {
     public static func tap() {
         #if canImport(UIKit)
