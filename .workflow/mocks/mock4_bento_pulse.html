@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>TubeLM - Bento Pulse</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d0e12;
+      --card: #15171e;
+      --card-highlight: #1c1f28;
+      --border: rgba(255, 255, 255, 0.08);
+      --accent: #10b981;
+      --lime: #d9ff63;
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+    }
+    body {
+      background: #000; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+      height: 100vh; overflow: hidden; display: flex; justify-content: center;
+    }
+    .phone {
+      width: 100%; max-width: 430px; height: 100%; background: var(--bg); display: flex; flex-direction: column;
+      position: relative; overflow: hidden;
+    }
+    .status-bar {
+      height: 48px; padding: 12px 24px 0; display: flex; justify-content: space-between; align-items: center;
+      font-size: 14px; font-weight: 600; flex-shrink: 0;
+    }
+    .header {
+      padding: 10px 18px 12px; display: flex; justify-content: space-between; align-items: center;
+      flex-shrink: 0;
+    }
+    .header-logo { font-size: 20px; font-weight: 900; letter-spacing: -0.5px; display: flex; align-items: center; gap: 8px; }
+    .logo-badge { background: var(--lime); color: #000; padding: 2px 6px; border-radius: 6px; font-size: 11px; }
+
+    .feed { flex: 1; overflow-y: auto; padding: 4px 16px 120px; }
+    .feed::-webkit-scrollbar { display: none; }
+
+    /* Bento Grid */
+    .bento-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;
+    }
+    .bento-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 14px;
+      display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .bento-hero {
+      grid-column: span 2; background: linear-gradient(135deg, #15171e 0%, #1a221f 100%);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+    .bento-hero-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .bento-hero-title { font-size: 15px; font-weight: 800; line-height: 1.3; margin-bottom: 4px; }
+    .bento-hero-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; }
+    .bento-stat-num { font-size: 24px; font-weight: 900; color: var(--lime); }
+    .bento-stat-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+
+    /* Category Chips */
+    .cat-chips {
+      display: flex; gap: 8px; overflow-x: auto; padding-bottom: 12px; margin-bottom: 8px;
+    }
+    .cat-chips::-webkit-scrollbar { display: none; }
+    .chip {
+      padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; white-space: nowrap;
+      background: var(--card); color: var(--text-muted); border: 1px solid var(--border); cursor: pointer;
+    }
+    .chip.active { background: var(--text); color: #000; border-color: var(--text); }
+
+    /* Streamlined Cards */
+    .pulse-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 12px 14px; margin-bottom: 10px; display: flex; gap: 12px; align-items: flex-start;
+    }
+    .pulse-rank {
+      width: 28px; height: 28px; border-radius: 8px; background: var(--card-highlight);
+      display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800;
+      color: var(--lime); flex-shrink: 0;
+    }
+    .pulse-content { flex: 1; min-width: 0; }
+    .pulse-source { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
+    .pulse-title { font-size: 14px; font-weight: 700; line-height: 1.3; margin: 2px 0 4px; }
+    .pulse-desc { font-size: 12px; color: #94a3b8; line-height: 1.4; }
+
+    .tab-bar {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 64px; background: rgba(13, 14, 18, 0.96);
+      border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center;
+      padding-bottom: 12px; z-index: 55;
+    }
+    .tab-item { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+    .tab-item.active { color: var(--lime); }
+    .home-bar {
+      position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+      width: 136px; height: 4.5px; background: rgba(255,255,255,0.3); border-radius: 10px; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar">
+      <span>9:41</span>
+      <span>Pulse</span>
+      <span>100%</span>
+    </div>
+
+    <div class="header">
+      <div class="header-logo">
+        TubeLM <span class="logo-badge">iOS</span>
+      </div>
+      <div style="font-size:12px; color:var(--text-muted); font-weight:600;">2026-09-18</div>
+    </div>
+
+    <div class="feed">
+      <!-- Bento Grid -->
+      <div class="bento-grid">
+        <div class="bento-card bento-hero">
+          <div class="bento-hero-top">
+            <span style="font-size:11px; font-weight:800; color:var(--lime); text-transform:uppercase;">#1 Must-Watch Breakthrough</span>
+            <span style="font-size:11px; background:rgba(0,0,0,0.4); padding:2px 8px; border-radius:10px;">22:22</span>
+          </div>
+          <div class="bento-hero-title">How to lose $35 Billion Dollars Betting on AI</div>
+          <div class="bento-hero-desc">This breakdown details how Leopold Aschenbrenner&#x27;s Situational Awareness fund collapsed from $45 billion to $1…</div>
+        </div>
+
+        <div class="bento-card">
+          <div class="bento-stat-num">20</div>
+          <div class="bento-stat-label">Executive Briefs</div>
+        </div>
+
+        <div class="bento-card">
+          <div class="bento-stat-num">1h 42m</div>
+          <div class="bento-stat-label">Audio Downloaded</div>
+        </div>
+      </div>
+
+      <!-- Categories -->
+      <div class="cat-chips">
+        <div class="chip active" onclick="filterCat(this, 'all')">All Briefs</div>
+        <div class="chip" onclick="filterCat(this, 'tech')">Tech & AI</div>
+        <div class="chip" onclick="filterCat(this, 'health')">Health & Bio</div>
+        <div class="chip" onclick="filterCat(this, 'deep_explainer')">Science & Deep</div>
+      </div>
+
+      <!-- Pulse Cards -->
+
+      <div class="pulse-card">
+        <div class="pulse-rank">1</div>
+        <div class="pulse-content">
+          <div class="pulse-source">ColdFusion · 22:22</div>
+          <div class="pulse-title">How to lose $35 Billion Dollars Betting on AI</div>
+          <div class="pulse-desc">This breakdown details how Leopold Aschenbrenner&#x27;s Situational Awareness fund collapsed from $45 billion to $10 billion after using 400% leverage on hardware longs and software shorts. It illustrates how unhedged directional conviction and margin calls can erase capital even when betting on major technological transformations. The analysis offers a crucial case study on structural financial risk in frontier AI markets.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">2</div>
+        <div class="pulse-content">
+          <div class="pulse-source">AI Explained · 24:53</div>
+          <div class="pulse-title">What AI Researchers Saw, Before Their Demand to ‘Pace’ AI</div>
+          <div class="pulse-desc">This report examines why senior OpenAI researchers began calling to pace frontier model releases based on confidential internal evaluations rather than public benchmarks. It outlines concrete technical leaps in autonomous multi-step reasoning, self-directed code execution, and autonomous cybersecurity capabilities. The video provides essential context on the growing divide between internal lab developments and public governance.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">3</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Two Minute Papers · 5:11</div>
+          <div class="pulse-title">DeepSeek’s Insane New Architecture</div>
+          <div class="pulse-desc">This technical breakdown explains how DeepSeek 4.1 Flash achieved a 437-fold KV cache memory reduction through Context Sparse Attention and an encoder-decoder shared global memory architecture. It highlights the engineering mechanisms that slash inference serving costs while noting the trade-offs in token consumption during extended internal reasoning. This is vital viewing for developers designing scalable, low-latency LLM serving infrastructure.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">4</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Peter Attia MD · 2:19:16</div>
+          <div class="pulse-title">407 ‒ Preventing cardiovascular and Alzheimer’s disease: lowering LDL early, APOE4, and more</div>
+          <div class="pulse-desc">This clinical discussion reviews Mendelian randomization data proving that lifelong early suppression of ApoB and LDL cholesterol provides superior protection against cardiovascular disease compared to late-life interventions. It highlights emerging clinical trial data for next-generation CETP inhibitors like obicetrapib, which lower LDL cholesterol by up to 50% and small dense particles by 90% without statin-related glycemic side effects. The insights establish a practical foundation for early primordial prevention.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">5</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Nutrition Made Simple! · 9:38</div>
+          <div class="pulse-title">New Study Changes Understanding of How Heart Disease Starts</div>
+          <div class="pulse-desc">This video highlights landmark New England Journal of Medicine findings revealing that 57% of asymptomatic adults develop active arterial plaque in peripheral vessels decades before anything appears on a coronary calcium scan. It explains why a zero coronary calcium score can provide false reassurance to younger adults and women. It also outlines actionable vascular assessment protocols like the non-invasive Ankle-Brachial Index to detect early systemic atherosclerosis.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">6</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Asianometry · 20:55</div>
+          <div class="pulse-title">Silicon Valley’s Starving for Compute</div>
+          <div class="pulse-desc">This analysis maps the 2026 compute shortage driven by agentic AI deployment, where frontier labs command 5 gigawatts each while secondary clouds command $20 million per megawatt. It calculates the massive software revenue required to justify 40 gigawatts of planned datacenter expansion. The piece clearly explains why aggressive hardware supply responses will likely turn today&#x27;s severe shortage into a structural compute glut by late 2027.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">7</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Bloomberg Originals · 11:54</div>
+          <div class="pulse-title">How China Plans to Win the Global AI Race</div>
+          <div class="pulse-desc">This briefing documents China&#x27;s macroeconomic pivot from real estate toward open-source AI and robotics, slashing model inference costs by up to 75% compared to Western proprietary equivalents. It explains how low electricity costs and open-weight models are driving widespread adoption across developing economies, Germany, and Singapore despite chip export controls. The video provides an important strategic framework showing how price competition and mass utility can shape global technological dominance.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">8</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Think School · 14:33</div>
+          <div class="pulse-title">Putin’s Endgame for Global Trade? | How the Melting Arctic Could Shift Power Toward Russia</div>
+          <div class="pulse-desc">This geopolitical analysis explains how the melting Arctic is opening the Northern Sea Route, halving commercial shipping transit times between Shanghai and Rotterdam from 40 to 20 days. It details Russia&#x27;s dominant gatekeeper position with 40 operational icebreakers and its control over vital minerals like nickel, cobalt, and copper along the passage. The piece reveals how shifting physical trade routes can bypass historic naval choke points and reconfigure global commerce.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">9</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Physionic · 11:03</div>
+          <div class="pulse-title">Peptides with HUGE Cardiovascular Impact!</div>
+          <div class="pulse-desc">This clinical review synthesizes evidence from six large trials demonstrating that GLP-1 receptor agonists deliver hard cardiovascular risk reductions in overweight non-diabetic populations beyond their glucose-lowering effects. It details arterial imaging data demonstrating reductions in carotid intima-media thickness and evidence of true plaque regression. The discussion provides clinicians and patients with essential mechanistic context on the vascular benefits of peptide therapies.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">10</div>
+        <div class="pulse-content">
+          <div class="pulse-source">IBM Technology · 9:38</div>
+          <div class="pulse-title">What Is MLflow? Tracing AI Agents &amp; LLM Workflows</div>
+          <div class="pulse-desc">This practical guide addresses the hidden failure modes of multi-agent architectures that silently pass standard HTTP 200 checks, including context overflows and cascading latencies. It demonstrates how to instrument OpenTelemetry-compatible traces and spans using MLflow to isolate broken tool calls and measure step-level latencies. It also explains how to implement LLM-as-a-judge scoring to enforce compliance and deterministic tool choices in production.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">11</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Machine Learning Street Talk · 25:58</div>
+          <div class="pulse-title">How Physical AI Learns Across Language, Video and Action — Ming-Yu Liu</div>
+          <div class="pulse-desc">This technical interview with NVIDIA&#x27;s Ming-Yu Liu details the architecture of Cosmos, a foundation world model designed to overcome the prohibitive physical costs of evaluating robotic hardware fleets. It explains how high-fidelity physics-grounded synthetic simulation allows autonomous robots to learn across video, language, and physical action spaces before real-world deployment. The discussion clarifies key engineering milestones required for generalizable physical AI systems.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">12</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Two Minute Papers · 4:16</div>
+          <div class="pulse-title">Claude Is Now Leaving Invisible Fingerprints In Its Text</div>
+          <div class="pulse-desc">This video reveals Anthropic&#x27;s deployment of invisible text watermarking in Claude, which nudges candidate token selection into statistically auditable green buckets without changing readability. It explains how as few as 21 marked words provide mathematical proof of machine authorship that resists casual paraphrasing and light edits. The piece highlights critical operational implications for content provenance, academic integrity, and the growing demand for unmonitored open-weight models.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">13</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Think School · 17:03</div>
+          <div class="pulse-title">Bhutan Found a Money Glitch | How a Tiny Kingdom Turned Hydropower Into Billions</div>
+          <div class="pulse-desc">This case study uncovers Bhutan&#x27;s sovereign economic strategy of pairing Himalayan run-of-river hydropower with state-run Bitcoin mining, which generated 28% of national GDP. It details how the kingdom navigated structural unemployment and foreign reserve depletion by monetizing seasonal electricity that previously went wasted. The video offers a fascinating model of sovereign resource monetization in a landlocked developing nation.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">14</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Doctor Alex · 32:56</div>
+          <div class="pulse-title">Cook, Cool, Reheat: The Power of Resistant Starch</div>
+          <div class="pulse-desc">This practical nutrition guide explains the molecular mechanisms behind type 3 resistant starch, demonstrating how cooking and chilling starchy whole foods blocks small-intestine glucose absorption and fuels colon butyrate production. It reviews clinical trial data showing that freezing and toasting bread cuts glycemic response roughly in half compared to fresh bread. It also provides essential food safety timing rules to prevent Bacillus cereus toxin formation during meal prep.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">15</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Hillary Lin, MD · 26:09</div>
+          <div class="pulse-title">Your Inflammation Test Is High. Are You Actually Inflamed?</div>
+          <div class="pulse-desc">This medical breakdown explains why elevated C-reactive protein functions as a biological reporter molecule rather than a direct vascular toxin, requiring clinicians to address upstream inflammatory drivers. It contrasts acute assay spikes with baseline high-sensitivity CRP, reviewing evidence from the Physicians&#x27; Health Study and the CANTOS trial targeting IL-1beta. The video offers valuable guidance on interpreting inflammatory lab panels without unwarranted panic.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">16</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Money &amp; Macro · 17:47</div>
+          <div class="pulse-title">How Vienna solved the housing crisis</div>
+          <div class="pulse-desc">This economic case study analyzes Vienna&#x27;s public housing model, where 60% of residents live in municipal or non-profit cooperative apartments paying €600 to €800 monthly while enjoying premium amenities. It traces how postwar land taxation and progressive construction levies funded massive public supply that permanently disciplined private rental markets. The piece demonstrates why aggressive public construction succeeds in keeping housing affordable where price caps alone fail.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">17</div>
+        <div class="pulse-content">
+          <div class="pulse-source">IBM Technology · 33:07</div>
+          <div class="pulse-title">OpenAI talks GPT-6 Astra and Millenium Prize, researchers create WeWorm exploit &amp; IBM’s US Open app</div>
+          <div class="pulse-desc">This briefing contrasts OpenAI Astra&#x27;s $15 million compute spend across 10,000 agents to solve the Navier-Stokes equations in Lean against lightweight enterprise AI architectures. It details real-world applications including IBM&#x27;s hybrid event-stream analytics at the US Open and the zero-click WeWorm exploit in WeChat&#x27;s VoIP stack. The video clearly illustrates the trade-off between resource-heavy frontier milestones and cost-constrained production engineering.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">18</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Bloomberg Originals · 10:24</div>
+          <div class="pulse-title">Why India Won’t Break Up With Russia</div>
+          <div class="pulse-desc">This geopolitical analysis explains why India maintains its long-term strategic partnership with Russia despite Western diplomatic pressure and sanctions. It documents how historical Soviet technical blueprints established India&#x27;s heavy industry and created a 48% hardware dependence in its military fleet. It also outlines the massive economic advantages India gains by importing discounted seaborne crude to secure national energy sovereignty.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">19</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Patrick Boyle · 32:41</div>
+          <div class="pulse-title">Why Germany Stopped Working</div>
+          <div class="pulse-desc">This economic analysis explains how Germany&#x27;s constitutional debt brake suspension failed to revive infrastructure because legal risk-aversion and fragmented public tenders stall execution. It demonstrates how splitting public works into microscopic bids causes projects to freeze whenever a single contractor is delayed or appeals. The video offers a sharp lesson on how prioritizing administrative compliance over iteration creates systemic economic stagnation.</div>
+        </div>
+      </div>
+
+      <div class="pulse-card">
+        <div class="pulse-rank">20</div>
+        <div class="pulse-content">
+          <div class="pulse-source">Sandeep Swadia · 19:10</div>
+          <div class="pulse-title">Once You Get Money, Upgrade These 8 Things Immediately</div>
+          <div class="pulse-desc">This practical framework outlines Sandeep Swadia&#x27;s 4S model—Stamina, Skills, Security, and Soul—for allocating capital toward lasting cognitive leverage rather than status symbols. It combines sleep deprivation research with corporate negotiation strategies, advocating for a six-to-nine-month BATNA fund to protect decision-making autonomy. The advice provides grounded, actionable guidance for preserving judgment and mitigating personal financial risk.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="tab-bar">
+      <div class="tab-item active">Pulse</div>
+      <div class="tab-item">Channels</div>
+      <div class="tab-item">Audio Deck</div>
+    </div>
+    <div class="home-bar"></div>
+  </div>
+
+  <script>
+    function filterCat(el, cat) {
+      document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+    }
+  </script>
+</body>
+</html>

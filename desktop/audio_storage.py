@@ -1,4 +1,4 @@
-"""Zero-cost audio hosting on Cloudflare R2 (shared bucket with Instagram Digest)."""
+"""Zero-cost audio hosting on Cloudflare R2 (dedicated TubeLM bucket)."""
 from __future__ import annotations
 import logging
 import os
@@ -29,7 +29,7 @@ def _client():
 
 
 def bucket() -> str:
-    return os.getenv("R2_BUCKET_NAME", "instagram-digest").strip()
+    return os.getenv("R2_BUCKET_NAME", "tubelm").strip()
 
 
 def public_domain() -> str:

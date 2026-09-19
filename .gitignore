@@ -20,12 +20,17 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
 # Generated build output
 build/
 dist/
 desktop/build/
 desktop/dist/
+ios/.build/
+
+# Cloudflare local state (account id, daemon sockets)
+worker/.wrangler/
 
 # Editor and operating-system files
 .DS_Store

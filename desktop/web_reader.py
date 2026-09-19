@@ -5,6 +5,7 @@ web_reader.py — TubeLM v4.0 Static Web Reader, 2-Week Rolling Purge & GitHub P
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -38,6 +39,25 @@ _AUDIO_DATE_RE = re.compile(r"^(?:summary_)?(\d{4}-\d{2}-\d{2})_")
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
+def _safe_int_seconds(value: Any) -> int:
+    """Coerce a duration-seconds field to int; malformed input yields 0, never a crash."""
+    try:
+        return int(str(value or "").strip() or 0)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _safe_channel_int(value: Any) -> int:
+    """Coerce an aggregate counter (read_minutes, audio_seconds) to int."""
+    try:
+        return int(value or 0)
+    except (ValueError, TypeError):
+        try:
+            return int(float(str(value).strip()))
+        except (ValueError, TypeError):
+            return 0
+
+
 def _clean_video_id(value) -> str:
     """Allowlist YouTube video ids at the producer boundary.
 
@@ -47,6 +67,29 @@ def _clean_video_id(value) -> str:
     """
     text = str(value or "")
     return text if _VIDEO_ID_RE.fullmatch(text) else ""
+
+
+def _make_item_id(item: dict[str, Any]) -> str:
+    """Generate a stable, deterministic synthetic identity key for feed items.
+
+    Key choice converges with the web reader's watch-state keys so cross-device
+    sync matches: raw YouTube video_id when present, else the raw canonical URL
+    (over-long URLs fall back to sha256), else a title hash. Ensures that
+    RSS/articles without a YouTube video_id still have a unique, stable key
+    across AppState, read_ids, CommuteQueue, and Bookmarks.
+    """
+    raw_id = item.get("id") or item.get("video_id")
+    if raw_id and str(raw_id).strip():
+        return str(raw_id).strip()
+    url = (item.get("url") or item.get("link") or "").strip()
+    if url:
+        if len(url) <= 200:
+            return url
+        return hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    title = (item.get("title") or "").strip().lower()
+    if title:
+        return hashlib.sha256(title.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(str(item).encode("utf-8")).hexdigest()[:16]
 
 # Same bound the dashboard sanitizer applies: read_state ids are truncated,
 # de-duplicated, and capped so legacy ids cannot grow the file without bound.
@@ -121,14 +164,15 @@ def purge_old_digests_and_audio(summaries_dir: Path, audio_dir: Path, max_age_da
 
 
 def extract_youtube_video_id(url: str) -> str:
-    """Extract YouTube video ID from various URL formats."""
+    """Extract YouTube video ID from various URL formats.
+
+    Only genuine 11-char ids survive: shorter fragments are LLM/feed garbage
+    and would otherwise collide as synthetic identity keys downstream.
+    """
     if not url:
         return ""
     match = re.search(r"(?:v=|\/embed\/|youtu\.be\/|\/v\/)([0-9A-Za-z_-]{11})", url)
-    if match:
-        return match.group(1)
-    match_mock = re.search(r"(?:v=|\/embed\/|youtu\.be\/|\/v\/)([0-9A-Za-z_-]{5,})", url)
-    return match_mock.group(1) if match_mock else ""
+    return match.group(1) if match else ""
 
 
 FFMPEG_TIMEOUT_SECONDS = 120
@@ -220,12 +264,9 @@ def parse_top20_digest(top20_file: Path) -> dict[str, Any]:
                 if len(parts) >= 3:
                     published = parts[2]
 
-            source_type = "youtube" if ("youtube.com" in url or "youtu.be" in url) else "web"
-            video_id = extract_youtube_video_id(url) if source_type == "youtube" else ""
-
             dur_elem = tr.find(class_=re.compile(r"duration", re.I)) or tr.find("span", attrs={"data-duration": True})
             duration = tr.get("data-duration", "") or (dur_elem.get_text(strip=True) if dur_elem else "")
-            duration_seconds = int(tr.get("data-duration-seconds") or 0)
+            duration_seconds = _safe_int_seconds(tr.get("data-duration-seconds"))
 
             items.append({
                 "rank": rank_num,
@@ -262,6 +303,65 @@ def _lead_for(text: str, max_words: int = 60) -> str:
     if len(parts) <= max_words:
         return " ".join(parts)
     return " ".join(parts[:max_words]) + "…"
+
+
+def _normalize_mobile_item(raw: dict[str, Any], rank: int | None = None) -> dict[str, Any]:
+    """Project a pipeline item onto the mobile data.json contract.
+
+    Pipeline dicts carry producer keys (candidate_id, summary, video_id,
+    published, candidate_count) that the iOS models never read; passing them
+    through bloats every weekly payload for zero benefit. The canonical
+    summary key is why_it_matters, backfilled from summary when the Top-20
+    sidecar is the source.
+    """
+    why = str(raw.get("why_it_matters") or raw.get("summary") or "").strip()
+    item: dict[str, Any] = {
+        "id": _make_item_id(raw),
+        "title": str(raw.get("title") or ""),
+        "source_name": str(raw.get("source_name") or ""),
+        "source_type": str(raw.get("source_type") or "youtube"),
+        "duration": str(raw.get("duration") or ""),
+        "duration_seconds": _safe_int_seconds(raw.get("duration_seconds")),
+        "why_it_matters": why,
+        "url": str(raw.get("url") or ""),
+        "audio_url": str(raw.get("audio_url") or ""),
+    }
+    if rank is not None:
+        item["rank"] = rank
+    return item
+
+
+def _normalize_mobile_video(raw: dict[str, Any]) -> dict[str, Any]:
+    """Project a channel video onto the mobile data.json contract."""
+    return {
+        "id": _make_item_id(raw),
+        "title": str(raw.get("title") or ""),
+        "duration": str(raw.get("duration") or ""),
+        "duration_seconds": _safe_int_seconds(raw.get("duration_seconds")),
+        "summary_html": str(raw.get("summary_html") or ""),
+        "url": str(raw.get("url") or ""),
+        "audio_url": str(raw.get("audio_url") or ""),
+        "source_type": str(raw.get("source_type") or "youtube"),
+        "lead": str(raw.get("lead") or ""),
+    }
+
+
+def _normalize_mobile_channel(raw: dict[str, Any]) -> dict[str, Any]:
+    """Project a channel dict onto the mobile data.json contract."""
+    channel_id = str(raw.get("id") or "").strip() or str(
+        raw.get("name", "channel")).lower().replace(" ", "_")
+    return {
+        "id": channel_id,
+        "name": str(raw.get("name") or "Channel"),
+        "category": str(raw.get("category") or "tech"),
+        "read_minutes": _safe_channel_int(raw.get("read_minutes")),
+        "summary_text": str(raw.get("summary_text") or ""),
+        "summary_audio_url": str(
+            raw.get("summary_audio_url") or raw.get("audio_url") or ""),
+        "audio_url": str(raw.get("audio_url") or ""),
+        "videos": [_normalize_mobile_video(v) for v in raw.get("videos", [])
+                   if isinstance(v, dict)],
+    }
 
 
 def _audio_seconds_for(audio_path: str | None) -> int:
@@ -407,7 +507,7 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
             "source_type": it_source_type,
             "published": str(it.get("published") or ""),
             "duration": str(it.get("duration") or ""),
-            "duration_seconds": int(it.get("duration_seconds") or 0),
+            "duration_seconds": _safe_int_seconds(it.get("duration_seconds")),
             "summary_html": summary_html,
             "lead": _lead_for(BeautifulSoup(summary_html, "html.parser").get_text(" ", strip=True) if summary_html else ""),
         })
@@ -512,7 +612,7 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
             "source_type": source_type,
             "published": published,
             "duration": str(duration),
-            "duration_seconds": int(dur_sec or 0),
+            "duration_seconds": _safe_int_seconds(dur_sec),
             "summary_html": summary_html,
             "lead": _lead_for(card_text),
         })
@@ -981,14 +1081,24 @@ def build_reader_site(
         for it in top20_data.get("items", []):
             vid = it.get("video_id") or it.get("url")
             if not it.get("duration") and vid in vid_to_dur:
-                it["duration"], it["duration_seconds"] = vid_to_dur[vid]
+                dur_text, dur_secs = vid_to_dur[vid]
+                it["duration"] = it.get("duration") or dur_text
+                it["duration_seconds"] = _safe_int_seconds(
+                    it.get("duration_seconds") or dur_secs)
+            it["id"] = _make_item_id(it)
+
+        for ch in channels:
+            if not ch.get("id"):
+                ch["id"] = ch.get("name", "channel").lower().replace(" ", "_")
+            for v in ch.get("videos", []):
+                v["id"] = _make_item_id(v)
 
         weeks_data[week_key] = {
             "run_date": run_date_label,
             "channels": channels,
             "top20": top20_data,
-            "total_read_minutes": sum(int(ch.get("read_minutes") or 0) for ch in channels),
-            "total_audio_seconds": sum(int(ch.get("audio_seconds") or 0) for ch in channels),
+            "total_read_minutes": sum(_safe_channel_int(ch.get("read_minutes")) for ch in channels),
+            "total_audio_seconds": sum(_safe_channel_int(ch.get("audio_seconds")) for ch in channels),
             "channel_count": len(channels),
         }
 
@@ -1026,6 +1136,40 @@ def build_reader_site(
     # Render RSS feed
     rss_path = site_dir / "feed.xml"
     generate_rss_feed(site_data, rss_path)
+
+    # Export canonical mobile data.json (schema_version: 1)
+    current_week = weeks_data.get("current", {})
+    raw_top20 = current_week.get("top20", {}) or {}
+    mobile_items = []
+    for idx, raw_item in enumerate(raw_top20.get("items", []), start=1):
+        if not isinstance(raw_item, dict):
+            continue
+        rank = raw_item.get("rank")
+        try:
+            rank_num = int(rank) if rank is not None else idx
+        except (ValueError, TypeError):
+            rank_num = idx
+        mobile_items.append(_normalize_mobile_item(raw_item, rank=rank_num))
+    mobile_data = {
+        "schema_version": 1,
+        "built_at": site_data["built_at"],
+        "run_date": "",
+        "top20": {"items": mobile_items, "candidate_count": len(mobile_items)},
+        "channels": [_normalize_mobile_channel(ch) for ch in current_week.get("channels", [])
+                     if isinstance(ch, dict)],
+    }
+    raw_run_date = str(current_week.get("run_date") or "")
+    if raw_run_date and raw_run_date != "None":
+        try:
+            datetime.strptime(raw_run_date, "%Y-%m-%d")
+            mobile_data["run_date"] = raw_run_date
+        except ValueError:
+            pass
+    data_json_path = site_dir / "data.json"
+    temp_json_path = site_dir / "data.json.tmp"
+    temp_json_path.write_text(json.dumps(mobile_data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_json_path.replace(data_json_path)
+    logger.info("Successfully exported mobile data.json at %s", data_json_path)
 
     # Write .nojekyll
     (site_dir / ".nojekyll").write_text("", encoding="utf-8")

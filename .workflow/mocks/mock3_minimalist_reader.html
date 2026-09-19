@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>TubeLM - Minimalist Reader</title>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+    :root {
+      --bg: #000000;
+      --card: #121212;
+      --text: #f4f4f0;
+      --text-muted: #888884;
+      --border: rgba(255, 255, 255, 0.08);
+      --accent: #e2e8f0;
+    }
+    body {
+      background: #000; color: var(--text); font-family: "Newsreader", Georgia, serif;
+      height: 100vh; overflow: hidden; display: flex; justify-content: center;
+    }
+    .phone {
+      width: 100%; max-width: 430px; height: 100%; background: var(--bg); display: flex; flex-direction: column;
+      position: relative; overflow: hidden;
+    }
+    .status-bar {
+      height: 48px; padding: 12px 24px 0; display: flex; justify-content: space-between; align-items: center;
+      font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; font-weight: 500;
+      color: var(--text-muted); flex-shrink: 0;
+    }
+    .header {
+      padding: 16px 24px 12px; display: flex; justify-content: space-between; align-items: baseline;
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .brand { font-size: 20px; font-weight: 600; letter-spacing: -0.5px; }
+    .font-switch {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; font-size: 12px; font-weight: 600;
+      color: var(--text-muted); background: var(--card); padding: 4px 10px; border-radius: 14px; border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .feed {
+      flex: 1; overflow-y: auto; padding: 20px 24px 120px; -webkit-overflow-scrolling: touch;
+    }
+    .feed::-webkit-scrollbar { display: none; }
+
+    .article-item {
+      margin-bottom: 32px; border-bottom: 1px solid var(--border); padding-bottom: 24px;
+    }
+    .article-meta {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; font-size: 12px;
+      color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;
+    }
+    .article-title {
+      font-size: 21px; font-weight: 500; line-height: 1.35; margin-bottom: 10px; color: #fff;
+    }
+    .article-excerpt {
+      font-size: 16px; line-height: 1.65; color: #b8b8b0; margin-bottom: 14px;
+    }
+    .article-footer {
+      display: flex; justify-content: space-between; align-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; font-size: 12px; color: var(--text-muted);
+    }
+    .read-time { display: flex; align-items: center; gap: 4px; }
+    .btn-listen {
+      background: transparent; border: 1px solid var(--border); color: #fff; padding: 4px 12px; border-radius: 14px;
+      cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 12px;
+    }
+
+    /* Minimal Floating Audio Pill */
+    .minimal-player {
+      position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
+      background: rgba(24, 24, 24, 0.92); backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 30px; padding: 8px 18px;
+      display: flex; align-items: center; gap: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; font-size: 12px; font-weight: 500;
+      z-index: 50;
+    }
+    .home-bar {
+      position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+      width: 136px; height: 4.5px; background: rgba(255,255,255,0.2); border-radius: 10px; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="phone" id="phoneContainer">
+    <div class="status-bar">
+      <span>9:41</span>
+      <span>TubeLM</span>
+      <span>100%</span>
+    </div>
+
+    <div class="header">
+      <div class="brand">TubeLM Digest</div>
+      <button class="font-switch" onclick="toggleTypography()">Serif / Sans</button>
+    </div>
+
+    <div class="feed">
+
+      <div class="article-item">
+        <div class="article-meta">ColdFusion · #1 Priority</div>
+        <div class="article-title">How to lose $35 Billion Dollars Betting on AI</div>
+        <div class="article-excerpt">This breakdown details how Leopold Aschenbrenner&#x27;s Situational Awareness fund collapsed from $45 billion to $10 billion after using 400% leverage on hardware longs and software shorts. It illustrates how unhedged directional conviction and margin calls can erase capital even when betting on major technological transformations. The analysis offers a crucial case study on structural financial risk in frontier AI markets.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 22:22</div>
+          <button class="btn-listen" onclick="listenNow('How to lose $35 Billion Dollars Betting on AI')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">AI Explained · #2 Priority</div>
+        <div class="article-title">What AI Researchers Saw, Before Their Demand to ‘Pace’ AI</div>
+        <div class="article-excerpt">This report examines why senior OpenAI researchers began calling to pace frontier model releases based on confidential internal evaluations rather than public benchmarks. It outlines concrete technical leaps in autonomous multi-step reasoning, self-directed code execution, and autonomous cybersecurity capabilities. The video provides essential context on the growing divide between internal lab developments and public governance.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 24:53</div>
+          <button class="btn-listen" onclick="listenNow('What AI Researchers Saw, Before Their Demand to ‘Pace’ AI')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">Two Minute Papers · #3 Priority</div>
+        <div class="article-title">DeepSeek’s Insane New Architecture</div>
+        <div class="article-excerpt">This technical breakdown explains how DeepSeek 4.1 Flash achieved a 437-fold KV cache memory reduction through Context Sparse Attention and an encoder-decoder shared global memory architecture. It highlights the engineering mechanisms that slash inference serving costs while noting the trade-offs in token consumption during extended internal reasoning. This is vital viewing for developers designing scalable, low-latency LLM serving infrastructure.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 5:11</div>
+          <button class="btn-listen" onclick="listenNow('DeepSeek’s Insane New Architecture')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">Peter Attia MD · #4 Priority</div>
+        <div class="article-title">407 ‒ Preventing cardiovascular and Alzheimer’s disease: lowering LDL early, APOE4, and more</div>
+        <div class="article-excerpt">This clinical discussion reviews Mendelian randomization data proving that lifelong early suppression of ApoB and LDL cholesterol provides superior protection against cardiovascular disease compared to late-life interventions. It highlights emerging clinical trial data for next-generation CETP inhibitors like obicetrapib, which lower LDL cholesterol by up to 50% and small dense particles by 90% without statin-related glycemic side effects. The insights establish a practical foundation for early primordial prevention.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 2:19:16</div>
+          <button class="btn-listen" onclick="listenNow('407 ‒ Preventing cardiovascular and Alzheimer’s disease: lowering LDL early, APOE4, and more')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">Nutrition Made Simple! · #5 Priority</div>
+        <div class="article-title">New Study Changes Understanding of How Heart Disease Starts</div>
+        <div class="article-excerpt">This video highlights landmark New England Journal of Medicine findings revealing that 57% of asymptomatic adults develop active arterial plaque in peripheral vessels decades before anything appears on a coronary calcium scan. It explains why a zero coronary calcium score can provide false reassurance to younger adults and women. It also outlines actionable vascular assessment protocols like the non-invasive Ankle-Brachial Index to detect early systemic atherosclerosis.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 9:38</div>
+          <button class="btn-listen" onclick="listenNow('New Study Changes Understanding of How Heart Disease Starts')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">Asianometry · #6 Priority</div>
+        <div class="article-title">Silicon Valley’s Starving for Compute</div>
+        <div class="article-excerpt">This analysis maps the 2026 compute shortage driven by agentic AI deployment, where frontier labs command 5 gigawatts each while secondary clouds command $20 million per megawatt. It calculates the massive software revenue required to justify 40 gigawatts of planned datacenter expansion. The piece clearly explains why aggressive hardware supply responses will likely turn today&#x27;s severe shortage into a structural compute glut by late 2027.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 20:55</div>
+          <button class="btn-listen" onclick="listenNow('Silicon Valley’s Starving for Compute')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">Bloomberg Originals · #7 Priority</div>
+        <div class="article-title">How China Plans to Win the Global AI Race</div>
+        <div class="article-excerpt">This briefing documents China&#x27;s macroeconomic pivot from real estate toward open-source AI and robotics, slashing model inference costs by up to 75% compared to Western proprietary equivalents. It explains how low electricity costs and open-weight models are driving widespread adoption across developing economies, Germany, and Singapore despite chip export controls. The video provides an important strategic framework showing how price competition and mass utility can shape global technological dominance.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 11:54</div>
+          <button class="btn-listen" onclick="listenNow('How China Plans to Win the Global AI Race')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">Think School · #8 Priority</div>
+        <div class="article-title">Putin’s Endgame for Global Trade? | How the Melting Arctic Could Shift Power Toward Russia</div>
+        <div class="article-excerpt">This geopolitical analysis explains how the melting Arctic is opening the Northern Sea Route, halving commercial shipping transit times between Shanghai and Rotterdam from 40 to 20 days. It details Russia&#x27;s dominant gatekeeper position with 40 operational icebreakers and its control over vital minerals like nickel, cobalt, and copper along the passage. The piece reveals how shifting physical trade routes can bypass historic naval choke points and reconfigure global commerce.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 14:33</div>
+          <button class="btn-listen" onclick="listenNow('Putin’s Endgame for Global Trade? | How the Melting Arctic Could Shift Power Toward Russia')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">Physionic · #9 Priority</div>
+        <div class="article-title">Peptides with HUGE Cardiovascular Impact!</div>
+        <div class="article-excerpt">This clinical review synthesizes evidence from six large trials demonstrating that GLP-1 receptor agonists deliver hard cardiovascular risk reductions in overweight non-diabetic populations beyond their glucose-lowering effects. It details arterial imaging data demonstrating reductions in carotid intima-media thickness and evidence of true plaque regression. The discussion provides clinicians and patients with essential mechanistic context on the vascular benefits of peptide therapies.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 11:03</div>
+          <button class="btn-listen" onclick="listenNow('Peptides with HUGE Cardiovascular Impact!')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">IBM Technology · #10 Priority</div>
+        <div class="article-title">What Is MLflow? Tracing AI Agents &amp; LLM Workflows</div>
+        <div class="article-excerpt">This practical guide addresses the hidden failure modes of multi-agent architectures that silently pass standard HTTP 200 checks, including context overflows and cascading latencies. It demonstrates how to instrument OpenTelemetry-compatible traces and spans using MLflow to isolate broken tool calls and measure step-level latencies. It also explains how to implement LLM-as-a-judge scoring to enforce compliance and deterministic tool choices in production.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 9:38</div>
+          <button class="btn-listen" onclick="listenNow('What Is MLflow? Tracing AI Agents &amp; LLM Workflows')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">Machine Learning Street Talk · #11 Priority</div>
+        <div class="article-title">How Physical AI Learns Across Language, Video and Action — Ming-Yu Liu</div>
+        <div class="article-excerpt">This technical interview with NVIDIA&#x27;s Ming-Yu Liu details the architecture of Cosmos, a foundation world model designed to overcome the prohibitive physical costs of evaluating robotic hardware fleets. It explains how high-fidelity physics-grounded synthetic simulation allows autonomous robots to learn across video, language, and physical action spaces before real-world deployment. The discussion clarifies key engineering milestones required for generalizable physical AI systems.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 25:58</div>
+          <button class="btn-listen" onclick="listenNow('How Physical AI Learns Across Language, Video and Action — Ming-Yu Liu')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+      <div class="article-item">
+        <div class="article-meta">Two Minute Papers · #12 Priority</div>
+        <div class="article-title">Claude Is Now Leaving Invisible Fingerprints In Its Text</div>
+        <div class="article-excerpt">This video reveals Anthropic&#x27;s deployment of invisible text watermarking in Claude, which nudges candidate token selection into statistically auditable green buckets without changing readability. It explains how as few as 21 marked words provide mathematical proof of machine authorship that resists casual paraphrasing and light edits. The piece highlights critical operational implications for content provenance, academic integrity, and the growing demand for unmonitored open-weight models.</div>
+        <div class="article-footer">
+          <div class="read-time">3 min read · 4:16</div>
+          <button class="btn-listen" onclick="listenNow('Claude Is Now Leaving Invisible Fingerprints In Its Text')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Listen
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="minimal-player" id="minPlayer">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      <span id="minPlayerTitle">Playing Overview · 14m</span>
+      <span style="opacity:0.6; font-size:11px;">1.5×</span>
+    </div>
+    <div class="home-bar"></div>
+  </div>
+
+  <script>
+    let isSans = false;
+    function toggleTypography() {
+      isSans = !isSans;
+      document.body.style.fontFamily = isSans ? '-apple-system, BlinkMacSystemFont, "Inter", sans-serif' : '"Newsreader", Georgia, serif';
+    }
+    function listenNow(title) {
+      document.getElementById('minPlayerTitle').innerText = title.substring(0, 24) + '…';
+    }
+  </script>
+</body>
+</html>

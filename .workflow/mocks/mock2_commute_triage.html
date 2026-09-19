@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>TubeLM - Commute Triage</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+    :root {
+      --bg: #090d16;
+      --surface: #111827;
+      --surface-card: #162032;
+      --border: rgba(56, 189, 248, 0.12);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-soft: rgba(56, 189, 248, 0.15);
+      --amber: #fbbf24;
+    }
+    body {
+      background: #000; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+      height: 100vh; overflow: hidden; display: flex; justify-content: center;
+    }
+    .phone {
+      width: 100%; max-width: 430px; height: 100%; background: var(--bg); display: flex; flex-direction: column;
+      position: relative; overflow: hidden;
+    }
+    .status-bar {
+      height: 48px; padding: 12px 24px 0; display: flex; justify-content: space-between; align-items: center;
+      font-size: 14px; font-weight: 600; flex-shrink: 0;
+    }
+    /* Triage Segment Switcher */
+    .triage-nav {
+      padding: 8px 16px 12px; display: flex; gap: 8px; flex-shrink: 0;
+    }
+    .triage-tab {
+      flex: 1; padding: 10px 0; text-align: center; border-radius: 12px; font-size: 13px; font-weight: 700;
+      background: var(--surface); color: var(--text-muted); cursor: pointer; transition: all 0.2s;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .triage-tab.active { background: var(--accent); color: #082f49; }
+    .triage-badge { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: rgba(0,0,0,0.25); }
+
+    /* Feed */
+    .feed { flex: 1; overflow-y: auto; padding: 12px 16px 130px; }
+    .feed::-webkit-scrollbar { display: none; }
+
+    /* Triage Item Card */
+    .triage-card {
+      background: var(--surface-card); border: 1px solid var(--border); border-radius: 16px;
+      padding: 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .t-header { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-muted); }
+    .t-source { font-weight: 700; color: var(--accent); }
+    .t-title { font-size: 15px; font-weight: 700; line-height: 1.35; }
+    .t-preview { font-size: 13px; color: #cbd5e1; line-height: 1.45; }
+
+    /* Quick Action Thumb Zone (Castro Swipe / 1-Tap) */
+    .thumb-actions {
+      display: flex; gap: 8px; margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;
+    }
+    .btn-queue {
+      flex: 2; padding: 10px; border-radius: 10px; background: var(--accent-soft); color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.3); font-size: 13px; font-weight: 700; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .btn-queue:active { background: var(--accent); color: #000; }
+    .btn-dismiss {
+      flex: 1; padding: 10px; border-radius: 10px; background: rgba(255,255,255,0.05); color: var(--text-muted);
+      border: none; font-size: 13px; font-weight: 600; cursor: pointer; text-align: center;
+    }
+
+    /* Commute Play All Floating Pill */
+    .commute-bar {
+      position: absolute; bottom: 74px; left: 16px; right: 16px; background: #0284c7; color: #fff;
+      padding: 12px 18px; border-radius: 28px; display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 10px 25px rgba(2, 132, 199, 0.4); z-index: 60; cursor: pointer;
+    }
+    .commute-title { font-size: 13px; font-weight: 700; }
+    .commute-sub { font-size: 11px; opacity: 0.9; }
+
+    .tab-bar {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 64px; background: rgba(9, 13, 22, 0.98);
+      border-top: 1px solid var(--border); display: flex; justify-content: space-around; align-items: center;
+      padding-bottom: 12px; z-index: 55;
+    }
+    .tab-item { font-size: 11px; font-weight: 600; color: var(--text-muted); text-align: center; }
+    .tab-item.active { color: var(--accent); }
+    .home-bar {
+      position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+      width: 136px; height: 4.5px; background: rgba(255,255,255,0.3); border-radius: 10px; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar">
+      <span>9:41</span>
+      <span style="color:var(--accent); font-weight:700;">Subway Mode · Offline Ready</span>
+      <span>100%</span>
+    </div>
+
+    <!-- Triage Switcher -->
+    <div class="triage-nav">
+      <div class="triage-tab active" onclick="setTab(this, 'inbox')">
+        Inbox <span class="triage-badge">20</span>
+      </div>
+      <div class="triage-tab" onclick="setTab(this, 'queue')">
+        Commute Queue <span class="triage-badge" id="queueBadge">3</span>
+      </div>
+      <div class="triage-tab" onclick="setTab(this, 'done')">
+        Done
+      </div>
+    </div>
+
+    <!-- Feed -->
+    <div class="feed" id="feed">
+
+      <div class="triage-card" id="t-card-0">
+        <div class="t-header">
+          <span class="t-source">ColdFusion</span>
+          <span>22:22 · #1</span>
+        </div>
+        <div class="t-title">How to lose $35 Billion Dollars Betting on AI</div>
+        <div class="t-preview">This breakdown details how Leopold Aschenbrenner&#x27;s Situational Awareness fund collapsed from $45 billion to $10 billion after using 400% leverage on hardware longs and software shorts. It illustrates how unhedged directional conviction and margin calls can erase capital even when betting on major technological transformations. The analysis offers a crucial case study on structural financial risk in frontier AI markets.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(0, 'How to lose $35 Billion Dollars Betting on AI')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(0)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-1">
+        <div class="t-header">
+          <span class="t-source">AI Explained</span>
+          <span>24:53 · #2</span>
+        </div>
+        <div class="t-title">What AI Researchers Saw, Before Their Demand to ‘Pace’ AI</div>
+        <div class="t-preview">This report examines why senior OpenAI researchers began calling to pace frontier model releases based on confidential internal evaluations rather than public benchmarks. It outlines concrete technical leaps in autonomous multi-step reasoning, self-directed code execution, and autonomous cybersecurity capabilities. The video provides essential context on the growing divide between internal lab developments and public governance.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(1, 'What AI Researchers Saw, Before Their Demand to ‘Pace’ AI')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(1)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-2">
+        <div class="t-header">
+          <span class="t-source">Two Minute Papers</span>
+          <span>5:11 · #3</span>
+        </div>
+        <div class="t-title">DeepSeek’s Insane New Architecture</div>
+        <div class="t-preview">This technical breakdown explains how DeepSeek 4.1 Flash achieved a 437-fold KV cache memory reduction through Context Sparse Attention and an encoder-decoder shared global memory architecture. It highlights the engineering mechanisms that slash inference serving costs while noting the trade-offs in token consumption during extended internal reasoning. This is vital viewing for developers designing scalable, low-latency LLM serving infrastructure.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(2, 'DeepSeek’s Insane New Architecture')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(2)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-3">
+        <div class="t-header">
+          <span class="t-source">Peter Attia MD</span>
+          <span>2:19:16 · #4</span>
+        </div>
+        <div class="t-title">407 ‒ Preventing cardiovascular and Alzheimer’s disease: lowering LDL early, APOE4, and more</div>
+        <div class="t-preview">This clinical discussion reviews Mendelian randomization data proving that lifelong early suppression of ApoB and LDL cholesterol provides superior protection against cardiovascular disease compared to late-life interventions. It highlights emerging clinical trial data for next-generation CETP inhibitors like obicetrapib, which lower LDL cholesterol by up to 50% and small dense particles by 90% without statin-related glycemic side effects. The insights establish a practical foundation for early primordial prevention.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(3, '407 ‒ Preventing cardiovascular and Alzheimer’s disease: lowering LDL early, APOE4, and more')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(3)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-4">
+        <div class="t-header">
+          <span class="t-source">Nutrition Made Simple!</span>
+          <span>9:38 · #5</span>
+        </div>
+        <div class="t-title">New Study Changes Understanding of How Heart Disease Starts</div>
+        <div class="t-preview">This video highlights landmark New England Journal of Medicine findings revealing that 57% of asymptomatic adults develop active arterial plaque in peripheral vessels decades before anything appears on a coronary calcium scan. It explains why a zero coronary calcium score can provide false reassurance to younger adults and women. It also outlines actionable vascular assessment protocols like the non-invasive Ankle-Brachial Index to detect early systemic atherosclerosis.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(4, 'New Study Changes Understanding of How Heart Disease Starts')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(4)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-5">
+        <div class="t-header">
+          <span class="t-source">Asianometry</span>
+          <span>20:55 · #6</span>
+        </div>
+        <div class="t-title">Silicon Valley’s Starving for Compute</div>
+        <div class="t-preview">This analysis maps the 2026 compute shortage driven by agentic AI deployment, where frontier labs command 5 gigawatts each while secondary clouds command $20 million per megawatt. It calculates the massive software revenue required to justify 40 gigawatts of planned datacenter expansion. The piece clearly explains why aggressive hardware supply responses will likely turn today&#x27;s severe shortage into a structural compute glut by late 2027.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(5, 'Silicon Valley’s Starving for Compute')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(5)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-6">
+        <div class="t-header">
+          <span class="t-source">Bloomberg Originals</span>
+          <span>11:54 · #7</span>
+        </div>
+        <div class="t-title">How China Plans to Win the Global AI Race</div>
+        <div class="t-preview">This briefing documents China&#x27;s macroeconomic pivot from real estate toward open-source AI and robotics, slashing model inference costs by up to 75% compared to Western proprietary equivalents. It explains how low electricity costs and open-weight models are driving widespread adoption across developing economies, Germany, and Singapore despite chip export controls. The video provides an important strategic framework showing how price competition and mass utility can shape global technological dominance.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(6, 'How China Plans to Win the Global AI Race')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(6)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-7">
+        <div class="t-header">
+          <span class="t-source">Think School</span>
+          <span>14:33 · #8</span>
+        </div>
+        <div class="t-title">Putin’s Endgame for Global Trade? | How the Melting Arctic Could Shift Power Toward Russia</div>
+        <div class="t-preview">This geopolitical analysis explains how the melting Arctic is opening the Northern Sea Route, halving commercial shipping transit times between Shanghai and Rotterdam from 40 to 20 days. It details Russia&#x27;s dominant gatekeeper position with 40 operational icebreakers and its control over vital minerals like nickel, cobalt, and copper along the passage. The piece reveals how shifting physical trade routes can bypass historic naval choke points and reconfigure global commerce.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(7, 'Putin’s Endgame for Global Trade? | How the Melting Arctic Could Shift Power Toward Russia')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(7)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-8">
+        <div class="t-header">
+          <span class="t-source">Physionic</span>
+          <span>11:03 · #9</span>
+        </div>
+        <div class="t-title">Peptides with HUGE Cardiovascular Impact!</div>
+        <div class="t-preview">This clinical review synthesizes evidence from six large trials demonstrating that GLP-1 receptor agonists deliver hard cardiovascular risk reductions in overweight non-diabetic populations beyond their glucose-lowering effects. It details arterial imaging data demonstrating reductions in carotid intima-media thickness and evidence of true plaque regression. The discussion provides clinicians and patients with essential mechanistic context on the vascular benefits of peptide therapies.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(8, 'Peptides with HUGE Cardiovascular Impact!')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(8)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-9">
+        <div class="t-header">
+          <span class="t-source">IBM Technology</span>
+          <span>9:38 · #10</span>
+        </div>
+        <div class="t-title">What Is MLflow? Tracing AI Agents &amp; LLM Workflows</div>
+        <div class="t-preview">This practical guide addresses the hidden failure modes of multi-agent architectures that silently pass standard HTTP 200 checks, including context overflows and cascading latencies. It demonstrates how to instrument OpenTelemetry-compatible traces and spans using MLflow to isolate broken tool calls and measure step-level latencies. It also explains how to implement LLM-as-a-judge scoring to enforce compliance and deterministic tool choices in production.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(9, 'What Is MLflow? Tracing AI Agents &amp; LLM Workflows')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(9)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-10">
+        <div class="t-header">
+          <span class="t-source">Machine Learning Street Talk</span>
+          <span>25:58 · #11</span>
+        </div>
+        <div class="t-title">How Physical AI Learns Across Language, Video and Action — Ming-Yu Liu</div>
+        <div class="t-preview">This technical interview with NVIDIA&#x27;s Ming-Yu Liu details the architecture of Cosmos, a foundation world model designed to overcome the prohibitive physical costs of evaluating robotic hardware fleets. It explains how high-fidelity physics-grounded synthetic simulation allows autonomous robots to learn across video, language, and physical action spaces before real-world deployment. The discussion clarifies key engineering milestones required for generalizable physical AI systems.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(10, 'How Physical AI Learns Across Language, Video and Action — Ming-Yu Liu')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(10)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-11">
+        <div class="t-header">
+          <span class="t-source">Two Minute Papers</span>
+          <span>4:16 · #12</span>
+        </div>
+        <div class="t-title">Claude Is Now Leaving Invisible Fingerprints In Its Text</div>
+        <div class="t-preview">This video reveals Anthropic&#x27;s deployment of invisible text watermarking in Claude, which nudges candidate token selection into statistically auditable green buckets without changing readability. It explains how as few as 21 marked words provide mathematical proof of machine authorship that resists casual paraphrasing and light edits. The piece highlights critical operational implications for content provenance, academic integrity, and the growing demand for unmonitored open-weight models.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(11, 'Claude Is Now Leaving Invisible Fingerprints In Its Text')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(11)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-12">
+        <div class="t-header">
+          <span class="t-source">Think School</span>
+          <span>17:03 · #13</span>
+        </div>
+        <div class="t-title">Bhutan Found a Money Glitch | How a Tiny Kingdom Turned Hydropower Into Billions</div>
+        <div class="t-preview">This case study uncovers Bhutan&#x27;s sovereign economic strategy of pairing Himalayan run-of-river hydropower with state-run Bitcoin mining, which generated 28% of national GDP. It details how the kingdom navigated structural unemployment and foreign reserve depletion by monetizing seasonal electricity that previously went wasted. The video offers a fascinating model of sovereign resource monetization in a landlocked developing nation.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(12, 'Bhutan Found a Money Glitch | How a Tiny Kingdom Turned Hydropower Into Billions')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(12)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-13">
+        <div class="t-header">
+          <span class="t-source">Doctor Alex</span>
+          <span>32:56 · #14</span>
+        </div>
+        <div class="t-title">Cook, Cool, Reheat: The Power of Resistant Starch</div>
+        <div class="t-preview">This practical nutrition guide explains the molecular mechanisms behind type 3 resistant starch, demonstrating how cooking and chilling starchy whole foods blocks small-intestine glucose absorption and fuels colon butyrate production. It reviews clinical trial data showing that freezing and toasting bread cuts glycemic response roughly in half compared to fresh bread. It also provides essential food safety timing rules to prevent Bacillus cereus toxin formation during meal prep.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(13, 'Cook, Cool, Reheat: The Power of Resistant Starch')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(13)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-14">
+        <div class="t-header">
+          <span class="t-source">Hillary Lin, MD</span>
+          <span>26:09 · #15</span>
+        </div>
+        <div class="t-title">Your Inflammation Test Is High. Are You Actually Inflamed?</div>
+        <div class="t-preview">This medical breakdown explains why elevated C-reactive protein functions as a biological reporter molecule rather than a direct vascular toxin, requiring clinicians to address upstream inflammatory drivers. It contrasts acute assay spikes with baseline high-sensitivity CRP, reviewing evidence from the Physicians&#x27; Health Study and the CANTOS trial targeting IL-1beta. The video offers valuable guidance on interpreting inflammatory lab panels without unwarranted panic.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(14, 'Your Inflammation Test Is High. Are You Actually Inflamed?')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(14)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-15">
+        <div class="t-header">
+          <span class="t-source">Money &amp; Macro</span>
+          <span>17:47 · #16</span>
+        </div>
+        <div class="t-title">How Vienna solved the housing crisis</div>
+        <div class="t-preview">This economic case study analyzes Vienna&#x27;s public housing model, where 60% of residents live in municipal or non-profit cooperative apartments paying €600 to €800 monthly while enjoying premium amenities. It traces how postwar land taxation and progressive construction levies funded massive public supply that permanently disciplined private rental markets. The piece demonstrates why aggressive public construction succeeds in keeping housing affordable where price caps alone fail.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(15, 'How Vienna solved the housing crisis')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(15)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-16">
+        <div class="t-header">
+          <span class="t-source">IBM Technology</span>
+          <span>33:07 · #17</span>
+        </div>
+        <div class="t-title">OpenAI talks GPT-6 Astra and Millenium Prize, researchers create WeWorm exploit &amp; IBM’s US Open app</div>
+        <div class="t-preview">This briefing contrasts OpenAI Astra&#x27;s $15 million compute spend across 10,000 agents to solve the Navier-Stokes equations in Lean against lightweight enterprise AI architectures. It details real-world applications including IBM&#x27;s hybrid event-stream analytics at the US Open and the zero-click WeWorm exploit in WeChat&#x27;s VoIP stack. The video clearly illustrates the trade-off between resource-heavy frontier milestones and cost-constrained production engineering.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(16, 'OpenAI talks GPT-6 Astra and Millenium Prize, researchers create WeWorm exploit &amp; IBM’s US Open app')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(16)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-17">
+        <div class="t-header">
+          <span class="t-source">Bloomberg Originals</span>
+          <span>10:24 · #18</span>
+        </div>
+        <div class="t-title">Why India Won’t Break Up With Russia</div>
+        <div class="t-preview">This geopolitical analysis explains why India maintains its long-term strategic partnership with Russia despite Western diplomatic pressure and sanctions. It documents how historical Soviet technical blueprints established India&#x27;s heavy industry and created a 48% hardware dependence in its military fleet. It also outlines the massive economic advantages India gains by importing discounted seaborne crude to secure national energy sovereignty.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(17, 'Why India Won’t Break Up With Russia')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(17)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-18">
+        <div class="t-header">
+          <span class="t-source">Patrick Boyle</span>
+          <span>32:41 · #19</span>
+        </div>
+        <div class="t-title">Why Germany Stopped Working</div>
+        <div class="t-preview">This economic analysis explains how Germany&#x27;s constitutional debt brake suspension failed to revive infrastructure because legal risk-aversion and fragmented public tenders stall execution. It demonstrates how splitting public works into microscopic bids causes projects to freeze whenever a single contractor is delayed or appeals. The video offers a sharp lesson on how prioritizing administrative compliance over iteration creates systemic economic stagnation.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(18, 'Why Germany Stopped Working')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(18)">Dismiss</button>
+        </div>
+      </div>
+
+      <div class="triage-card" id="t-card-19">
+        <div class="t-header">
+          <span class="t-source">Sandeep Swadia</span>
+          <span>19:10 · #20</span>
+        </div>
+        <div class="t-title">Once You Get Money, Upgrade These 8 Things Immediately</div>
+        <div class="t-preview">This practical framework outlines Sandeep Swadia&#x27;s 4S model—Stamina, Skills, Security, and Soul—for allocating capital toward lasting cognitive leverage rather than status symbols. It combines sleep deprivation research with corporate negotiation strategies, advocating for a six-to-nine-month BATNA fund to protect decision-making autonomy. The advice provides grounded, actionable guidance for preserving judgment and mitigating personal financial risk.</div>
+        <div class="thumb-actions">
+          <button class="btn-queue" onclick="addToQueue(19, 'Once You Get Money, Upgrade These 8 Things Immediately')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add to Commute Queue
+          </button>
+          <button class="btn-dismiss" onclick="dismissItem(19)">Dismiss</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Floating Commute Queue Action -->
+    <div class="commute-bar" onclick="startCommutePlayback()">
+      <div>
+        <div class="commute-title">▶ Play Commute Queue</div>
+        <div class="commute-sub" id="commuteCountText">3 items queued · 38m total audio</div>
+      </div>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    </div>
+
+    <!-- Tab Bar -->
+    <div class="tab-bar">
+      <div class="tab-item active">Triage</div>
+      <div class="tab-item">Channels</div>
+      <div class="tab-item">Settings</div>
+    </div>
+    <div class="home-bar"></div>
+  </div>
+
+  <script>
+    let queueCount = 3;
+    function addToQueue(idx, title) {
+      queueCount++;
+      document.getElementById('queueBadge').innerText = queueCount;
+      document.getElementById('commuteCountText').innerText = queueCount + ' items queued · ' + (queueCount * 12) + 'm audio';
+      const card = document.getElementById('t-card-' + idx);
+      card.style.transform = 'translateX(100px)';
+      card.style.opacity = '0';
+      setTimeout(() => card.style.display = 'none', 200);
+    }
+    function dismissItem(idx) {
+      const card = document.getElementById('t-card-' + idx);
+      card.style.opacity = '0';
+      setTimeout(() => card.style.display = 'none', 150);
+    }
+    function startCommutePlayback() {
+      alert('Commute playback started: Continuous queue audio streaming through headphones.');
+    }
+    function setTab(el, type) {
+      document.querySelectorAll('.triage-tab').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+    }
+  </script>
+</body>
+</html>

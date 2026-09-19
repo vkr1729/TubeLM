@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>TubeLM - Audio-First Commuter Deck</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+    :root {
+      --bg: #0c0a09;
+      --card: #1c1917;
+      --border: rgba(245, 158, 11, 0.15);
+      --amber: #f59e0b;
+      --orange: #f97316;
+      --text: #fafaf9;
+      --text-muted: #a8a29e;
+    }
+    body {
+      background: #000; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+      height: 100vh; overflow: hidden; display: flex; justify-content: center;
+    }
+    .phone {
+      width: 100%; max-width: 430px; height: 100%; background: var(--bg); display: flex; flex-direction: column;
+      position: relative; overflow: hidden;
+    }
+    .status-bar {
+      height: 48px; padding: 12px 24px 0; display: flex; justify-content: space-between; align-items: center;
+      font-size: 14px; font-weight: 600; flex-shrink: 0;
+    }
+    
+    /* Top Audio Deck */
+    .audio-hero {
+      padding: 16px 20px 20px; background: linear-gradient(180deg, #1c1917 0%, #0c0a09 100%);
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .audio-badge {
+      display: inline-flex; align-items: center; gap: 6px; background: rgba(245, 158, 11, 0.15);
+      color: var(--amber); padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; margin-bottom: 8px;
+    }
+    .track-title { font-size: 18px; font-weight: 800; line-height: 1.3; margin-bottom: 4px; }
+    .track-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+
+    /* Scrubber */
+    .scrubber-container { margin-bottom: 12px; }
+    .progress-track {
+      height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; position: relative; cursor: pointer;
+    }
+    .progress-fill { width: 35%; height: 100%; background: var(--amber); border-radius: 3px; }
+    .time-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
+    /* Large Ergonomic Touch Controls */
+    .deck-controls {
+      display: flex; justify-content: space-between; align-items: center; padding: 0 16px;
+    }
+    .ctrl-skip {
+      background: none; border: none; color: var(--text); cursor: pointer; display: flex; flex-direction: column;
+      align-items: center; font-size: 11px; font-weight: 700; gap: 2px;
+    }
+    .ctrl-play {
+      width: 62px; height: 62px; border-radius: 50%; background: var(--amber); color: #000;
+      border: none; display: flex; align-items: center; justify-content: center; cursor: pointer;
+      box-shadow: 0 8px 20px rgba(245, 158, 11, 0.35);
+    }
+
+    /* Synchronized Takeaways Feed */
+    .feed { flex: 1; overflow-y: auto; padding: 16px; -webkit-overflow-scrolling: touch; }
+    .feed::-webkit-scrollbar { display: none; }
+    .feed-header { font-size: 12px; font-weight: 800; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; letter-spacing: 0.8px; }
+
+    .chapter-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 12px 14px; margin-bottom: 10px; transition: all 0.2s;
+    }
+    .chapter-card.active {
+      border-color: var(--amber); background: rgba(245, 158, 11, 0.08);
+    }
+    .chapter-top { display: flex; justify-content: space-between; font-size: 11px; color: var(--amber); font-weight: 700; margin-bottom: 4px; }
+    .chapter-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+    .chapter-body { font-size: 12px; color: #d6d3d1; line-height: 1.4; }
+
+    .home-bar {
+      position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+      width: 136px; height: 4.5px; background: rgba(255,255,255,0.3); border-radius: 10px; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar">
+      <span>9:41</span>
+      <span style="color:var(--amber); font-weight:700;">Headphones Connected</span>
+      <span>100%</span>
+    </div>
+
+    <!-- Audio Hero Deck -->
+    <div class="audio-hero">
+      <div class="audio-badge">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+        Week of 2026-09-18 · Offline Cached
+      </div>
+      <div class="track-title" id="trackTitle">Top 20 Executive Overview</div>
+      <div class="track-sub" id="trackSub">Chapter 1 of 20: How to lose $35 Billion Dollars Betting on AI</div>
+
+      <!-- Scrubber -->
+      <div class="scrubber-container">
+        <div class="progress-track" onclick="seekAudio(event)">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="time-row">
+          <span id="curTime">05:12</span>
+          <span>14:48</span>
+        </div>
+      </div>
+
+      <!-- 56pt Large Ergonomic Controls -->
+      <div class="deck-controls">
+        <button class="ctrl-skip" onclick="skip(-15)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg>
+          -15s
+        </button>
+
+        <button class="ctrl-play" onclick="togglePlay(this)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        </button>
+
+        <button class="ctrl-skip" onclick="skip(15)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 17l5-5-5-5M6 17l5-5-5-5"/></svg>
+          +15s
+        </button>
+
+        <button class="ctrl-skip" onclick="cycleSpeed(this)">
+          <span style="font-size:14px; font-weight:800;" id="speedLabel">1.25×</span>
+          Speed
+        </button>
+      </div>
+    </div>
+
+    <!-- Synchronized Live Takeaways -->
+    <div class="feed">
+      <div class="feed-header">Synchronized Key Chapters</div>
+
+      <div class="chapter-card active" onclick="selectChapter(0, 'How to lose $35 Billion Dollars Betting on AI')">
+        <div class="chapter-top">
+          <span>CHAPTER 1 · 22:22</span>
+          <span>ColdFusion</span>
+        </div>
+        <div class="chapter-title">How to lose $35 Billion Dollars Betting on AI</div>
+        <div class="chapter-body">This breakdown details how Leopold Aschenbrenner&#x27;s Situational Awareness fund collapsed from $45 billion to $10 billion after using 400% leverage on hardware longs and software shorts. It illustrates how unhedged directional conviction and margin calls can erase capital even when betting on major technological transformations. The analysis offers a crucial case study on structural financial risk in frontier AI markets.</div>
+      </div>
+
+      <div class="chapter-card" onclick="selectChapter(1, 'What AI Researchers Saw, Before Their Demand to ‘Pace’ AI')">
+        <div class="chapter-top">
+          <span>CHAPTER 2 · 24:53</span>
+          <span>AI Explained</span>
+        </div>
+        <div class="chapter-title">What AI Researchers Saw, Before Their Demand to ‘Pace’ AI</div>
+        <div class="chapter-body">This report examines why senior OpenAI researchers began calling to pace frontier model releases based on confidential internal evaluations rather than public benchmarks. It outlines concrete technical leaps in autonomous multi-step reasoning, self-directed code execution, and autonomous cybersecurity capabilities. The video provides essential context on the growing divide between internal lab developments and public governance.</div>
+      </div>
+
+      <div class="chapter-card" onclick="selectChapter(2, 'DeepSeek’s Insane New Architecture')">
+        <div class="chapter-top">
+          <span>CHAPTER 3 · 5:11</span>
+          <span>Two Minute Papers</span>
+        </div>
+        <div class="chapter-title">DeepSeek’s Insane New Architecture</div>
+        <div class="chapter-body">This technical breakdown explains how DeepSeek 4.1 Flash achieved a 437-fold KV cache memory reduction through Context Sparse Attention and an encoder-decoder shared global memory architecture. It highlights the engineering mechanisms that slash inference serving costs while noting the trade-offs in token consumption during extended internal reasoning. This is vital viewing for developers designing scalable, low-latency LLM serving infrastructure.</div>
+      </div>
+
+      <div class="chapter-card" onclick="selectChapter(3, '407 ‒ Preventing cardiovascular and Alzheimer’s disease: lowering LDL early, APOE4, and more')">
+        <div class="chapter-top">
+          <span>CHAPTER 4 · 2:19:16</span>
+          <span>Peter Attia MD</span>
+        </div>
+        <div class="chapter-title">407 ‒ Preventing cardiovascular and Alzheimer’s disease: lowering LDL early, APOE4, and more</div>
+        <div class="chapter-body">This clinical discussion reviews Mendelian randomization data proving that lifelong early suppression of ApoB and LDL cholesterol provides superior protection against cardiovascular disease compared to late-life interventions. It highlights emerging clinical trial data for next-generation CETP inhibitors like obicetrapib, which lower LDL cholesterol by up to 50% and small dense particles by 90% without statin-related glycemic side effects. The insights establish a practical foundation for early primordial prevention.</div>
+      </div>
+
+      <div class="chapter-card" onclick="selectChapter(4, 'New Study Changes Understanding of How Heart Disease Starts')">
+        <div class="chapter-top">
+          <span>CHAPTER 5 · 9:38</span>
+          <span>Nutrition Made Simple!</span>
+        </div>
+        <div class="chapter-title">New Study Changes Understanding of How Heart Disease Starts</div>
+        <div class="chapter-body">This video highlights landmark New England Journal of Medicine findings revealing that 57% of asymptomatic adults develop active arterial plaque in peripheral vessels decades before anything appears on a coronary calcium scan. It explains why a zero coronary calcium score can provide false reassurance to younger adults and women. It also outlines actionable vascular assessment protocols like the non-invasive Ankle-Brachial Index to detect early systemic atherosclerosis.</div>
+      </div>
+
+      <div class="chapter-card" onclick="selectChapter(5, 'Silicon Valley’s Starving for Compute')">
+        <div class="chapter-top">
+          <span>CHAPTER 6 · 20:55</span>
+          <span>Asianometry</span>
+        </div>
+        <div class="chapter-title">Silicon Valley’s Starving for Compute</div>
+        <div class="chapter-body">This analysis maps the 2026 compute shortage driven by agentic AI deployment, where frontier labs command 5 gigawatts each while secondary clouds command $20 million per megawatt. It calculates the massive software revenue required to justify 40 gigawatts of planned datacenter expansion. The piece clearly explains why aggressive hardware supply responses will likely turn today&#x27;s severe shortage into a structural compute glut by late 2027.</div>
+      </div>
+
+      <div class="chapter-card" onclick="selectChapter(6, 'How China Plans to Win the Global AI Race')">
+        <div class="chapter-top">
+          <span>CHAPTER 7 · 11:54</span>
+          <span>Bloomberg Originals</span>
+        </div>
+        <div class="chapter-title">How China Plans to Win the Global AI Race</div>
+        <div class="chapter-body">This briefing documents China&#x27;s macroeconomic pivot from real estate toward open-source AI and robotics, slashing model inference costs by up to 75% compared to Western proprietary equivalents. It explains how low electricity costs and open-weight models are driving widespread adoption across developing economies, Germany, and Singapore despite chip export controls. The video provides an important strategic framework showing how price competition and mass utility can shape global technological dominance.</div>
+      </div>
+
+      <div class="chapter-card" onclick="selectChapter(7, 'Putin’s Endgame for Global Trade? | How the Melting Arctic Could Shift Power Toward Russia')">
+        <div class="chapter-top">
+          <span>CHAPTER 8 · 14:33</span>
+          <span>Think School</span>
+        </div>
+        <div class="chapter-title">Putin’s Endgame for Global Trade? | How the Melting Arctic Could Shift Power Toward Russia</div>
+        <div class="chapter-body">This geopolitical analysis explains how the melting Arctic is opening the Northern Sea Route, halving commercial shipping transit times between Shanghai and Rotterdam from 40 to 20 days. It details Russia&#x27;s dominant gatekeeper position with 40 operational icebreakers and its control over vital minerals like nickel, cobalt, and copper along the passage. The piece reveals how shifting physical trade routes can bypass historic naval choke points and reconfigure global commerce.</div>
+      </div>
+
+      <div class="chapter-card" onclick="selectChapter(8, 'Peptides with HUGE Cardiovascular Impact!')">
+        <div class="chapter-top">
+          <span>CHAPTER 9 · 11:03</span>
+          <span>Physionic</span>
+        </div>
+        <div class="chapter-title">Peptides with HUGE Cardiovascular Impact!</div>
+        <div class="chapter-body">This clinical review synthesizes evidence from six large trials demonstrating that GLP-1 receptor agonists deliver hard cardiovascular risk reductions in overweight non-diabetic populations beyond their glucose-lowering effects. It details arterial imaging data demonstrating reductions in carotid intima-media thickness and evidence of true plaque regression. The discussion provides clinicians and patients with essential mechanistic context on the vascular benefits of peptide therapies.</div>
+      </div>
+
+      <div class="chapter-card" onclick="selectChapter(9, 'What Is MLflow? Tracing AI Agents &amp; LLM Workflows')">
+        <div class="chapter-top">
+          <span>CHAPTER 10 · 9:38</span>
+          <span>IBM Technology</span>
+        </div>
+        <div class="chapter-title">What Is MLflow? Tracing AI Agents &amp; LLM Workflows</div>
+        <div class="chapter-body">This practical guide addresses the hidden failure modes of multi-agent architectures that silently pass standard HTTP 200 checks, including context overflows and cascading latencies. It demonstrates how to instrument OpenTelemetry-compatible traces and spans using MLflow to isolate broken tool calls and measure step-level latencies. It also explains how to implement LLM-as-a-judge scoring to enforce compliance and deterministic tool choices in production.</div>
+      </div>
+
+    </div>
+    <div class="home-bar"></div>
+  </div>
+
+  <script>
+    let isPlaying = true;
+    function togglePlay(btn) {
+      isPlaying = !isPlaying;
+      btn.innerHTML = isPlaying 
+        ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
+        : '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+    }
+    function skip(sec) {
+      alert('Skipped ' + sec + ' seconds');
+    }
+    function cycleSpeed(btn) {
+      const speeds = ['1.0×', '1.25×', '1.5×', '2.0×'];
+      let lbl = document.getElementById('speedLabel');
+      let idx = (speeds.indexOf(lbl.innerText) + 1) % speeds.length;
+      lbl.innerText = speeds[idx];
+    }
+    function selectChapter(idx, title) {
+      document.querySelectorAll('.chapter-card').forEach((c, i) => {
+        c.classList.toggle('active', i === idx);
+      });
+      document.getElementById('trackSub').innerText = 'Chapter ' + (idx + 1) + ' of 20: ' + title;
+    }
+  </script>
+</body>
+</html>

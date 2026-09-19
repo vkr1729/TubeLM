@@ -1,0 +1,77 @@
+name: Build TubeLM iOS (LiveContainer)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build-ipa:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode Version
+        run: sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Test TubeLM Core
+        run: |
+          cd ios
+          swift test
+
+      - name: Build TubeLM App for iOS
+        run: |
+          cd ios
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "iOS SDK path: $SDK_PATH"
+          if swift build -c release --triple arm64-apple-ios --sdk "$SDK_PATH"; then
+            echo "Successfully built for arm64-apple-ios with --triple"
+          elif swift build -c release -Xswiftc -sdk -Xswiftc "$SDK_PATH" -Xswiftc -target -Xswiftc arm64-apple-ios17.0; then
+            echo "Successfully built for arm64-apple-ios with -Xswiftc flags"
+          else
+            echo "Falling back to swift build -c release"
+            swift build -c release
+          fi
+
+      - name: Package LiveContainer IPA
+        run: |
+          mkdir -p build/Payload
+          APP_DIR="build/Payload/TubeLM.app"
+          mkdir -p "$APP_DIR"
+          cp ios/TubeLM/Info.plist "$APP_DIR/Info.plist"
+          
+          echo "Locating built TubeLMApp binary..."
+          find ios/.build -name TubeLMApp -type f || true
+          
+          BIN_PATH=$(find ios/.build -name TubeLMApp -type f -perm +111 2>/dev/null | grep -E 'arm64-apple-ios.*/release/TubeLMApp' | head -n 1 || true)
+          if [ -z "$BIN_PATH" ]; then
+            BIN_PATH=$(find ios/.build -name TubeLMApp -type f -perm +111 2>/dev/null | grep -E 'release/TubeLMApp' | head -n 1 || true)
+          fi
+          if [ -z "$BIN_PATH" ]; then
+            BIN_PATH=$(find ios/.build -name TubeLMApp -type f 2>/dev/null | head -n 1 || true)
+          fi
+          
+          if [ -z "$BIN_PATH" ] || [ ! -f "$BIN_PATH" ]; then
+            echo "::error::TubeLMApp binary not found - refusing to ship an empty IPA"
+            exit 1
+          fi
+          
+          echo "Selected binary: $BIN_PATH"
+          file "$BIN_PATH"
+          cp "$BIN_PATH" "$APP_DIR/TubeLM"
+          chmod +x "$APP_DIR/TubeLM"
+          
+          cd build && zip -qr -9 TubeLM.ipa Payload
+          echo "IPA contents:"
+          unzip -l TubeLM.ipa
+          ls -lh TubeLM.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TubeLM-LiveContainer-IPA
+          path: build/TubeLM.ipa

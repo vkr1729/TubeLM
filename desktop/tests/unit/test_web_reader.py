@@ -8,6 +8,11 @@ from web_reader import (
     generate_rss_feed,
     build_reader_site,
     _clean_video_id,
+    _make_item_id,
+    _normalize_mobile_item,
+    _normalize_mobile_channel,
+    _normalize_mobile_video,
+    _safe_int_seconds,
 )
 
 
@@ -364,6 +369,21 @@ class TestBuildReaderSite:
         assert "Linear Algebra" in content
         assert 'data-theme="light"' in content
 
+        # Verify mobile data.json export (schema_version: 1)
+        data_json = site_dir / "data.json"
+        assert data_json.exists()
+        mobile_payload = json.loads(data_json.read_text(encoding="utf-8"))
+        assert mobile_payload.get("schema_version") == 1
+        assert "run_date" in mobile_payload
+        assert "top20" in mobile_payload
+        assert "channels" in mobile_payload
+        for it in mobile_payload.get("top20", {}).get("items", []):
+            assert it.get("id")
+        for ch in mobile_payload.get("channels", []):
+            assert ch.get("id")
+            for v in ch.get("videos", []):
+                assert v.get("id")
+
     def test_read_state_embedding_and_retention(self, tmp_path, monkeypatch):
         import paths
         fake_data_dir = tmp_path / ".tubelm"
@@ -532,3 +552,80 @@ class TestVideoExtractionAndOptimization:
         assert any(i["src"] == "apple-touch-icon.png" for i in manifest["icons"])
 
 
+class TestMobileExportContract:
+    def test_make_item_id_converges_with_web_reader_keys(self):
+        assert _make_item_id({"video_id": "dQw4w9WgXcQ"}) == "dQw4w9WgXcQ"
+        assert _make_item_id({"url": "https://example.com/a"}) == "https://example.com/a"
+        long_url = "https://example.com/" + "x" * 300
+        assert len(_make_item_id({"url": long_url})) == 16
+        assert _make_item_id({"title": "Same Title"}) == _make_item_id({"title": "same title"})
+
+    def test_safe_int_seconds_never_crashes(self):
+        assert _safe_int_seconds("abc") == 0
+        assert _safe_int_seconds(None) == 0
+        assert _safe_int_seconds("42") == 42
+        assert _safe_int_seconds(7) == 7
+
+    def test_normalize_strips_producer_keys_and_maps_summary(self):
+        raw = {
+            "candidate_id": "item-0001",
+            "video_id": "dQw4w9WgXcQ",
+            "title": "T",
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "source_name": "S",
+            "source_type": "youtube",
+            "published": "2026-09-19",
+            "summary": "Sidecar summary",
+            "duration_seconds": "bad",
+        }
+        item = _normalize_mobile_item(raw, rank=1)
+        assert item["id"] == "dQw4w9WgXcQ"
+        assert item["why_it_matters"] == "Sidecar summary"
+        assert item["rank"] == 1
+        assert item["duration_seconds"] == 0
+        for leaked in ("candidate_id", "summary", "video_id", "published"):
+            assert leaked not in item
+
+    def test_normalize_channel_drops_pipeline_bloat(self):
+        raw = {
+            "id": "ch1",
+            "name": "C",
+            "category": "tech",
+            "read_minutes": "bad",
+            "summary_text": "ST",
+            "summary_audio_url": "audio/s.mp3",
+            "audio_url": "audio/a.mp3",
+            "videos": [{"title": "V", "url": "https://example.com/v",
+                        "video_id": "", "lead": "L"}],
+            "brief": [{"title": "V"}],
+            "word_count": 10,
+            "has_audio": True,
+            "audio_path": "/tmp/x.mp3",
+        }
+        ch = _normalize_mobile_channel(raw)
+        assert ch["read_minutes"] == 0
+        assert ch["videos"][0]["id"] == "https://example.com/v"
+        for leaked in ("brief", "word_count", "has_audio", "audio_path",
+                       "full_summary_html", "summary_preview"):
+            assert leaked not in ch
+
+    def test_normalize_video_drops_video_id_key(self):
+        v = _normalize_mobile_video({"title": "V", "url": "https://example.com/v",
+                                     "video_id": "dQw4w9WgXcQ"})
+        assert v["id"] == "dQw4w9WgXcQ"
+        assert "video_id" not in v
+
+    def test_run_date_never_leaks_none_string(self, tmp_path, monkeypatch):
+        for _k in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_DOMAIN"):
+            monkeypatch.delenv(_k, raising=False)
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "1")
+        summaries_dir = tmp_path / "summaries"
+        audio_dir = tmp_path / "audio"
+        site_dir = tmp_path / "site"
+        summaries_dir.mkdir()
+        audio_dir.mkdir()
+        sources_file = tmp_path / "sources.json"
+        sources_file.write_text("[]")
+        build_reader_site(summaries_dir, audio_dir, site_dir, sources_file)
+        payload = json.loads((site_dir / "data.json").read_text(encoding="utf-8"))
+        assert payload["run_date"] != "None"
