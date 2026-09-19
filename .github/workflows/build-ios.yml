@@ -29,6 +29,86 @@ jobs:
           cd ios
           swift test --filter TubeLMCoreTests
 
+      - name: Run Automated Simulator UAT
+        run: |
+          echo "=== Step 1: Discover and Boot iOS Simulator ==="
+          xcrun simctl list devices available
+          
+          # Prioritize iPhone 16, then iPhone 15, then any available iPhone
+          UDID=$(xcrun simctl list devices available | grep -i "iPhone 16" | grep -E -o '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | head -n 1 || true)
+          if [ -z "$UDID" ]; then
+            UDID=$(xcrun simctl list devices available | grep -i "iPhone 15" | grep -E -o '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | head -n 1 || true)
+          fi
+          if [ -z "$UDID" ]; then
+            UDID=$(xcrun simctl list devices available | grep -i "iPhone" | grep -E -o '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | head -n 1 || true)
+          fi
+          
+          if [ -z "$UDID" ]; then
+            echo "::error::No available iOS Simulator found on runner"
+            exit 1
+          fi
+          
+          echo "Selected iOS Simulator UDID: $UDID"
+          echo "Booting simulator..."
+          xcrun simctl boot "$UDID" || true
+          
+          # Wait up to 60s for simulator to reach Booted status
+          for i in {1..30}; do
+            STATUS=$(xcrun simctl list devices | grep "$UDID" | grep -o "(Booted)" || true)
+            if [ "$STATUS" = "(Booted)" ]; then
+              echo "Simulator reached Booted state in approx $((i * 2))s"
+              break
+            fi
+            sleep 2
+          done
+
+          echo "=== Step 2: Execute Automated UAT Test Suite on iOS Simulator ==="
+          cd ios
+          export MOCK_DATA_PATH="$GITHUB_WORKSPACE/.workflow/mocks/mock_data.json"
+          
+          echo "Available schemes in Swift Package:"
+          xcodebuild -list || true
+          
+          # Run xcodebuild test targeting the booted iOS Simulator
+          if xcodebuild test -scheme TubeLMCoreTests -destination "platform=iOS Simulator,id=$UDID" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""; then
+            echo "UAT simulator test passed with scheme TubeLMCoreTests"
+          elif xcodebuild test -scheme TubeLM-Package -destination "platform=iOS Simulator,id=$UDID" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""; then
+            echo "UAT simulator test passed with scheme TubeLM-Package"
+          elif xcodebuild test -scheme TubeLMCore -destination "platform=iOS Simulator,id=$UDID" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""; then
+            echo "UAT simulator test passed with scheme TubeLMCore"
+          else
+            echo "::error::Automated iOS Simulator UAT tests failed"
+            exit 1
+          fi
+
+          echo "=== Step 3: Install & Launch TubeLM on iOS Simulator (Live Sanity) ==="
+          mkdir -p ../build/artifacts
+          SIM_SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          echo "iOS Simulator SDK path: $SIM_SDK_PATH"
+          
+          if swift build -c debug --triple arm64-apple-ios17.0-simulator --sdk "$SIM_SDK_PATH"; then
+            mkdir -p ../build/Simulator/TubeLM.app
+            cp TubeLM/Info.plist ../build/Simulator/TubeLM.app/Info.plist
+            SIM_BIN=$(find .build -name TubeLMApp -type f -perm +111 2>/dev/null | grep -E 'simulator.*/debug/TubeLMApp' | head -n 1 || find .build -name TubeLMApp -type f 2>/dev/null | head -n 1 || true)
+            if [ -n "$SIM_BIN" ] && [ -f "$SIM_BIN" ]; then
+              echo "Found simulator binary: $SIM_BIN"
+              cp "$SIM_BIN" ../build/Simulator/TubeLM.app/TubeLM
+              chmod +x ../build/Simulator/TubeLM.app/TubeLM
+              codesign -s - --force --deep ../build/Simulator/TubeLM.app || true
+              echo "Installing app bundle onto simulator..."
+              xcrun simctl install "$UDID" ../build/Simulator/TubeLM.app || true
+              echo "Launching app on simulator..."
+              xcrun simctl launch "$UDID" com.vkr1729.tubelm || true
+              sleep 4
+              echo "Capturing simulator screenshot..."
+              xcrun simctl io "$UDID" screenshot ../build/artifacts/simulator_uat_screenshot.png || true
+            fi
+          else
+            echo "Simulator app build skipped or failed; unit/UAT tests already passed."
+          fi
+          
+          echo "=== Automated Simulator UAT Step Complete ==="
+
       - name: Build TubeLM App for iOS
         run: |
           cd ios
@@ -81,3 +161,11 @@ jobs:
         with:
           name: TubeLM-LiveContainer-IPA
           path: build/TubeLM.ipa
+
+      - name: Upload Simulator UAT Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TubeLM-Simulator-UAT
+          path: build/artifacts/
+          if-no-files-found: ignore

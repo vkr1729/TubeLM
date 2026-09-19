@@ -4,20 +4,46 @@ import XCTest
 final class TubeLMCoreTests: XCTestCase {
 
     func testDigestFeedDecodingFromMockData() throws {
-        // Locate the mock_data.json in the repository
-        let currentDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        var mockDataUrl = currentDir.appendingPathComponent(".workflow/mocks/mock_data.json")
-        if !FileManager.default.fileExists(atPath: mockDataUrl.path) {
-            mockDataUrl = currentDir.appendingPathComponent("../.workflow/mocks/mock_data.json")
+        var data: Data?
+        #if SWIFT_PACKAGE
+        if let bundleUrl = Bundle.module.url(forResource: "mock_data", withExtension: "json") ??
+                           Bundle.module.url(forResource: "mock_data", withExtension: "json", subdirectory: "Resources") {
+            data = try? Data(contentsOf: bundleUrl)
+        }
+        #endif
+
+        if data == nil {
+            if let bundleUrl = Bundle(for: Self.self).url(forResource: "mock_data", withExtension: "json") ??
+                               Bundle(for: Self.self).url(forResource: "mock_data", withExtension: "json", subdirectory: "Resources") {
+                data = try? Data(contentsOf: bundleUrl)
+            }
         }
 
-        guard FileManager.default.fileExists(atPath: mockDataUrl.path) else {
-            XCTFail("mock_data.json not found at \(mockDataUrl.path)")
+        if data == nil, let envPath = ProcessInfo.processInfo.environment["MOCK_DATA_PATH"], FileManager.default.fileExists(atPath: envPath) {
+            data = try? Data(contentsOf: URL(fileURLWithPath: envPath))
+        }
+
+        if data == nil {
+            var searchDirs: [URL] = [
+                URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
+                URL(fileURLWithPath: FileManager.default.currentDirectoryPath).deletingLastPathComponent(),
+                URL(fileURLWithPath: FileManager.default.currentDirectoryPath).deletingLastPathComponent().deletingLastPathComponent()
+            ]
+            for dir in searchDirs {
+                let candidate = dir.appendingPathComponent(".workflow/mocks/mock_data.json")
+                if FileManager.default.fileExists(atPath: candidate.path) {
+                    data = try? Data(contentsOf: candidate)
+                    if data != nil { break }
+                }
+            }
+        }
+
+        guard let validData = data else {
+            XCTFail("mock_data.json could not be loaded via bundle, environment, or file path")
             return
         }
 
-        let data = try Data(contentsOf: mockDataUrl)
-        let feed = try JSONDecoder().decode(DigestFeed.self, from: data)
+        let feed = try JSONDecoder().decode(DigestFeed.self, from: validData)
 
         XCTAssertEqual(feed.schemaVersion, 1)
         XCTAssertEqual(feed.top20.items.count, 20)

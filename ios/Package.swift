@@ -10,7 +10,10 @@ var targets: [Target] = [
     .testTarget(
         name: "TubeLMCoreTests",
         dependencies: ["TubeLMCore"],
-        path: "Tests/TubeLMCoreTests"
+        path: "Tests/TubeLMCoreTests",
+        resources: [
+            .copy("Resources/mock_data.json")
+        ]
     ),
 ]
 
