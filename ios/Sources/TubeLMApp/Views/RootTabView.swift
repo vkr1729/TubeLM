@@ -71,6 +71,7 @@ public struct RootTabView: View {
                     }
                 }
                 .navigationTitle(currentTitle)
+                #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -80,6 +81,16 @@ public struct RootTabView: View {
                         .accessibilityLabel("Sync settings")
                     }
                 }
+                #else
+                .toolbar {
+                    ToolbarItem(placement: .automatic) {
+                        Button(action: { isShowingSyncSettings = true }) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        .accessibilityLabel("Sync settings")
+                    }
+                }
+                #endif
             }
 
             // Floating Sticky Mini-Player
@@ -423,7 +434,9 @@ private struct SyncSettingsSheet: View {
                 }
             }
             .navigationTitle("Cloud Sync")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

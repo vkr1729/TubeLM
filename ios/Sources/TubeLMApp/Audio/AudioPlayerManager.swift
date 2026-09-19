@@ -29,11 +29,13 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self = self else { return }
-            guard let finished = notification.object as? AVPlayerItem,
-                  finished == self.player?.currentItem else { return }
-            self.isPlaying = false
-            self.updateNowPlayingInfo()
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                guard let finished = notification.object as? AVPlayerItem,
+                      finished == self.player?.currentItem else { return }
+                self.isPlaying = false
+                self.updateNowPlayingInfo()
+            }
         }
     }
 
@@ -161,16 +163,18 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         guard timeObserverToken == nil else { return }
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserverToken = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self = self else { return }
-            let seconds = time.seconds
-            self.currentTime = seconds.isFinite ? max(0, seconds) : 0
-            if let currentItem = self.player?.currentItem {
-                let total = currentItem.duration.seconds
-                if total.isFinite && total > 0 {
-                    self.duration = total
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                let seconds = time.seconds
+                self.currentTime = seconds.isFinite ? max(0, seconds) : 0
+                if let currentItem = self.player?.currentItem {
+                    let total = currentItem.duration.seconds
+                    if total.isFinite && total > 0 {
+                        self.duration = total
+                    }
                 }
+                self.updateNowPlayingInfo()
             }
-            self.updateNowPlayingInfo()
         }
     }
 
