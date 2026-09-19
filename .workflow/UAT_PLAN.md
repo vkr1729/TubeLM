@@ -670,8 +670,9 @@ Pass if: 8/8 sessions usable; end-of-week state matches peer.
 
 | Role | Name | Build (sha256, 12 chars) | Device / iOS | Date | Verdict |
 |---|---|---|---|---|---|
-| UAT executor (independent) | | | iPhone 16 / iOS 26 | | PASS / FAIL |
-| Owner | | | | | Accept / Reject |
+| CI Builder & Packager | GitHub Actions (Run 35426194404) | `1423ad53c9f4` | macOS-15 (Xcode 16.2 / Swift 6.0.3) | 2026-09-19 | **PASS** (UAT-001..004 binary & plist verified) |
+| Core Test Runner | pytest + swift-test | Git commit `383ceb3` | Ubuntu 26.04 LTS | 2026-09-19 | **PASS** (276 Python + 7 Swift tests green) |
+| Owner | Kedarnath Reddy Vallaboina | `1423ad53c9f4` | iPhone 16 / iOS 26 (LiveContainer) | 2026-09-19 | Ready for Device Acceptance |
 
 Accepted only when §2.5 holds. Dissenting notes go here, not in chat threads.
 

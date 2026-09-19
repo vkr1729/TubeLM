@@ -46,4 +46,4 @@ HANDOFF_REVIEW_PROMPT.md
 .commandcode/
 .kimchi/
 .playwright-mcp/
-
+dist_ios/
