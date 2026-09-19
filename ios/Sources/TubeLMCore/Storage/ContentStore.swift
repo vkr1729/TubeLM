@@ -59,9 +59,36 @@ public actor ContentStore {
     // MARK: - Feed Cache
 
     public func loadCachedFeed() throws -> DigestFeed? {
-        guard FileManager.default.fileExists(atPath: feedCacheFile.path) else { return nil }
-        let data = try Data(contentsOf: feedCacheFile)
-        return try JSONDecoder().decode(DigestFeed.self, from: data)
+        if FileManager.default.fileExists(atPath: feedCacheFile.path) {
+            let data = try Data(contentsOf: feedCacheFile)
+            return try JSONDecoder().decode(DigestFeed.self, from: data)
+        }
+
+        // Fallback to bundled seed feed on initial launch
+        #if SWIFT_PACKAGE
+        if let bundleUrl = Bundle.module.url(forResource: "data", withExtension: "json") ??
+                           Bundle.module.url(forResource: "data", withExtension: "json", subdirectory: "Resources") {
+            if let data = try? Data(contentsOf: bundleUrl),
+               let feed = try? JSONDecoder().decode(DigestFeed.self, from: data) {
+                try? saveFeed(feed)
+                return feed
+            }
+        }
+        #endif
+
+        let mainCandidates = [
+            Bundle.main.url(forResource: "data", withExtension: "json"),
+            Bundle.main.url(forResource: "mock_data", withExtension: "json")
+        ]
+        for url in mainCandidates.compactMap({ $0 }) {
+            if let data = try? Data(contentsOf: url),
+               let feed = try? JSONDecoder().decode(DigestFeed.self, from: data) {
+                try? saveFeed(feed)
+                return feed
+            }
+        }
+
+        return nil
     }
 
     public func saveFeed(_ feed: DigestFeed) throws {

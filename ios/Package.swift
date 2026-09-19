@@ -5,7 +5,10 @@ var targets: [Target] = [
     .target(
         name: "TubeLMCore",
         dependencies: [],
-        path: "Sources/TubeLMCore"
+        path: "Sources/TubeLMCore",
+        resources: [
+            .copy("Resources/data.json")
+        ]
     ),
     .testTarget(
         name: "TubeLMCoreTests",

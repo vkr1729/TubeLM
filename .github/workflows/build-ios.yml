@@ -86,6 +86,7 @@ jobs:
           if swift build -c debug --triple arm64-apple-ios17.0-simulator --sdk "$SIM_SDK_PATH"; then
             mkdir -p ../build/Simulator/TubeLM.app
             cp TubeLM/Info.plist ../build/Simulator/TubeLM.app/Info.plist
+            cp ../.workflow/mocks/mock_data.json ../build/Simulator/TubeLM.app/data.json
             SIM_BIN=$(find .build -name TubeLMApp -type f -perm +111 2>/dev/null | grep -E 'simulator.*/debug/TubeLMApp' | head -n 1 || find .build -name TubeLMApp -type f 2>/dev/null | head -n 1 || true)
             if [ -n "$SIM_BIN" ] && [ -f "$SIM_BIN" ]; then
               echo "Found simulator binary: $SIM_BIN"
@@ -96,7 +97,7 @@ jobs:
               xcrun simctl install "$UDID" ../build/Simulator/TubeLM.app || true
               echo "Launching app on simulator..."
               xcrun simctl launch "$UDID" com.vkr1729.tubelm || true
-              sleep 4
+              sleep 6
               echo "Capturing simulator screenshot..."
               xcrun simctl io "$UDID" screenshot ../build/artifacts/simulator_uat_screenshot.png || true
             fi
@@ -126,6 +127,7 @@ jobs:
           APP_DIR="build/Payload/TubeLM.app"
           mkdir -p "$APP_DIR"
           cp ios/TubeLM/Info.plist "$APP_DIR/Info.plist"
+          cp .workflow/mocks/mock_data.json "$APP_DIR/data.json"
           
           echo "Locating built TubeLMApp binary..."
           find ios/.build -name TubeLMApp -type f || true
