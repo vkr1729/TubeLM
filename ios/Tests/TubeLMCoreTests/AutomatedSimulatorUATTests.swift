@@ -140,6 +140,56 @@ final class AutomatedSimulatorUATTests: XCTestCase {
         XCTAssertFalse(afterRemove.contains(where: { $0.id == "bm_1" }))
     }
 
+    /// UAT-024: Cloudflare CRDT bookmark synchronization, LWW timestamps, and tombstone resolution
+    func test_UAT024_BookmarkCRDTSyncAndTombstoneResolution() async throws {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("TubeLM_UAT_BMSync_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let store = ContentStore(baseDirectory: tempDir)
+        let now = Date().timeIntervalSince1970 * 1000
+
+        // 1. Local device saves bookmark bm_1
+        let bm1 = FeedItem(id: "bm_1", rank: 1, title: "Bookmark 1", sourceName: "Source 1")
+        try await store.saveBookmark(bm1)
+
+        let localStates = await store.loadBookmarkStates()
+        XCTAssertGreaterThan(localStates["bm_1"] ?? 0, 0, "Bookmark save must record positive timestamp")
+
+        // 2. Remote peer adds bookmark bm_2 at t = now + 1000
+        let bm2 = FeedItem(id: "bm_2", rank: 2, title: "Bookmark 2", sourceName: "Source 2")
+        let merged1 = try await store.applyRemoteBookmarks(
+            remoteBookmarks: [bm2],
+            remoteStates: ["bm_2": now + 1000]
+        )
+        XCTAssertEqual(merged1.count, 2, "Merged bookmarks must contain both bm_1 and bm_2")
+        XCTAssertEqual(merged1.map { $0.id }, ["bm_2", "bm_1"], "Bookmarks must be ordered by timestamp descending")
+
+        // 3. Local device removes bookmark bm_1 -> tombstone
+        try await store.removeBookmark(id: "bm_1")
+        let statesAfterDelete = await store.loadBookmarkStates()
+        XCTAssertLessThan(statesAfterDelete["bm_1"] ?? 0, 0, "Unbookmarking must record negative tombstone")
+        let bookmarksAfterDelete = await store.loadBookmarks()
+        XCTAssertEqual(bookmarksAfterDelete.count, 1)
+        XCTAssertFalse(bookmarksAfterDelete.contains(where: { $0.id == "bm_1" }))
+
+        // 4. Stale peer attempts to re-push bm_1 with older timestamp
+        let mergedStale = try await store.applyRemoteBookmarks(
+            remoteBookmarks: [bm1],
+            remoteStates: ["bm_1": now]
+        )
+        XCTAssertEqual(mergedStale.count, 1, "Stale push must not resurrect deleted bookmark")
+        XCTAssertFalse(mergedStale.contains(where: { $0.id == "bm_1" }))
+
+        // 5. Newer remote peer explicitly re-bookmarks bm_1 with fresher timestamp
+        let mergedResurrect = try await store.applyRemoteBookmarks(
+            remoteBookmarks: [bm1],
+            remoteStates: ["bm_1": now + 10000]
+        )
+        XCTAssertEqual(mergedResurrect.count, 2, "Fresher intent must resurrect bookmark")
+        XCTAssertTrue(mergedResurrect.contains(where: { $0.id == "bm_1" }))
+    }
+
     // MARK: - S4: Commute Queue Acceptance
 
     /// UAT-026 & UAT-029: Commute Queue operations, duplicate prevention, and reorder safety

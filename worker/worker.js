@@ -24,6 +24,8 @@ const MAX_PAYLOAD_BYTES = 1024 * 1024; // 1 MiB per sync push
 const MAX_ITEM_STATES = 5000;
 const MAX_ARRAY_IDS = 5000;
 const MAX_ID_LENGTH = 256;
+const MAX_BOOKMARKS = 1000;
+const MAX_BOOKMARK_STATES = 5000;
 const RATE_LIMIT_MAX = 60; // requests per window per client IP (best-effort)
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const DO_RATE_LIMIT_MAX = 240; // pushes per window per sync key (exact, in-DO)
@@ -185,6 +187,54 @@ function capStates(states, limit) {
   return capped;
 }
 
+function sanitizeBookmarkItem(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  if (typeof item.id !== 'string' || !item.id || item.id.length > MAX_ID_LENGTH) return null;
+  if (CONTROL_CHARS_RE.test(item.id)) return null;
+
+  const clean = {
+    id: item.id,
+    title: (typeof item.title === 'string' ? item.title.slice(0, 500) : ''),
+    source_name: (typeof item.source_name === 'string' ? item.source_name.slice(0, 256) : ''),
+    source_type: (typeof item.source_type === 'string' ? item.source_type.slice(0, 64) : 'youtube'),
+  };
+
+  if (typeof item.rank === 'number' && Number.isFinite(item.rank)) {
+    clean.rank = Math.floor(item.rank);
+  }
+  if (typeof item.duration === 'string') {
+    clean.duration = item.duration.slice(0, 64);
+  }
+  if (typeof item.duration_seconds === 'number' && Number.isFinite(item.duration_seconds)) {
+    clean.duration_seconds = Math.floor(item.duration_seconds);
+  }
+  if (typeof item.why_it_matters === 'string') {
+    clean.why_it_matters = item.why_it_matters.slice(0, 2000);
+  }
+  if (typeof item.url === 'string') {
+    clean.url = item.url.slice(0, 2048);
+  }
+  if (typeof item.audio_url === 'string') {
+    clean.audio_url = item.audio_url.slice(0, 2048);
+  }
+  return clean;
+}
+
+function sanitizeBookmarksArray(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const clean = [];
+  for (const raw of value) {
+    const item = sanitizeBookmarkItem(raw);
+    if (!item) continue;
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    clean.push(item);
+    if (clean.length >= MAX_BOOKMARKS) break;
+  }
+  return clean;
+}
+
 // ── Shared merge (single-fetch; used by the DO and the direct fallback) ─────
 function mergeSyncState(existing, payload, nowMs) {
   const incomingStates = sanitizeItemStates(payload.item_states);
@@ -240,10 +290,64 @@ function mergeSyncState(existing, payload, nowMs) {
     .filter((id) => (mergedStates[id] === undefined || mergedStates[id] > 0))
     .slice(0, MAX_ARRAY_IDS);
 
+  // ── Bookmarks CRDT Merge (LWW signed timestamps & tombstones) ───────────────
+  const hasIncomingBookmarkStates = payload.bookmark_states && typeof payload.bookmark_states === 'object' && !Array.isArray(payload.bookmark_states);
+  const hasIncomingBookmarks = Array.isArray(payload.bookmarks);
+
+  const incomingBookmarkStates = hasIncomingBookmarkStates ? sanitizeItemStates(payload.bookmark_states) : {};
+  const incomingBookmarks = hasIncomingBookmarks ? sanitizeBookmarksArray(payload.bookmarks) : [];
+
+  let existingBookmarkStates = {};
+  let existingBookmarks = [];
+  if (existing) {
+    if (existing.bookmark_states && typeof existing.bookmark_states === 'object') {
+      for (const [key, ts] of Object.entries(existing.bookmark_states)) {
+        if (typeof ts === 'number' && Number.isFinite(ts)) existingBookmarkStates[key] = ts;
+      }
+    }
+    existingBookmarks = sanitizeBookmarksArray(existing.bookmarks);
+  }
+
+  const mergedBookmarkStates = { ...existingBookmarkStates };
+  for (const [key, ts] of Object.entries(incomingBookmarkStates)) {
+    const cur = mergedBookmarkStates[key] || 0;
+    if (Math.abs(ts) >= Math.abs(cur)) {
+      mergedBookmarkStates[key] = ts;
+    }
+  }
+
+  incomingBookmarks.forEach((item) => {
+    if (mergedBookmarkStates[item.id] === undefined) mergedBookmarkStates[item.id] = nowMs;
+  });
+  existingBookmarks.forEach((item) => {
+    if (mergedBookmarkStates[item.id] === undefined) mergedBookmarkStates[item.id] = nowMs;
+  });
+
+  const itemsMap = new Map();
+  for (const item of existingBookmarks) {
+    itemsMap.set(item.id, item);
+  }
+  for (const item of incomingBookmarks) {
+    itemsMap.set(item.id, item);
+  }
+
+  const mergedBookmarks = [];
+  for (const [id, item] of itemsMap.entries()) {
+    const ts = mergedBookmarkStates[id];
+    if (ts !== undefined && ts > 0) {
+      mergedBookmarks.push(item);
+    }
+  }
+
+  mergedBookmarks.sort((a, b) => (mergedBookmarkStates[b.id] || 0) - (mergedBookmarkStates[a.id] || 0));
+  const cappedBookmarks = mergedBookmarks.slice(0, MAX_BOOKMARKS);
+
   return {
     read_ids: mergedReadIds,
     top20_read: mergedTop20,
     item_states: capStates(mergedStates, MAX_ITEM_STATES),
+    bookmarks: cappedBookmarks,
+    bookmark_states: capStates(mergedBookmarkStates, MAX_BOOKMARK_STATES),
     updated_at: new Date(nowMs).toISOString(),
   };
 }
@@ -422,6 +526,8 @@ export default {
             read_ids: [],
             top20_read: [],
             item_states: {},
+            bookmarks: [],
+            bookmark_states: {},
             updated_at: null,
             message: 'No remote state yet for this key',
           }, 200, origin, env);
@@ -430,6 +536,8 @@ export default {
           read_ids: Array.isArray(data.read_ids) ? data.read_ids : [],
           top20_read: Array.isArray(data.top20_read) ? data.top20_read : [],
           item_states: (data.item_states && typeof data.item_states === 'object') ? data.item_states : {},
+          bookmarks: Array.isArray(data.bookmarks) ? sanitizeBookmarksArray(data.bookmarks) : [],
+          bookmark_states: (data.bookmark_states && typeof data.bookmark_states === 'object') ? data.bookmark_states : {},
           updated_at: data.updated_at || null,
         }, 200, origin, env);
       } catch (err) {

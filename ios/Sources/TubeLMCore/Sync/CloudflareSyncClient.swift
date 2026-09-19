@@ -7,17 +7,29 @@ public struct SyncPayload: Codable, Sendable {
     public let readIds: [String]
     public let top20Read: [String]
     public let itemStates: [String: Double]
+    public let bookmarks: [FeedItem]
+    public let bookmarkStates: [String: Double]
 
     enum CodingKeys: String, CodingKey {
         case readIds = "read_ids"
         case top20Read = "top20_read"
         case itemStates = "item_states"
+        case bookmarks
+        case bookmarkStates = "bookmark_states"
     }
 
-    public init(readIds: [String], top20Read: [String], itemStates: [String: Double]) {
+    public init(
+        readIds: [String],
+        top20Read: [String],
+        itemStates: [String: Double],
+        bookmarks: [FeedItem] = [],
+        bookmarkStates: [String: Double] = [:]
+    ) {
         self.readIds = readIds
         self.top20Read = top20Read
         self.itemStates = itemStates
+        self.bookmarks = bookmarks
+        self.bookmarkStates = bookmarkStates
     }
 }
 
@@ -26,6 +38,8 @@ public struct SyncResponse: Codable, Sendable {
     public let readIds: [String]
     public let top20Read: [String]
     public let itemStates: [String: Double]
+    public let bookmarks: [FeedItem]
+    public let bookmarkStates: [String: Double]
     public let updatedAt: String?
     public let message: String?
 
@@ -34,6 +48,8 @@ public struct SyncResponse: Codable, Sendable {
         case readIds = "read_ids"
         case top20Read = "top20_read"
         case itemStates = "item_states"
+        case bookmarks
+        case bookmarkStates = "bookmark_states"
         case updatedAt = "updated_at"
         case message
     }
@@ -44,15 +60,25 @@ public struct SyncResponse: Codable, Sendable {
         self.readIds = try c.decodeIfPresent([String].self, forKey: .readIds) ?? []
         self.top20Read = try c.decodeIfPresent([String].self, forKey: .top20Read) ?? []
         self.itemStates = try c.decodeIfPresent([String: Double].self, forKey: .itemStates) ?? [:]
+        self.bookmarks = try c.decodeIfPresent([FeedItem].self, forKey: .bookmarks) ?? []
+        self.bookmarkStates = try c.decodeIfPresent([String: Double].self, forKey: .bookmarkStates) ?? [:]
         self.updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
         self.message = try c.decodeIfPresent(String.self, forKey: .message)
     }
 
-    public init(readIds: [String] = [], top20Read: [String] = [], itemStates: [String: Double] = [:]) {
+    public init(
+        readIds: [String] = [],
+        top20Read: [String] = [],
+        itemStates: [String: Double] = [:],
+        bookmarks: [FeedItem] = [],
+        bookmarkStates: [String: Double] = [:]
+    ) {
         self.ok = nil
         self.readIds = readIds
         self.top20Read = top20Read
         self.itemStates = itemStates
+        self.bookmarks = bookmarks
+        self.bookmarkStates = bookmarkStates
         self.updatedAt = nil
         self.message = nil
     }
@@ -133,12 +159,24 @@ public actor CloudflareSyncClient {
         return try decodeResponse(data)
     }
 
-    public func pushLocalMutations(readIds: [String], top20Read: [String], itemStates: [String: Double]) async throws -> SyncResponse? {
+    public func pushLocalMutations(
+        readIds: [String],
+        top20Read: [String],
+        itemStates: [String: Double],
+        bookmarks: [FeedItem] = [],
+        bookmarkStates: [String: Double] = [:]
+    ) async throws -> SyncResponse? {
         guard isConfigured else { return nil }
         var request = authorizedRequest(method: "POST")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
-            SyncPayload(readIds: readIds, top20Read: top20Read, itemStates: itemStates)
+            SyncPayload(
+                readIds: readIds,
+                top20Read: top20Read,
+                itemStates: itemStates,
+                bookmarks: bookmarks,
+                bookmarkStates: bookmarkStates
+            )
         )
         let data = try await perform(request)
         return try decodeResponse(data)

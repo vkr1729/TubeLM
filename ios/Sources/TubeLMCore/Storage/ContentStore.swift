@@ -3,6 +3,7 @@ import Foundation
 public actor ContentStore {
     public static let maxReadIDs = 5000
     public static let maxItemStates = 5000
+    public static let maxBookmarkStates = 5000
 
     private let baseDirectory: URL
     private let cacheDirectory: URL
@@ -11,6 +12,7 @@ public actor ContentStore {
     private let readStateFile: URL
     private let itemStatesFile: URL
     private let bookmarksFile: URL
+    private let bookmarkStatesFile: URL
     private let metaFile: URL
 
     public struct StoreMeta: Codable, Sendable {
@@ -40,6 +42,7 @@ public actor ContentStore {
         self.readStateFile = cacheDirectory.appendingPathComponent("read_state.json")
         self.itemStatesFile = cacheDirectory.appendingPathComponent("item_states.json")
         self.bookmarksFile = pinnedDirectory.appendingPathComponent("bookmarks.json")
+        self.bookmarkStatesFile = pinnedDirectory.appendingPathComponent("bookmark_states.json")
         self.metaFile = cacheDirectory.appendingPathComponent("meta.json")
 
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
@@ -200,15 +203,51 @@ public actor ContentStore {
         return items
     }
 
+    public func loadBookmarkStates() -> [String: Double] {
+        if FileManager.default.fileExists(atPath: bookmarkStatesFile.path),
+           let data = try? Data(contentsOf: bookmarkStatesFile),
+           let decoded = try? JSONDecoder().decode([String: Double].self, from: data) {
+            return decoded.filter { _, ts in ts.isFinite }
+        }
+        // Seed from existing bookmarks if states file does not exist yet
+        let existing = loadBookmarks()
+        guard !existing.isEmpty else { return [:] }
+        let now = Date().timeIntervalSince1970 * 1000
+        var seeded: [String: Double] = [:]
+        for item in existing {
+            seeded[item.id] = now
+        }
+        return seeded
+    }
+
+    public func saveBookmarkStates(_ states: [String: Double]) throws {
+        let finite = states.filter { _, ts in ts.isFinite }
+        let capped: [String: Double]
+        if finite.count > Self.maxBookmarkStates {
+            var kept = [String: Double](minimumCapacity: Self.maxBookmarkStates)
+            for (key, value) in finite.sorted(by: { abs($0.value) > abs($1.value) }).prefix(Self.maxBookmarkStates) {
+                kept[key] = value
+            }
+            capped = kept
+        } else {
+            capped = finite
+        }
+        let data = try JSONEncoder().encode(capped)
+        try atomicWrite(data: data, to: bookmarkStatesFile)
+    }
+
     public func saveBookmark(_ item: FeedItem) throws {
         var current = loadBookmarks()
-        if !current.contains(where: { $0.id == item.id }) {
-            current.insert(item, at: 0)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = .prettyPrinted
-            let data = try encoder.encode(current)
-            try atomicWrite(data: data, to: bookmarksFile)
-        }
+        current.removeAll(where: { $0.id == item.id })
+        current.insert(item, at: 0)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        let data = try encoder.encode(current)
+        try atomicWrite(data: data, to: bookmarksFile)
+
+        var states = loadBookmarkStates()
+        states[item.id] = Date().timeIntervalSince1970 * 1000
+        try saveBookmarkStates(states)
     }
 
     public func removeBookmark(id: String) throws {
@@ -218,6 +257,52 @@ public actor ContentStore {
         encoder.outputFormatting = .prettyPrinted
         let data = try encoder.encode(current)
         try atomicWrite(data: data, to: bookmarksFile)
+
+        var states = loadBookmarkStates()
+        states[id] = -Date().timeIntervalSince1970 * 1000
+        try saveBookmarkStates(states)
+    }
+
+    /// Merges remote bookmarks and bookmark states into local storage using LWW tombstones.
+    public func applyRemoteBookmarks(remoteBookmarks: [FeedItem], remoteStates: [String: Double]) throws -> [FeedItem] {
+        var localStates = loadBookmarkStates()
+        for (id, ts) in remoteStates {
+            guard ts.isFinite else { continue }
+            let cur = localStates[id] ?? 0
+            if abs(ts) >= abs(cur) {
+                localStates[id] = ts
+            }
+        }
+
+        var itemsMap = [String: FeedItem]()
+        for item in loadBookmarks() {
+            itemsMap[item.id] = item
+            if localStates[item.id] == nil {
+                localStates[item.id] = Date().timeIntervalSince1970 * 1000
+            }
+        }
+        for item in remoteBookmarks {
+            itemsMap[item.id] = item
+            if localStates[item.id] == nil {
+                localStates[item.id] = Date().timeIntervalSince1970 * 1000
+            }
+        }
+        try saveBookmarkStates(localStates)
+
+        var activeBookmarks: [FeedItem] = []
+        for (id, item) in itemsMap {
+            if let ts = localStates[id], ts > 0 {
+                activeBookmarks.append(item)
+            }
+        }
+        activeBookmarks.sort { (localStates[$0.id] ?? 0) > (localStates[$1.id] ?? 0) }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        let data = try encoder.encode(activeBookmarks)
+        try atomicWrite(data: data, to: bookmarksFile)
+
+        return activeBookmarks
     }
 
     // MARK: - Meta & ETag

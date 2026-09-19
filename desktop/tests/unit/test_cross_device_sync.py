@@ -633,3 +633,117 @@ def test_reader_sanitizes_untrusted_urls_and_handler_args():
     process.stdout.write('OK_READER_ESC');
     """
     assert "OK_READER_ESC" in _run_node_script(node_script)
+
+
+def test_worker_bookmark_crdt_sync_and_tombstones():
+    """Verify that bookmarks sync across devices with LWW timestamps and tombstones."""
+    worker_path = Path(__file__).resolve().parents[3] / "worker" / "worker.js"
+    assert worker_path.exists()
+
+    node_script = """
+    import('./worker/worker.js').then(async (m) => {
+      const worker = m.default;
+      const storage = new Map();
+      const mockR2 = {
+        async get(key) {
+          if (!storage.has(key)) return null;
+          const data = storage.get(key);
+          return { json: async () => JSON.parse(data), text: async () => data };
+        },
+        async put(key, value) {
+          storage.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+        }
+      };
+      const env = { SYNC_BUCKET: mockR2 };
+      const AUTH = { 'Content-Type': 'application/json', 'X-Sync-Key': 'bookmark-sync-passphrase-01' };
+
+      // 1. Device 1 saves bookmark bm_1 at t=1000
+      const b1 = { id: 'bm_1', title: 'Bookmark One', source_name: '3B1B' };
+      await worker.fetch(new Request('http://localhost/sync', {
+        method: 'POST',
+        headers: AUTH,
+        body: JSON.stringify({
+          bookmarks: [b1],
+          bookmark_states: { 'bm_1': 1000 }
+        })
+      }), env);
+
+      // 2. Device 2 saves bookmark bm_2 at t=1500
+      const b2 = { id: 'bm_2', title: 'Bookmark Two', source_name: 'Lex' };
+      await worker.fetch(new Request('http://localhost/sync', {
+        method: 'POST',
+        headers: AUTH,
+        body: JSON.stringify({
+          bookmarks: [b2],
+          bookmark_states: { 'bm_2': 1500 }
+        })
+      }), env);
+
+      // 3. GET should return both bm_2 and bm_1 (sorted newest first)
+      const res3 = await worker.fetch(new Request('http://localhost/sync', { method: 'GET', headers: AUTH }), env);
+      const data3 = await res3.json();
+      if (!Array.isArray(data3.bookmarks) || data3.bookmarks.length !== 2) {
+        throw new Error('Expected 2 bookmarks, got ' + (data3.bookmarks ? data3.bookmarks.length : 0));
+      }
+      if (data3.bookmarks[0].id !== 'bm_2' || data3.bookmarks[1].id !== 'bm_1') {
+        throw new Error('Expected bookmarks sorted newest first: ' + JSON.stringify(data3.bookmarks));
+      }
+
+      // 4. Device 1 unbookmarks bm_1 at t=2000 (tombstone)
+      await worker.fetch(new Request('http://localhost/sync', {
+        method: 'POST',
+        headers: AUTH,
+        body: JSON.stringify({
+          bookmarks: [],
+          bookmark_states: { 'bm_1': -2000 }
+        })
+      }), env);
+
+      const res4 = await worker.fetch(new Request('http://localhost/sync', { method: 'GET', headers: AUTH }), env);
+      const data4 = await res4.json();
+      if (data4.bookmarks.some(b => b.id === 'bm_1')) {
+        throw new Error('bm_1 should have been removed by tombstone');
+      }
+      if (data4.bookmarks.length !== 1 || data4.bookmarks[0].id !== 'bm_2') {
+        throw new Error('bm_2 should still exist');
+      }
+
+      // 5. Stale Device 3 connects with old state where bm_1 had t=1000
+      await worker.fetch(new Request('http://localhost/sync', {
+        method: 'POST',
+        headers: AUTH,
+        body: JSON.stringify({
+          bookmarks: [b1],
+          bookmark_states: { 'bm_1': 1000 }
+        })
+      }), env);
+
+      const res5 = await worker.fetch(new Request('http://localhost/sync', { method: 'GET', headers: AUTH }), env);
+      const data5 = await res5.json();
+      if (data5.bookmarks.some(b => b.id === 'bm_1')) {
+        throw new Error('Stale push resurrected deleted bm_1!');
+      }
+
+      // 6. Device 3 explicitly re-bookmarks bm_1 at t=3000
+      await worker.fetch(new Request('http://localhost/sync', {
+        method: 'POST',
+        headers: AUTH,
+        body: JSON.stringify({
+          bookmarks: [b1],
+          bookmark_states: { 'bm_1': 3000 }
+        })
+      }), env);
+
+      const res6 = await worker.fetch(new Request('http://localhost/sync', { method: 'GET', headers: AUTH }), env);
+      const data6 = await res6.json();
+      if (!data6.bookmarks.some(b => b.id === 'bm_1')) {
+        throw new Error('Re-bookmarked bm_1 should have resurrected');
+      }
+
+      process.stdout.write('OK_BOOKMARK_CRDT');
+    }).catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    assert "OK_BOOKMARK_CRDT" in _run_node_script(node_script)

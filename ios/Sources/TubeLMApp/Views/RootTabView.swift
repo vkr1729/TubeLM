@@ -289,8 +289,13 @@ public struct RootTabView: View {
     private func pullRemoteState() async {
         do {
             if let remote = try await syncClient.fetchRemoteState() {
-                let merged = try await store.applyRemoteStates(remote.itemStates)
-                self.readIDs = merged
+                let mergedReads = try await store.applyRemoteStates(remote.itemStates)
+                self.readIDs = mergedReads
+                let mergedBookmarks = try await store.applyRemoteBookmarks(
+                    remoteBookmarks: remote.bookmarks,
+                    remoteStates: remote.bookmarkStates
+                )
+                self.bookmarks = mergedBookmarks
             }
         } catch {
             // Unpaired or unreachable: local state remains authoritative.
@@ -307,13 +312,22 @@ public struct RootTabView: View {
             do {
                 let states = await store.loadItemStates()
                 let ordered = await store.loadReadIDsOrdered()
+                let localBookmarks = await store.loadBookmarks()
+                let localBookmarkStates = await store.loadBookmarkStates()
                 if let remote = try await syncClient.pushLocalMutations(
                     readIds: ordered,
                     top20Read: ordered,
-                    itemStates: states
+                    itemStates: states,
+                    bookmarks: localBookmarks,
+                    bookmarkStates: localBookmarkStates
                 ) {
-                    let merged = try await store.applyRemoteStates(remote.itemStates)
-                    self.readIDs = merged
+                    let mergedReads = try await store.applyRemoteStates(remote.itemStates)
+                    self.readIDs = mergedReads
+                    let mergedBookmarks = try await store.applyRemoteBookmarks(
+                        remoteBookmarks: remote.bookmarks,
+                        remoteStates: remote.bookmarkStates
+                    )
+                    self.bookmarks = mergedBookmarks
                 }
             } catch {
                 // Next mutation retries; never interrupt the user.

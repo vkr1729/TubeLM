@@ -166,33 +166,43 @@ final class TubeLMCoreTests: XCTestCase {
     }
 
     func testSyncPayloadMatchesWorkerContract() throws {
+        let bm = FeedItem(id: "bm_1", rank: 1, title: "Bookmark 1", sourceName: "Source 1")
         let payload = SyncPayload(
             readIds: ["a"],
             top20Read: ["b"],
-            itemStates: ["a": 123.0, "c": -456.0]
+            itemStates: ["a": 123.0, "c": -456.0],
+            bookmarks: [bm],
+            bookmarkStates: ["bm_1": 1000.0]
         )
         let data = try JSONEncoder().encode(payload)
         let keys = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         XCTAssertNotNil(keys?["read_ids"])
         XCTAssertNotNil(keys?["top20_read"])
         XCTAssertNotNil(keys?["item_states"])
+        XCTAssertNotNil(keys?["bookmarks"])
+        XCTAssertNotNil(keys?["bookmark_states"])
         XCTAssertNil(keys?["client_id"])
         XCTAssertNil(keys?["merged_item_states"])
 
         let workerGET = """
-        {"read_ids": ["a"], "top20_read": ["b"], "item_states": {"a": 123}, "updated_at": "2026-09-19T00:00:00.000Z"}
+        {"read_ids": ["a"], "top20_read": ["b"], "item_states": {"a": 123}, "bookmarks": [{"id": "bm_1", "title": "B1", "source_name": "S1", "source_type": "youtube"}], "bookmark_states": {"bm_1": 1000}, "updated_at": "2026-09-19T00:00:00.000Z"}
         """.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(SyncResponse.self, from: workerGET)
         XCTAssertEqual(decoded.readIds, ["a"])
         XCTAssertEqual(decoded.top20Read, ["b"])
         XCTAssertEqual(decoded.itemStates["a"], 123)
+        XCTAssertEqual(decoded.bookmarks.count, 1)
+        XCTAssertEqual(decoded.bookmarks[0].id, "bm_1")
+        XCTAssertEqual(decoded.bookmarkStates["bm_1"], 1000)
 
         let emptyGET = """
-        {"read_ids": [], "top20_read": [], "item_states": {}, "updated_at": null, "message": "No remote state yet for this key"}
+        {"read_ids": [], "top20_read": [], "item_states": {}, "bookmarks": [], "bookmark_states": {}, "updated_at": null, "message": "No remote state yet for this key"}
         """.data(using: .utf8)!
         let empty = try JSONDecoder().decode(SyncResponse.self, from: emptyGET)
         XCTAssertTrue(empty.readIds.isEmpty)
         XCTAssertTrue(empty.itemStates.isEmpty)
+        XCTAssertTrue(empty.bookmarks.isEmpty)
+        XCTAssertTrue(empty.bookmarkStates.isEmpty)
     }
 
     func testQueueMoveIgnoresOutOfBoundsIndices() {
