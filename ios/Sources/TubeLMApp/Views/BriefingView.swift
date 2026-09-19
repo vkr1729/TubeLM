@@ -136,7 +136,7 @@ public struct BriefingView: View {
                                     .font(AppTheme.actionButton)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
-                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .background(AppTheme.secondarySystemBackground)
                                     .foregroundColor(.primary)
                                     .cornerRadius(8)
                                 }
@@ -146,7 +146,7 @@ public struct BriefingView: View {
                                         .font(AppTheme.actionButton)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 6)
-                                        .background(Color(UIColor.secondarySystemBackground))
+                                        .background(AppTheme.secondarySystemBackground)
                                         .foregroundColor(.primary)
                                         .cornerRadius(8)
                                 }
@@ -155,7 +155,7 @@ public struct BriefingView: View {
                                     Image(systemName: bookmarked ? "bookmark.fill" : "bookmark")
                                         .font(.system(size: 12))
                                         .padding(8)
-                                        .background(Color(UIColor.secondarySystemBackground))
+                                        .background(AppTheme.secondarySystemBackground)
                                         .foregroundColor(bookmarked ? AppTheme.accent : .primary)
                                         .cornerRadius(8)
                                 }
@@ -164,7 +164,7 @@ public struct BriefingView: View {
                         .padding(.top, 4)
                     }
                     .padding(16)
-                    .background(Color(UIColor.systemBackground))
+                    .background(AppTheme.systemBackground)
                     .cornerRadius(18)
                     .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
                     .opacity(isRead ? 0.45 : 1.0)

@@ -35,7 +35,7 @@ public struct PlayerDeckSheet: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.secondary)
                         .padding(8)
-                        .background(Color(UIColor.secondarySystemBackground))
+                        .background(AppTheme.secondarySystemBackground)
                         .clipShape(Circle())
                 }
             }
@@ -95,7 +95,7 @@ public struct PlayerDeckSheet: View {
                             Image(systemName: "gobackward.15")
                                 .font(.system(size: 20))
                                 .frame(width: 44, height: 44)
-                                .background(Color(UIColor.secondarySystemBackground))
+                                .background(AppTheme.secondarySystemBackground)
                                 .clipShape(Circle())
                         }
 
@@ -113,7 +113,7 @@ public struct PlayerDeckSheet: View {
                             Image(systemName: "goforward.15")
                                 .font(.system(size: 20))
                                 .frame(width: 44, height: 44)
-                                .background(Color(UIColor.secondarySystemBackground))
+                                .background(AppTheme.secondarySystemBackground)
                                 .clipShape(Circle())
                         }
 
@@ -121,7 +121,7 @@ public struct PlayerDeckSheet: View {
                             Text(String(format: "%.2g×", player.playbackRate))
                                 .font(.system(size: 12, weight: .bold))
                                 .frame(width: 44, height: 44)
-                                .background(Color(UIColor.secondarySystemBackground))
+                                .background(AppTheme.secondarySystemBackground)
                                 .clipShape(Circle())
                         }
                     }
@@ -174,7 +174,7 @@ public struct PlayerDeckSheet: View {
                                     }
                                 }
                                 .padding(10)
-                                .background(Color(UIColor.secondarySystemBackground))
+                                .background(AppTheme.secondarySystemBackground)
                                 .cornerRadius(10)
                                 .onDrag { NSItemProvider(object: item.id as NSString) }
                                 .onDrop(of: [.text], delegate: QueueDropDelegate(item: item, queue: $queue))
@@ -186,7 +186,7 @@ public struct PlayerDeckSheet: View {
                 .padding(.bottom, 30)
             }
         }
-        .background(Color(UIColor.systemBackground))
+        .background(AppTheme.systemBackground)
     }
 
     private func formatTime(_ seconds: Double) -> String {

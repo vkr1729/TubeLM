@@ -49,7 +49,7 @@ public struct ChannelsView: View {
                     .font(.system(size: 14))
             }
             .padding(10)
-            .background(Color(UIColor.secondarySystemBackground))
+            .background(AppTheme.secondarySystemBackground)
             .cornerRadius(12)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -70,7 +70,7 @@ public struct ChannelsView: View {
                                     .font(.system(size: 14, weight: .bold))
                                     .foregroundColor(AppTheme.accent)
                                     .frame(width: 42, height: 42)
-                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .background(AppTheme.secondarySystemBackground)
                                     .cornerRadius(12)
 
                                 VStack(alignment: .leading, spacing: 3) {
@@ -116,7 +116,7 @@ public struct ChannelsView: View {
                                     .lineSpacing(2)
                                     .padding(10)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .background(AppTheme.secondarySystemBackground)
                                     .cornerRadius(10)
                             }
 
@@ -152,7 +152,7 @@ public struct ChannelsView: View {
                                         .font(.system(size: 11, weight: .bold))
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 7)
-                                        .background(Color(UIColor.secondarySystemBackground))
+                                        .background(AppTheme.secondarySystemBackground)
                                         .foregroundColor(.primary)
                                         .cornerRadius(8)
                                 }
@@ -224,7 +224,7 @@ public struct ChannelsView: View {
                                                         .font(.system(size: 10, weight: .bold))
                                                         .padding(.horizontal, 8)
                                                         .padding(.vertical, 4)
-                                                        .background(Color(UIColor.tertiarySystemBackground))
+                                                        .background(AppTheme.tertiarySystemBackground)
                                                         .cornerRadius(6)
                                                 }
 
@@ -244,14 +244,14 @@ public struct ChannelsView: View {
                                                     Image(systemName: "bookmark")
                                                         .font(.system(size: 11))
                                                         .padding(5)
-                                                        .background(Color(UIColor.tertiarySystemBackground))
+                                                        .background(AppTheme.tertiarySystemBackground)
                                                         .cornerRadius(6)
                                                 }
                                             }
                                             .padding(.leading, 24)
                                         }
                                         .padding(10)
-                                        .background(Color(UIColor.secondarySystemBackground))
+                                        .background(AppTheme.secondarySystemBackground)
                                         .cornerRadius(12)
                                         .opacity(isVidRead ? 0.45 : 1.0)
                                     }
@@ -260,7 +260,7 @@ public struct ChannelsView: View {
                             }
                         }
                         .padding(14)
-                        .background(Color(UIColor.systemBackground))
+                        .background(AppTheme.systemBackground)
                         .cornerRadius(16)
                         .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
                         .padding(.horizontal, 16)

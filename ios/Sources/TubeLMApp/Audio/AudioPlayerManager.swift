@@ -25,7 +25,7 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         setupAudioSession()
         setupRemoteCommands()
         endOfPlaybackObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEnd,
+            forName: AVPlayerItem.didPlayToEndTimeNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
@@ -47,6 +47,7 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
     }
 
     private func setupAudioSession() {
+        #if os(iOS)
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .spokenAudio, options: [])
@@ -54,6 +55,7 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         } catch {
             print("Failed to configure AVAudioSession: \(error)")
         }
+        #endif
     }
 
     private func setupRemoteCommands() {

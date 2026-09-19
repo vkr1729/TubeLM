@@ -135,7 +135,7 @@ public struct RootTabView: View {
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 14))
                             .frame(width: 36, height: 36)
-                            .background(Color(UIColor.secondarySystemBackground))
+                            .background(AppTheme.secondarySystemBackground)
                             .clipShape(Circle())
                     }
                 }
@@ -160,8 +160,8 @@ public struct RootTabView: View {
                 }
                 .padding(.horizontal, 32)
                 .padding(.vertical, 10)
-                .background(Color(UIColor.systemBackground))
-                .overlay(Rectangle().frame(height: 0.5).foregroundColor(Color(UIColor.separator)), alignment: .top)
+                .background(AppTheme.systemBackground)
+                .overlay(Rectangle().frame(height: 0.5).foregroundColor(AppTheme.separator), alignment: .top)
             }
         }
         .ignoresSafeArea(.keyboard)
@@ -404,9 +404,14 @@ private struct SyncSettingsSheet: View {
         NavigationStack {
             Form {
                 Section("Worker URL") {
+                    #if os(iOS)
                     TextField("https://tubelm-sync.<subdomain>.workers.dev", text: $endpoint)
                         .textInputAutocapitalization(.never)
-                        .disableAutocorrection(true)
+                        .autocorrectionDisabled(true)
+                    #else
+                    TextField("https://tubelm-sync.<subdomain>.workers.dev", text: $endpoint)
+                        .autocorrectionDisabled(true)
+                    #endif
                 }
                 Section("Sync Passphrase") {
                     SecureField("16+ character passphrase", text: $passphrase)

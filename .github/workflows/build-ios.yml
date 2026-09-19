@@ -27,7 +27,7 @@ jobs:
       - name: Test TubeLM Core
         run: |
           cd ios
-          swift test
+          swift test --filter TubeLMCoreTests
 
       - name: Build TubeLM App for iOS
         run: |

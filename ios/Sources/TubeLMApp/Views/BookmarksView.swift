@@ -71,7 +71,7 @@ public struct BookmarksView: View {
                                 }
                             }
                             .padding(14)
-                            .background(Color(UIColor.systemBackground))
+                            .background(AppTheme.systemBackground)
                             .cornerRadius(16)
                             .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
                             .padding(.horizontal, 16)

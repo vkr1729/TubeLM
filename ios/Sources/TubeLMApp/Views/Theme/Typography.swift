@@ -9,6 +9,18 @@ public enum AppTheme {
     public static let whyBackgroundLight = Color(red: 0.94, green: 0.99, blue: 0.96) // #f0fdf4
     public static let whyBorder = Color(red: 0.13, green: 0.77, blue: 0.37) // #22c55e
 
+    #if canImport(UIKit)
+    public static let systemBackground = Color(uiColor: .systemBackground)
+    public static let secondarySystemBackground = Color(uiColor: .secondarySystemBackground)
+    public static let tertiarySystemBackground = Color(uiColor: .tertiarySystemBackground)
+    public static let separator = Color(uiColor: .separator)
+    #else
+    public static let systemBackground = Color.white
+    public static let secondarySystemBackground = Color(red: 0.95, green: 0.95, blue: 0.97)
+    public static let tertiarySystemBackground = Color(red: 0.92, green: 0.92, blue: 0.94)
+    public static let separator = Color(red: 0.85, green: 0.85, blue: 0.87)
+    #endif
+
     // Typography
     public static let headline = Font.system(size: 24, weight: .bold, design: .serif)
     public static let title = Font.system(size: 16, weight: .bold, design: .serif)
