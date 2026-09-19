@@ -1,7 +1,7 @@
 #if canImport(AVFoundation) && canImport(MediaPlayer)
-import Foundation
-import AVFoundation
-import MediaPlayer
+@preconcurrency import Foundation
+@preconcurrency import AVFoundation
+@preconcurrency import MediaPlayer
 import TubeLMCore
 
 @MainActor
@@ -29,22 +29,13 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            Task { @MainActor [weak self] in
+            MainActor.assumeIsolated {
                 guard let self = self else { return }
                 guard let finished = notification.object as? AVPlayerItem,
                       finished == self.player?.currentItem else { return }
                 self.isPlaying = false
                 self.updateNowPlayingInfo()
             }
-        }
-    }
-
-    deinit {
-        if let endOfPlaybackObserver = endOfPlaybackObserver {
-            NotificationCenter.default.removeObserver(endOfPlaybackObserver)
-        }
-        if let token = timeObserverToken {
-            player?.removeTimeObserver(token)
         }
     }
 
@@ -163,7 +154,7 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         guard timeObserverToken == nil else { return }
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserverToken = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            Task { @MainActor [weak self] in
+            MainActor.assumeIsolated {
                 guard let self = self else { return }
                 let seconds = time.seconds
                 self.currentTime = seconds.isFinite ? max(0, seconds) : 0
