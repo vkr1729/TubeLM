@@ -22,7 +22,6 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
 
     public override init() {
         super.init()
-        setupAudioSession()
         setupRemoteCommands()
         endOfPlaybackObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.didPlayToEndTimeNotification,
@@ -39,7 +38,7 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         }
     }
 
-    private func setupAudioSession() {
+    private func ensureAudioSession() {
         #if os(iOS)
         do {
             let session = AVAudioSession.sharedInstance()
@@ -88,6 +87,7 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         if !trimmed.isEmpty,
            let url = URL(string: trimmed, relativeTo: Self.feedBaseURL)?.absoluteURL,
            url.scheme == "http" || url.scheme == "https" {
+            ensureAudioSession()
             let item = AVPlayerItem(url: url)
             if player == nil {
                 player = AVPlayer(playerItem: item)
@@ -108,8 +108,14 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
     }
 
     public func play() {
-        player?.play()
-        player?.rate = playbackRate
+        guard let player = player, player.currentItem != nil else {
+            // No loaded item: do not activate audio session or fake playing state
+            isPlaying = false
+            return
+        }
+        ensureAudioSession()
+        player.play()
+        player.rate = playbackRate
         isPlaying = true
         updateNowPlayingInfo()
     }

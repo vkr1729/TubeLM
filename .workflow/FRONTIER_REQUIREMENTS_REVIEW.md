@@ -1,123 +1,132 @@
 # Frontier Requirements Review — TubeLM iOS (LiveContainer Native)
 
 Source: `.workflow/REQUIREMENTS.md`
-Date: 2026-09-19
+Date: 2026-09-20
+Reviewer: Muse Spark (code-verified against `ios/`, `worker/worker.js`, `.github/workflows/build-ios.yml`)
 
 ## Target User Scale Anchor
 
-**Single-Person Personal Use Only.**
+**Single-Person Personal Use Exclusively** (§1). Carried as hard constraint through every recommendation:
 
-Hard constraints carried through all recommendations below:
-- Reject enterprise complexity: no multi-tenant DB, no user auth framework, no remote cloud server / backend API to maintain.
-- Host: sideloaded app inside **LiveContainer** on iOS (JIT, no reliable background daemons / push).
-- Use pattern: commuter, 7–8 opens/week, intermittent connectivity (subway tunnels).
-- Content scale: 37 sources → Top 20 briefing, 2-week rolling retention, weekly `data.json` + audio via GitHub Pages (`vkr1729.github.io/TubeLM/`) or optional R2.
+- Reject enterprise complexity: no multi-tenant DB, no auth framework, no maintained backend.
+- Host: sideloaded `.ipa` inside **LiveContainer** on iOS (JIT, unsigned, no reliable background daemons/push).
+- Baseline: **iOS 26 on iPhone 16**; usage 7–8 opens/week on Singapore commute with tunnel dead zones.
+- Tension to watch: §2 mandates a Cloudflare Worker (`tubelm-sync.<subdomain>.workers.dev`, R2 + Durable Object `SyncCoordinator`, Bearer passphrase) that *is* a remote server. Review treats it as anchor-compliant only if it is zero-maintenance, optional, and never blocks offline use.
 
-Any recommendation that implies a server, login, or per-user cloud sync violates the anchor and is listed only as a rejected alternative.
+## Section 4 Defect Verification (code-checked, not just spec-read)
+
+Spec §4 lists 2 incidents / 7 sub-requirements. Current code status:
+
+- **4.1 Missing icon — still open.** No `AppIcon*.png` in repo; `ios/TubeLM/Info.plist` has no `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconFiles`, `CFBundleIconFile`; `build-ios.yml` "Package LiveContainer IPA" copies only `Info.plist` + `data.json` + binary, no icons.
+- **4.2.1 Bundle.module trap — mostly fixed.** `ContentStore.loadCachedFeed()` already guards `Bundle.module` behind `#if SWIFT_PACKAGE` with `Bundle.main` (`data`/`mock_data`) fallback. Residual risk is corrupt/empty fallback (see Q2).
+- **4.2.2 Eager audio session — NOT fixed.** `AudioPlayerManager.init()` still calls `setupAudioSession()` → `setCategory(.playback)` + `setActive(true)` at launch, exactly what §4 bans. Must defer both to `play()`/`playTrack()`.
+- **4.2.3 Missing plist keys — partially open.** Present: `CFBundlePackageType=APPL`, `UILaunchScreen`. Missing: `CFBundleSupportedPlatforms`, `MinimumOSVersion`, `CFBundleSignature`. Note version skew: §4 requires `MinimumOSVersion 17.0` while §1 declares iOS 26 baseline — floor vs. target needs a decision.
+- **4.2.4 Unsigned Mach-O — open in CI.** Simulator step runs `codesign -s - --force --deep`; device IPA packaging step does not run `codesign`/`ldid` at all and never verifies `LC_CODE_SIGNATURE`.
+
+All Qs below assume §4 must close with automated gates, not manual "it launched once" checks.
 
 ---
 
-## Q1 — How does the app survive a `data.json` schema change or partial weekly publish?
+## Q1 — What is the acceptance proof for "icon fixed + launch-crash fixed"?
 
-**Ambiguity:** §2 says the iOS app consumes pure JSON via a new `desktop/web_reader.py` export hook, with silent ETag / If-Modified-Since refresh on every launch/foreground. No schema version, no atomicity contract, no tolerant-reader rule is specified.
+**Ambiguity:** §4 prescribes artifacts (4 PNG sizes, plist keys, `codesign -s -`) but no verification contract. "Package icons into `TubeLM.app` root" + "ensure ad-hoc signing" can silently regress — wrong dimensions, corrupt PNG, missing `~ipad` key, `codesign` pass on macOS yet AMFI kill under LiveContainer JIT, LiveContainer icon cache showing stale blank.
 
 **Edge cases / failure modes:**
-- Weekly pipeline adds/renames a field (e.g. new audio URL shape for R2 vs Pages) → old installed `.ipa` crashes or shows blank feed.
-- `gh-pages` push lands `data.json` before `/audio/...` files (or vice versa) → feed references 404 audio during commute.
-- ETag check succeeds on flaky subway Wi-Fi but body download truncates → corrupt local cache replaces good cache, next cold start in tunnel shows nothing.
+- PNG exists but wrong pixel size / wrong color profile → iOS silently falls back to blank icon, CI still green.
+- `CFBundleIcons` added but `CFBundleIcons~ipad` or `CFBundleIconFiles` misspelled → iPhone OK, LiveContainer grid blank.
+- `codesign -s -` runs on the simulator `.app` but device IPA ships unsigned → `unzip -l` looks fine, AMFI kills on device.
+- `MinimumOSVersion 17.0` vs §1 iOS 26 baseline: building with iOS 17 SDK APIs that behave differently on 26, or vice versa.
 
 **Recommended approach:**
-- Versioned, tolerant reader: `data.json` carries `schema_version: 1`; Swift reader decodes with `decodeIfPresent` + defaults, ignores unknown keys, never throws on missing optional fields.
-- Atomic swap: download to temp file, validate (JSON parses + `items` non-empty + version supported), then `replaceItemAt` over cached copy. Failed validation keeps last good cache and logs silently.
-- Publish-side ordering: `web_reader.py` writes audio assets first, then `data.json` last; optionally add `manifest_etag` / `content_hash` so iOS can skip half-pushed states.
+- CI gate in `build-ios.yml` after packaging: assert 4 PNGs exist in `Payload/TubeLM.app/`, verify dimensions via `sips -g pixelWidth/Height` or `file`, lint plist keys with `PlistBuddy`, verify signature with `codesign -dv --verbose=4` / `otool -l | grep LC_CODE_SIGNATURE`, fail build on miss. Add LiveContainer import smoke note (install + `simctl launch` + screenshot, already partially done for sim).
+- Lock semantics: `MinimumOSVersion 17.0` = floor, iOS 26 + iPhone 16 = tested baseline; state both explicitly.
 
 **Alternatives:**
-- Strict Codable models (fail-fast) — simpler code but one schema drift bricks offline reading; rejected.
-- Server-side version negotiation / forced-update endpoint — violates single-user / no-server anchor; rejected.
-- HTML scraping fallback — reintroduces parsing fragility the JSON hook was created to avoid; rejected.
+- Manual screenshot check ("looks right on my phone") — catches nothing in CI; rejected as sole gate.
+- Full Apple asset catalog (`Assets.car`) instead of loose PNGs — more correct on stock iOS but heavier toolchain for LiveContainer loose-bundle packaging; defer.
+- Skip verification, trust packaging script — reproduces the original incident; rejected.
 
-**Decision needed:** Confirm `schema_version` field in export hook + tolerant-decode rule as acceptance criterion.
+**Decision needed:** Confirm CI icon+plist+signature assertions as §4 exit criteria and clarify 17.0-floor vs 26-baseline wording.
 
-## Q2 — What happens to Saved / Queue items and `read_state` when the 2-week purge fires?
+## Q2 — What renders on first launch with no cache, no bundle feed, and no network?
 
-**Ambiguity:** PROJECT.md enforces strict 14-day purge of digests/notebooks; REQUIREMENTS §2 says full offline text + cached audio, plus bookmark-to-queue and locally persisted `read_state` with optional export. No retention exemption for user-saved items.
+**Ambiguity:** §4.2.1 fixes the `fatalError` but specifies only "fallback to sandbox documents with zero crash risk." Combined with §2's stale-while-revalidate (launch → ETag check → atomic swap), the cold-start-in-tunnel path is undefined: corrupt `feed.json`, missing bundled `data.json` (CI copies `mock_data.json` today, production IPA may differ), ETag check timing out.
 
 **Edge cases / failure modes:**
-- User bookmarks a Week-1 deep explainer for later; Week-3 publish purges it remotely → queue entry dangles (text gone, audio 404, or silently disappears — both bad).
-- `read_ids` grows unbounded across weeks (PROJECT.md hardening already caps web at `MAX_READ_IDS=5000`); iOS has no cap specified → `Documents/` bloat inside LiveContainer sandbox.
-- Stale-while-revalidate overwrites local cache and drops IDs for purged items → unread counters / filters recompute incorrectly.
+- First install opened in MRT tunnel: no `Documents/cache/feed.json`, bundled `data.json` missing/stale, network unreachable → `loadCachedFeed()` returns `nil`; does UI blank-crash, spin forever, or show readable empty state?
+- Truncated download replaces good cache (header check OK, body truncated on flaky Wi-Fi) → next cold start has corrupt JSON and no fallback.
+- `DigestFeed` tolerant decoding already exists (`decodeIfPresent` + defaults) but `loadCachedFeed` uses `try JSONDecoder().decode` on the cache path — a corrupt cache file *throws* instead of healing.
 
 **Recommended approach:**
-- Saved-exempt pinning: queue/bookmarked items are copied to `Documents/pinned/` (text + audio) and exempt from rolling eviction; un-bookmarking makes them eligible for next GC. Cap pins (e.g. 50 items / 500 MB) with oldest-unpinned-first eviction and a settings row showing usage.
-- Tombstone read-state: keep `read_ids` as a bounded LRU (e.g. 5000, string-only, matching web hardening), prune IDs whose content hash hasn't existed for >2 cycles; never resurrect purged items as unread.
-- Remote purge never deletes local pins — explicit divergence is correct for single-user offline-first.
+- Never-throw launch path: cache read failure → try `Bundle.main` → else render staged empty state ("No briefing yet — pull to retry"), never block on network. Download-to-temp → validate (JSON parses + `items` non-empty + `schema_version` supported) → atomic `replaceItemAt`; failed validation keeps last good cache silently.
+- Make cache decode tolerant too (`try?` + fallback, or quarantining corrupt file), matching the already-tolerant `DigestFeed.init(from:)`.
 
 **Alternatives:**
-- Mirror remote purge exactly (delete local saves too) — simplest, but destroys commuter trust; rejected.
-- Unlimited local archive (keep everything forever) — blows LiveContainer storage, no GC story; rejected.
-- Cloud backup of saves (iCloud / R2 upload) — introduces auth + server maintenance, violates anchor; rejected.
+- `fatalError`/force-unwrap on missing feed — simplest, reproduces crash; rejected.
+- Block cold start on network fetch for correctness — violates "instantaneous cold starts" + tunnel requirement; rejected.
+- Ship large bundled seed feed to mask the case — bloats IPA, goes stale weekly; rejected as primary (small seed OK, network-independent launch required).
 
-**Decision needed:** Confirm pin-exempt + 50-item / 500 MB cap + LRU `read_ids` bound.
+**Decision needed:** Confirm "offline-first empty-state + validate-then-swap" as the launch contract; fix `AudioPlayerManager` eager `setActive` in the same pass since both fire at launch.
 
-## Q3 — Which audio source is canonical offline, and what bounds pre-download?
+## Q3 — Does silent refresh or auto-sync ever interrupt reading, scrolling, or playback?
 
-**Ambiguity:** §2 allows audio on GitHub Pages `/audio/...` *or* R2 "if configured"; §Interview defaults to hybrid smart caching (stream + one-tap "Pre-download Top 20" / auto Top-10 over Wi-Fi). No canonical URL rule, no size budget, no Wi-Fi-vs-cellular rule inside LiveContainer.
+**Ambiguity:** §2 demands *both* "silent single-flight ETag check on every launch/foreground, atomically updates without interrupting" *and* "auto-syncs in background on every state mutation (watched, queued, bookmarked), no manual sync." No concurrency, ordering, debounce, or conflict rule. The 120Hz triage + 56pt Commute Deck + 15s skip experience collides with mid-scroll feed swaps and tunnel-flaky POSTs.
 
 **Edge cases / failure modes:**
-- R2 configured mid-week → same episode has two URLs; cached Pages file + new R2 URL double-stores or re-downloads on subway.
-- Full Top-20 pre-download over cellular in transit burns data; auto Top-10 over "Wi-Fi" misfires on captive-portal subway Wi-Fi with no internet.
-- LiveContainer `Documents/` fills with 37-channel audio (NotebookLM overviews are large) → iOS evicts / LiveContainer fails to launch; no failure UX specified.
-- Stream-only fallback dies in tunnel with no graceful degraded state.
+- Rapid foreground/background cycling in subway → overlapping `URLSession` checks race; older response overwrites newer, or feed re-renders mid-scroll.
+- Refresh lands while user reads item #7 or drags queue → force-reload yanks scroll / reorders "Up Next."
+- Mutation in tunnel (mark read + queue + bookmark) with Worker unreachable → does the app retry, drop, or block UI? `CloudflareSyncClient` timeout is 15s with `unauthorized/rateLimited/payloadTooLarge` errors — no specified UX.
+- ETag says modified but full `data.json` takes 30s on edge network; user already reading cached copy.
 
 **Recommended approach:**
-- Canonical-per-item URL: `data.json` emits single `audio_url` + `audio_sha` + `duration_s` + `bytes`; pipeline decides Pages-vs-R2 at build time, app never chooses. Cache key = sha, not URL, so source flips don't duplicate.
-- Bounded hybrid: default manual "Download for commute" (Top 20); auto-download Top 10 only on unmetered Wi-Fi with reachability + `allowsExpensiveNetworkAccess=false`; hard storage ceiling (e.g. 1 GB) with LRU audio eviction, pins exempt per Q2. Always show download size before tap.
-- Degraded playback: if offline and audio missing, text remains fully readable + inline "audio unavailable offline" state instead of spinner.
+- Single-flight refresh with debounce (min ~60s between checks), conditional GET, 15s timeout; validate-then-stage — if user is scrolled/reading/playing, show quiet "New briefing available — tap to refresh" pill instead of force-swap; never move scroll under touch.
+- Sync as best-effort background: local-first (ContentStore LWW tombstones already correct), silent retry with backoff, never block mutation UI; surface 401/429/413 only in Settings/debug, not as alerts. Leverages existing `item_states`/`bookmark_states` LWW merge in worker + client.
 
 **Alternatives:**
-- Download-all-37 — guarantees offline but violates lean-storage + Pages bandwidth; rejected (already rejected in interview, reaffirmed here).
-- Stream-only — fails the core subway requirement; rejected.
-- Background fetch / silent push pre-warm — unreliable under LiveContainer background restrictions (§4); rejected as primary, foreground-only per spec.
+- Blocking refresh on every foreground — simplest, kills snappy cold start; rejected.
+- Force-reload feed on arrival — simple code, janky triage; rejected.
+- Fire-and-forget sync with no retry — loses commute triage state; rejected.
 
-**Decision needed:** Confirm per-item canonical URL + sha key, 1 GB ceiling, expensive-network guard.
+**Decision needed:** Confirm single-flight + debounce + staged-apply pill + silent-retry sync as the concurrency contract.
 
-## Q4 — What does "optionally sync `read_ids`" mean without a server or login?
+## Q4 — Which audio URL is canonical, and what bounds the offline cache?
 
-**Ambiguity:** Interview Q4 says "optionally sync `read_ids` to/from GitHub Pages or TubeLM local server if reachable." Both conflict with the scale anchor: GitHub Pages is static (no write endpoint), and a local server implies pairing, discovery, auth, and conflict resolution for one person.
+**Ambiguity:** §2 allows audio on R2 `/tubelm/audio/...` *or* Pages `/audio/...` with "transparent local disk caching so subway tunnels are protected," but names no canonical URL, no cache key, no storage ceiling, no cellular-vs-Wi-Fi rule. Tab 3 promises "unlimited bookmarks, audio caching dropped entirely" while the Commute Deck implies queued audio must survive tunnels.
 
 **Edge cases / failure modes:**
-- Split-brain: PWA `localStorage`, desktop GUI `read_state.json`, iOS sandbox diverge → same item read on phone shows unread on desktop, no merge rule.
-- Naive last-write-wins over flaky transit network resurrects cleared items or wipes a commute's triage.
-- Any writable sync endpoint on Pages or LAN introduces SSRF/auth surface the v4.0 hardening just closed.
+- Pipeline flips R2 mid-week → same episode has two URLs; URL-keyed cache double-stores or re-downloads on cellular.
+- Partial download in tunnel (stream cut mid-file) → 15s skip/scrub on truncated file, or spinner with full text available but unplayed.
+- `Documents/` fills LiveContainer quota with queued audio → launch failures; no eviction or "audio unavailable offline" state specified.
+- Stream-only fallback dies in tunnel with no degraded UX.
+
+**Recommended approach:**
+- Pipeline emits single canonical `audio_url` + `audio_sha`/`bytes` per item at build time; app never chooses source. Cache key = content hash, not URL, so source flips don't duplicate. Temp-download → validate → atomic swap.
+- Bounded hybrid: manual "Download for commute" + auto top-N only on unmetered Wi-Fi (`allowsExpensiveNetworkAccess=false`); hard ceiling (e.g. ~1 GB) with LRU eviction, bookmarked/queued pins exempt; always show size before tap. Offline-missing audio degrades to fully readable text + inline "audio unavailable offline" instead of spinner.
+
+**Alternatives:**
+- Stream-only — fails core tunnel requirement; rejected.
+- Download-everything — guarantees offline, blows LiveContainer storage + Pages bandwidth; rejected.
+- Background prefetch via BGTask — unreliable in LiveContainer guest (§4 context); rejected as primary, foreground-only.
+
+**Decision needed:** Confirm canonical-URL + hash-key + ceiling + degraded-text state; clarify bookmark-audio exclusion vs queue-audio pinning.
+
+## Q5 — Is Worker sync required or optional, and where does the passphrase live?
+
+**Ambiguity:** §1 anchor says "strictly reject … remote cloud server maintenance" while §2 mandates event-driven sync to `tubelm-sync.<subdomain>.workers.dev` with `Authorization: Bearer <passphrase>` on *every* mutation. Unspecified: provisioning/rotation, unconfigured state, offline behavior, and whether the app is useful with no key. `CloudflareSyncClient.isConfigured` already gates on non-empty key, but spec never says so.
+
+**Edge cases / failure modes:**
+- Fresh install with no passphrase entered opens in tunnel → every tap fires failing POSTs, 15s timeouts pile up, or errors spam the commuter.
+- 401 (rotated key) / 429 (rate limit: 60/min/IP, 240/key in DO) / 413 (1 MiB cap) during commute → silent data divergence across devices with no merge UX (LWW exists server-side, client `applyRemoteStates` exists, but trigger policy undefined).
+- Passphrase bundled into IPA or checked into repo → credential leak; key knowledge = read+write per worker header comment.
+- Worker/R2/DO treated as "no maintenance" until custom domain, bindings, or rate tuning need changes — who owns that for a 1-user app?
 
 **Recommended approach (anchor-compliant):**
-- Local-first canonical, file-based portability only: iOS owns its `read_state`; export/import via Share Sheet / Files (`read-state.json`, same string-ID capped format as web) for manual reconciliation. No auto-sync, no network write path in v1.
-- If any auto path is wanted later: read-only pull of a static `read-ids.json` published by desktop pipeline is the only Pages-compatible direction — and even that should be explicit opt-in, union-merge only (never delete local reads).
+- Local-first, sync-optional: app is fully functional with empty key (commute reading, queue, bookmarks all work offline); sync is best-effort when configured. Passphrase entered in Settings, stored in Keychain/sandbox, never bundled. Silent retry, union-merge via existing LWW; explicit "Sync status" row for 401/429/413 instead of alerts.
+- Document Worker as zero-touch infra (static bindings, no per-user ops), explicitly exempted from the "no server" ban — or the ban must be reworded.
 
 **Alternatives:**
-- LAN sync to TubeLM Flask server (Bonjour + token) — doable but adds pairing UX, conflict UI, and a always-on desktop dependency for a 1-user commuter app; defer.
-- iCloud KV / CloudKit sync — Apple-native but adds entitlements, container config, and LiveContainer sandbox uncertainty; defer.
-- Third-party backend (Firebase/Supabase) — directly violates no-server anchor; rejected.
+- Hard-require sync (block usage until key valid) — bricks the tunnel use case; rejected.
+- Embed key in binary/plist — leaks credential, breaks rotation; rejected.
+- Drop Worker, local-only + manual export/import — purest anchor reading, but discards already-built CRDT sync; defer as fallback if Worker ops prove burdensome.
 
-**Decision needed:** Lock v1 to local-only + manual export/import; remove "sync to GitHub Pages" wording or redefine as read-only pull.
-
-## Q5 — How is foreground-only refresh atomic under flaky transit networking?
-
-**Ambiguity:** §2 + §4 mandate silent ETag revalidate on every launch/foreground (7–8×/week, often mid-transit) with smooth in-place feed update and zero background daemons. No concurrency, ordering, or interruption rule.
-
-**Edge cases / failure modes:**
-- Rapid foreground/background cycling in subway triggers overlapping `URLSession` checks → race: older response overwrites newer, or feed re-renders mid-scroll breaking 120 Hz triage.
-- ETag says "modified" but full fetch takes 30s on edge network; user starts reading cached copy — does mid-read swap yank scroll position?
-- Deploy lands mid-check (new `data.json`, old audio) → Q1 partial-publishns recreates at the refresh layer.
-
-**Recommended approach:**
-- Single-flight refresh: coalesce foreground events, one in-flight check at a time, debounce (e.g. min 60s between checks); `ETag`/`Last-Modified` conditional GET, then full-body fetch with timeout (e.g. 15s, matching web SSRF/RSS guard precedent).
-- Non-disruptive apply: validate-then-swap (per Q1); if user is scrolled/reading, stage new feed and show quiet "New briefing available — tap to refresh" pill instead of force-reloading; never move scroll under touch.
-- Reachability-aware: on expensive/constrained network, still do the cheap header check but defer large audio prefetch; surface failures silently (keep cache, retry next foreground).
-
-**Alternatives:**
-- Force-reload on every foreground — simplest but janky mid-triage reloads; rejected.
-- Background App Refresh / BGTaskScheduler pre-warm — unreliable in LiveContainer guest container per §4; rejected as dependency (may add opportunistically later).
-- Push notification trigger — requires server + APNs + entitlements, violates anchor; rejected.
-
-**Decision needed:** Confirm single-flight + staged-apply-pill + 60s debounce as the refresh contract.
+**Decision needed:** Lock v1 as local-first + optional best-effort sync; forbid bundled keys; clarify Worker exemption in §1 wording.

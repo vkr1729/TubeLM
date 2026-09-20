@@ -23,8 +23,12 @@ class WebpageScraperHandler(BaseSourceHandler):
         self._name = name
         self._url = url
         self._is_index_page = is_index_page
-        self._link_selector = link_selector
-        self._max_items = max_items
+        self._link_selector = link_selector if isinstance(link_selector, str) else ""
+        try:
+            max_count = int(max_items)
+        except (TypeError, ValueError):
+            max_count = 10
+        self._max_items = max(1, min(max_count, 50))
         self._category = category
 
     @property

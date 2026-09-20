@@ -53,9 +53,13 @@ def is_youtube_video_item(item: dict[str, Any]) -> bool:
 
 def build_video_filename(rank: int, source_name: str, title: str) -> str:
     """Build the standardized video filename: {rank:02d} - {source_name} - {title}.mp4."""
+    try:
+        rank_num = int(rank)
+    except (TypeError, ValueError):
+        rank_num = 0
     clean_source = sanitize_filename_part(source_name, max_length=60)
     clean_title = sanitize_filename_part(title, max_length=140)
-    return f"{rank:02d} - {clean_source} - {clean_title}.mp4"
+    return f"{rank_num:02d} - {clean_source} - {clean_title}.mp4"
 
 
 def extract_items_from_top10_html(html_path: Path) -> list[dict[str, Any]]:
@@ -252,7 +256,11 @@ def download_top10_videos(
             logger.info("Skipping non-video Top 10 item #%s: %s", item.get("rank"), item.get("title"))
             continue
 
-        rank = int(item.get("rank") or len(download_tasks) + 1)
+        try:
+            rank_num = int(item.get("rank") or len(download_tasks) + 1)
+        except (TypeError, ValueError):
+            rank_num = len(download_tasks) + 1
+        rank = rank_num
         source_name = str(item.get("source_name") or "YouTube")
         title = str(item.get("title") or "Untitled")
         url = str(item.get("url") or "").strip()

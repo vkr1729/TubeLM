@@ -1,5 +1,26 @@
 import Foundation
 
+/// Lenient primitives for a pipeline-owned feed: dirty producer values
+/// (numeric strings, floats, bools) coerce; anything else falls back.
+private func lenientInt<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> Int? {
+    if let v = (try? c.decodeIfPresent(Int.self, forKey: key)) ?? nil { return v }
+    if let v = (try? c.decodeIfPresent(Double.self, forKey: key)) ?? nil, v.isFinite { return Int(v) }
+    if let s = (try? c.decodeIfPresent(String.self, forKey: key)) ?? nil {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return nil }
+        if let d = Double(t), d.isFinite { return Int(d) }
+    }
+    return nil
+}
+
+private func lenientString<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K, default value: String = "") -> String {
+    if let s = (try? c.decodeIfPresent(String.self, forKey: key)) ?? nil { return s }
+    if let v = (try? c.decodeIfPresent(Int.self, forKey: key)) ?? nil { return String(v) }
+    if let v = (try? c.decodeIfPresent(Double.self, forKey: key)) ?? nil { return String(v) }
+    if let v = (try? c.decodeIfPresent(Bool.self, forKey: key)) ?? nil { return v ? "true" : "false" }
+    return value
+}
+
 public struct DigestFeed: Codable, Sendable, Equatable {
     public let schemaVersion: Int
     public let builtAt: String?
@@ -98,16 +119,22 @@ public struct FeedItem: Codable, Identifiable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
-        self.rank = try c.decodeIfPresent(Int.self, forKey: .rank)
-        self.title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
-        self.sourceName = try c.decodeIfPresent(String.self, forKey: .sourceName) ?? ""
-        self.sourceType = try c.decodeIfPresent(String.self, forKey: .sourceType) ?? "youtube"
-        self.duration = try c.decodeIfPresent(String.self, forKey: .duration)
-        self.durationSeconds = try c.decodeIfPresent(Int.self, forKey: .durationSeconds)
-        self.whyItMatters = try c.decodeIfPresent(String.self, forKey: .whyItMatters)
-        self.url = try c.decodeIfPresent(String.self, forKey: .url)
-        self.audioUrl = try c.decodeIfPresent(String.self, forKey: .audioUrl)
+        if let id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? nil, !id.isEmpty {
+            self.id = id
+        } else if let numericId = try? c.decodeIfPresent(Int.self, forKey: .id) {
+            self.id = String(numericId)
+        } else {
+            self.id = UUID().uuidString
+        }
+        self.rank = lenientInt(c, .rank)
+        self.title = lenientString(c, .title)
+        self.sourceName = lenientString(c, .sourceName)
+        self.sourceType = lenientString(c, .sourceType, default: "youtube")
+        self.duration = try? c.decodeIfPresent(String.self, forKey: .duration)
+        self.durationSeconds = lenientInt(c, .durationSeconds)
+        self.whyItMatters = try? c.decodeIfPresent(String.self, forKey: .whyItMatters)
+        self.url = try? c.decodeIfPresent(String.self, forKey: .url)
+        self.audioUrl = try? c.decodeIfPresent(String.self, forKey: .audioUrl)
     }
 
     public var isArticle: Bool {
@@ -163,14 +190,20 @@ public struct Channel: Codable, Identifiable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
-        self.name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Channel"
-        self.category = try c.decodeIfPresent(String.self, forKey: .category) ?? "tech"
-        self.readMinutes = try c.decodeIfPresent(Int.self, forKey: .readMinutes)
-        self.summaryText = try c.decodeIfPresent(String.self, forKey: .summaryText)
-        self.summaryAudioUrl = try c.decodeIfPresent(String.self, forKey: .summaryAudioUrl)
-        self.audioUrl = try c.decodeIfPresent(String.self, forKey: .audioUrl)
-        self.videos = try c.decodeIfPresent([VideoItem].self, forKey: .videos) ?? []
+        if let id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? nil, !id.isEmpty {
+            self.id = id
+        } else if let numericId = try? c.decodeIfPresent(Int.self, forKey: .id) {
+            self.id = String(numericId)
+        } else {
+            self.id = UUID().uuidString
+        }
+        self.name = lenientString(c, .name, default: "Channel")
+        self.category = lenientString(c, .category, default: "tech")
+        self.readMinutes = lenientInt(c, .readMinutes)
+        self.summaryText = try? c.decodeIfPresent(String.self, forKey: .summaryText)
+        self.summaryAudioUrl = try? c.decodeIfPresent(String.self, forKey: .summaryAudioUrl)
+        self.audioUrl = try? c.decodeIfPresent(String.self, forKey: .audioUrl)
+        self.videos = (try? c.decodeIfPresent([VideoItem].self, forKey: .videos)) ?? []
     }
 
     public var initials: String {
@@ -244,15 +277,21 @@ public struct VideoItem: Codable, Identifiable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
-        self.title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
-        self.duration = try c.decodeIfPresent(String.self, forKey: .duration)
-        self.durationSeconds = try c.decodeIfPresent(Int.self, forKey: .durationSeconds)
-        self.summaryHtml = try c.decodeIfPresent(String.self, forKey: .summaryHtml)
-        self.url = try c.decodeIfPresent(String.self, forKey: .url)
-        self.audioUrl = try c.decodeIfPresent(String.self, forKey: .audioUrl)
-        self.sourceType = try c.decodeIfPresent(String.self, forKey: .sourceType)
-        self.lead = try c.decodeIfPresent(String.self, forKey: .lead)
+        if let id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? nil, !id.isEmpty {
+            self.id = id
+        } else if let numericId = try? c.decodeIfPresent(Int.self, forKey: .id) {
+            self.id = String(numericId)
+        } else {
+            self.id = UUID().uuidString
+        }
+        self.title = lenientString(c, .title)
+        self.duration = try? c.decodeIfPresent(String.self, forKey: .duration)
+        self.durationSeconds = lenientInt(c, .durationSeconds)
+        self.summaryHtml = try? c.decodeIfPresent(String.self, forKey: .summaryHtml)
+        self.url = try? c.decodeIfPresent(String.self, forKey: .url)
+        self.audioUrl = try? c.decodeIfPresent(String.self, forKey: .audioUrl)
+        self.sourceType = try? c.decodeIfPresent(String.self, forKey: .sourceType)
+        self.lead = try? c.decodeIfPresent(String.self, forKey: .lead)
     }
 
     public var isArticle: Bool {

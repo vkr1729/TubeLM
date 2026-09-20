@@ -7,6 +7,7 @@ from web_reader import (
     parse_channel_digest,
     generate_rss_feed,
     build_reader_site,
+    optimize_audio_for_web,
     _clean_video_id,
     _make_item_id,
     _normalize_mobile_item,
@@ -565,6 +566,10 @@ class TestMobileExportContract:
         assert _safe_int_seconds(None) == 0
         assert _safe_int_seconds("42") == 42
         assert _safe_int_seconds(7) == 7
+        assert _safe_int_seconds(float("nan")) == 0
+        assert _safe_int_seconds(float("inf")) == 0
+        assert _safe_int_seconds("12.9") == 12
+        assert _safe_int_seconds(12.9) == 12
 
     def test_normalize_strips_producer_keys_and_maps_summary(self):
         raw = {
@@ -629,3 +634,34 @@ class TestMobileExportContract:
         build_reader_site(summaries_dir, audio_dir, site_dir, sources_file)
         payload = json.loads((site_dir / "data.json").read_text(encoding="utf-8"))
         assert payload["run_date"] != "None"
+
+    def test_normalize_item_rank_garbage_omits_rank(self):
+        item = _normalize_mobile_item(
+            {"title": "T", "url": "https://example.com/x", "rank": "abc"})
+        assert "rank" not in item
+        item = _normalize_mobile_item({"title": "T"}, rank="7")
+        assert item["rank"] == 7
+
+    def test_normalize_channel_rejects_non_list_videos(self):
+        ch = _normalize_mobile_channel({"name": "X", "videos": None})
+        assert ch["videos"] == []
+        ch = _normalize_mobile_channel({"name": "X", "videos": ["x", {"title": "ok"}]})
+        assert len(ch["videos"]) == 1
+
+    def test_make_item_id_caps_overlong_ids(self):
+        assert len(_make_item_id({"id": "x" * 500})) == 16
+
+    def test_generate_rss_feed_tolerates_hostile_shapes(self, tmp_path):
+        generate_rss_feed(
+            {"weeks": {"current": {
+                "run_date": "bad",
+                "channels": ["x", {}, {"name": "C"}],
+                "top20": {"items": [{"rank": 1}, "junk", {"rank": 2, "title": "T"}]},
+            }}},
+            tmp_path / "feed.xml",
+        )
+        assert (tmp_path / "feed.xml").exists()
+
+    def test_optimize_audio_missing_input_returns_false(self, tmp_path):
+        assert optimize_audio_for_web(
+            tmp_path / "missing.mp3", tmp_path / "out.mp3") is False

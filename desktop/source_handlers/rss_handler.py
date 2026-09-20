@@ -48,7 +48,11 @@ class GenericRSSHandler(BaseSourceHandler):
         self._url = url
         self._force_text_extraction = force_text_extraction
         self._behind_paywall = behind_paywall
-        self._max_items = max_items
+        try:
+            max_count = int(max_items)
+        except (TypeError, ValueError):
+            max_count = 15
+        self._max_items = max(1, min(max_count, 50))
         self._category = category
 
     @property

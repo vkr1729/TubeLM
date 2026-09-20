@@ -57,3 +57,23 @@
 - **Persistent Mini-Player & Commute Queue Drawer:**
   - Floats above bottom tab bar with track title and queue count badge (`3 in Queue`).
   - Tapping opens the native iOS **Now Playing & Commute Deck Sheet** with scrubber, 15s skip, 1.25x speed, and the full re-orderable "Up Next" queue.
+
+---
+
+## 4. Defect Resolution & LiveContainer Hardening (Phase 1 Incident)
+
+### 4.1 Missing App Icon
+- **Problem:** App displays blank/default placeholder icon in LiveContainer and iOS home screen.
+- **Requirement:**
+  - Generate full set of production iOS PNG icons (`AppIcon60x60@2x.png` [120x120], `AppIcon60x60@3x.png` [180x180], `AppIcon76x76@2x.png` [152x152], `AppIcon.png` [512x512 / 1024x1024]) adhering to the Executive Briefing design system (emerald background `#15803d`, lime-accented "TL" monogram).
+  - Configure `Info.plist` with `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconFiles`, and `CFBundleIconFile` referencing the icon assets.
+  - Package all icon PNGs directly into the root of `TubeLM.app` within the IPA payload.
+
+### 4.2 Immediate Crash on App Launch
+- **Problem:** App crashes immediately upon launch before rendering the first screen.
+- **Root Causes & Requirements:**
+  1. **SPM Bundle.module fatalError Trap:** `ContentStore.loadCachedFeed()` called `Bundle.module` which throws `fatalError` when run outside Swift PM test builds. Requirement: Eliminate `Bundle.module` dependency for runtime bundle loading; safely query `Bundle.main.url(forResource: "data", withExtension: "json")` and fallback to sandbox documents with zero crash risk.
+  2. **Eager Audio Session Activation:** `AudioPlayerManager.init()` eagerly activated `AVAudioSession.sharedInstance().setActive(true)` during app launch, causing launch conflicts under LiveContainer's host audio session. Requirement: Defer `setActive(true)` until explicit user playback starts (`play()` / `playTrack()`).
+  3. **Missing Info.plist Platform Keys:** Missing `CFBundleSupportedPlatforms` (`iPhoneOS`), `MinimumOSVersion` (`17.0`), `CFBundlePackageType` (`APPL`), `CFBundleSignature` (`????`), and launch screen declarations. Requirement: Complete `Info.plist` according to Apple and LiveContainer specifications.
+  4. **Unsigned Mach-O Binary (AMFI Rejection):** Packaging script produced Mach-O binary without `LC_CODE_SIGNATURE`, causing iOS AMFI to kill the process on launch. Requirement: Ensure ad-hoc code signing (`codesign -s - --force --deep` or `ldid -S`) is executed during packaging.
+

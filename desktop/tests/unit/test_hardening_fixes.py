@@ -48,6 +48,11 @@ class TestFfmpegTimeout:
         assert web_reader.optimize_audio_for_web(src, dest) is False
         assert dest.read_bytes() == b"dummy_data"
 
+    def test_missing_input_returns_false_without_crash(self, tmp_path):
+        import web_reader
+        assert web_reader.optimize_audio_for_web(
+            tmp_path / "missing.mp3", tmp_path / "out.mp3") is False
+
 
 class TestFetchGuard:
     def test_loopback_is_blocked(self):
@@ -120,6 +125,17 @@ class TestAtomicStateWrites:
         assert clean == sorted({"a", "b", "x" * gui.MAX_READ_ID_LENGTH})
         big = [f"id-{i}" for i in range(gui.MAX_READ_IDS + 100)]
         assert len(gui._sanitize_read_ids(big)) == gui.MAX_READ_IDS
+
+    def test_read_ids_reject_non_list_input(self):
+        import gui
+        assert gui._sanitize_read_ids("notalist") == []
+        assert gui._sanitize_read_ids(None) == []
+        assert gui._sanitize_read_ids({"a": 1}) == []
+
+    def test_read_ids_preserve_mobile_keys(self):
+        import gui
+        mobile = ["dQw4w9WgXcQ", "https://example.com/a", "2026-09-04_AI_Explained"]
+        assert gui._sanitize_read_ids(mobile) == sorted(mobile)
 
     def test_read_ids_canonical_only_filtering(self):
         import gui

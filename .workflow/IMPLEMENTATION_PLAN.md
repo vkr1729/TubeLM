@@ -138,3 +138,20 @@ ios/
   - Author `Info.plist` with `UIBackgroundModes: [audio]` and LiveContainer configurations.
   - Author `scripts/package_ipa.sh` to package `.app` bundle into unsigned `.ipa`.
   - Author `.github/workflows/build-ios.yml` to compile on `macos-latest` and publish `.ipa` artifacts on GitHub Releases.
+
+### Phase 6: App Icon & Launch Crash Defect Resolution (LiveContainer Hardening)
+- **Target:** `ios/TubeLM/`, `ios/Sources/`, `scripts/package_ipa.sh`, `.github/workflows/build-ios.yml`
+- **Actions:**
+  1. **App Icon Assets & Declaration:**
+     - Generate crisp production PNG icons (`AppIcon60x60@2x.png` [120x120], `AppIcon60x60@3x.png` [180x180], `AppIcon76x76@2x.png` [152x152], `AppIcon83.5x83.5@2x.png` [167x167], `AppIcon.png` [1024x1024]) in `ios/TubeLM/`.
+     - Update `ios/TubeLM/Info.plist` with `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconFiles`, `CFBundleIconFile`, `CFBundleSupportedPlatforms` (`iPhoneOS`), `MinimumOSVersion` (`17.0`), `CFBundlePackageType` (`APPL`), `CFBundleSignature` (`????`).
+  2. **Launch Path Crash Elimination:**
+     - In `ContentStore.swift`: Remove `Bundle.module` runtime reliance (which invokes `Swift.fatalError` when not running in Swift PM test harnesses). Safely load from `Bundle.main.url(forResource: "data", withExtension: "json")` or sandbox documents, with never-throw fallback to staged empty state.
+     - In `AudioPlayerManager.swift`: Remove eager `setActive(true)` during `init()`. Defer audio session activation to `play()` and `playTrack()` so app launch never conflicts with LiveContainer host audio session.
+  3. **Packaging & Ad-Hoc Code Signing:**
+     - Update `scripts/package_ipa.sh` to stage all `AppIcon*.png` files into `Payload/TubeLM.app/`.
+     - Ensure ad-hoc code signing (`codesign -s - --force --deep "$APP_DIR"` or `ldid -S`) is executed so the Mach-O binary and bundle contain valid `LC_CODE_SIGNATURE` load command, preventing iOS AMFI from killing the app upon launch.
+     - Add post-packaging validation assertions: assert all 5 icon PNGs exist in `Payload/TubeLM.app/`, assert `Info.plist` contains icon keys and `CFBundleSupportedPlatforms`, assert Mach-O binary is non-empty and signed.
+  4. **CI Workflow Alignment:**
+     - Update `.github/workflows/build-ios.yml` to copy `AppIcon*.png` and perform ad-hoc code signing during device IPA packaging, matching the simulator packaging.
+

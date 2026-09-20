@@ -1,13 +1,24 @@
-# Audit & Remediation Report — TubeLM iOS vs `.workflow/REQUIREMENTS.md`
+# Audit & Remediation Report — TubeLM vs `.workflow/REQUIREMENTS.md`
 
-Date: 2026-09-19 · Scope: personal-use scale only (no enterprise patterns introduced).
-Baseline: `swift test` (TubeLMCore) could not run out-of-the-box — the toolchain's
-`swift-test` requires `libxml2.so.2` while the host provides `.so.16`; tests were
-executed with a compat symlink (`LD_LIBRARY_PATH=/tmp/llxml`). Python baseline:
-244 unit tests passing, ruff clean, `node --check worker/worker.js` clean.
+Date: 2026-09-20 · Scope: personal-use scale only (no enterprise patterns introduced).
+Auditor method: adversarial — probed every workspace trust boundary with hostile
+inputs (nulls, wrong types, garbage strings, NaN/Inf, missing files, non-JSON
+bodies, over-long ids) and fixed what crashed, desynced, or regressed.
 
-Final verification: **250 Python tests passing, ruff clean, 7/7 Swift tests
-passing, worker syntax clean, CI YAML valid, Info.plist parses.**
+Baseline (pre-remediation, re-measured 2026-09-20):
+`swift test` needs a compat shim on this host (`swift-test` wants
+`libxml2.so.2`, host provides `.so.16`; `mkdir -p /tmp/llxml &&
+ln -sf /usr/lib/x86_64-linux-gnu/libxml2.so.16 /tmp/llxml/libxml2.so.2`).
+Python: 277 unit + 26 integration passing, ruff clean,
+`node --check worker/worker.js` clean. Prior report (2026-09-19, sections A–K
+below) verified intact — all fixes re-checked, none regressed.
+
+Final verification (post-remediation): **291 Python passing, ruff clean, 20/20
+Swift tests passing (incl. UAT suite), `node --check worker/worker.js` clean,
+`web_reader --build-only` clean, synthetic mobile-contract projection
+(20 items / 23 channels) decodes.**
+
+Prior audit (2026-09-19, retained verbatim — re-verified, no regressions):
 
 ---
 
@@ -197,7 +208,7 @@ formatted bullet points" requirement for real pipeline HTML.
 - LiveContainer packaging stays unsigned-zip (correct for the JIT container);
   no entitlements beyond `audio` background mode were added.
 
-## K. Tests added
+## K. Tests added (2026-09-19 cycle)
 
 - Swift (+2 new, 7 total): worker-contract payload/response, out-of-bounds
   queue moves, tombstone unmark + remote merge, non-finite timestamp rejection,
@@ -205,3 +216,197 @@ formatted bullet points" requirement for real pipeline HTML.
 - Python (+6 new, 250 total in `tests/unit/`): id/URL convergence, safe-int
   coercion, producer-key stripping, `summary→why_it_matters` mapping,
   `run_date != "None"`.
+
+---
+
+# New audit cycle — 2026-09-20 (this session)
+
+Working tree at audit start already contained uncommitted §4 remediation
+(icon set, plist keys, `Bundle.module` removal, deferred audio session,
+`package_ipa.sh` + CI validation) plus a committed-but-stale `ios/TubeLM.ipa`
+(no icons inside). Each item below was **probed with a hostile input first,
+then fixed, then covered by a test**. Personal-use scale respected throughout:
+no new services, deps, tables, or background daemons.
+
+## L. `read_state` cross-device wipe (critical — phone state silently dropped)
+
+- **Probe:** mobile identity keys are raw `video_id` / raw URL
+  (`7K_sA6o1dOE`, `https://example.com/a`) — the dashboard
+  `_CANONICAL_READ_ID_RE` (`^\d{4}-\d{2}-\d{2}_.+`) matches **none** of them.
+  `POST /api/reader/read-state` ran `_sanitize_read_ids(ids,
+  canonical_only=True)`, so any phone-originated read state forwarded through
+  the PWA/desktop path was reduced to `[]`. The single-id toggle path
+  (`{id, is_read}`) also failed to discard the truncated form on unmark, and
+  crashed the comparison when the stored document was a non-list.
+  `purge_old_digests_and_audio` had the same shape of bug in milder form
+  (non-date ids kept, but rewrite was a non-atomic `write_text` and a
+  non-list `read_ids` document broke the diff).
+- **Fix** (`desktop/gui.py`): default sanitize path (no `canonical_only`)
+  preserves all string ids; single-id path truncates symmetrically on add
+  **and** remove and tolerates a corrupt/non-list stored document.
+  `canonical_only=True` retained as an opt-in for the legacy date-scoped
+  channel view only.
+- **Fix** (`desktop/web_reader.py`): purge keeps non-date ids (mobile keys
+  have no retention date and must never age out), guards non-list documents,
+  and rewrites atomically (pid-temp + `os.replace`).
+- **Tests:** `test_read_state_preserves_mobile_keys` (integration: video-id +
+  URL round-trip through the real endpoint),
+  `test_read_ids_preserve_mobile_keys` + `test_read_ids_reject_non_list_input`
+  (unit). Existing `test_read_ids_canonical_only_filtering` kept green —
+  opt-in behavior unchanged.
+
+## M. Unsafe numeric coercion: NaN/Inf/decimals crash or poison the week
+
+- **Probe:** `_safe_int_seconds(12.9)` **raised** `ValueError`
+  (`int("12.9")` throws — only `int()`'s own error was caught, not the
+  float-string case); `_safe_channel_int(float('nan'))` raised; Swift
+  `decodeIfPresent(Int.self)` throws on `"7"` / `12.9` / `true`, so one dirty
+  producer row kills the whole feed decode.
+- **Fix** (Python): both coercers go through `float()` + `math.isfinite` —
+  `"12.9"`/`12.9` → `12`, NaN/Inf/garbage → `0`, never raise.
+- **Fix** (Swift, `DigestFeed.swift`): file-private `lenientInt`/
+  `lenientString` helpers; `FeedItem.rank`/`durationSeconds`,
+  `Channel.readMinutes`, and all `id`/`title`/`name`/`category` fields coerce
+  numeric-string/float/bool and fall back instead of throwing. Empty-string
+  ids fall back to `UUID()`.
+- **Tests:** extended `test_safe_int_seconds_never_crashes` (NaN/Inf/decimals),
+  new Swift `testLenientDecodingToleratesDirtyProducerValues`.
+
+## N. Mobile-export shape crashes on hostile producer rows
+
+- **Probe:** `_normalize_mobile_item(raw, rank="abc")` passed the garbage
+  string into `data.json` (`"rank": "abc"` — Swift `Int?` decode then throws
+  for the whole feed); `_normalize_mobile_channel({'videos': None})` raised
+  `TypeError: 'NoneType' object is not iterable`, killing the weekly build;
+  `_make_item_id({'id': 'x'*500})` emitted a 500-char id breaking every
+  256-char cap downstream; `optimize_audio_for_web(missing.mp3)` raised
+  `FileNotFoundError` out of the fallback copy; `generate_rss_feed` raised
+  bare `KeyError: 'title'` on a partial Top-20 row and accepted non-dict
+  channels/items; `data.json` temp-write used `Path.replace` with no cleanup.
+- **Fix** (`desktop/web_reader.py`): rank coerced to `Int`, omitted when
+  garbage; channel normalizer rejects non-dict input and non-list `videos`;
+  `_make_item_id` hashes over-long ids to 16-char form; missing audio input
+  returns `False` (logs, no raise) and the fallback copy guards `OSError`;
+  RSS filters non-dict rows and uses `.get()` throughout; `data.json` swap is
+  `os.replace` in `try/finally` with temp cleanup.
+- **Tests:** `test_normalize_item_rank_garbage_omits_rank`,
+  `test_normalize_channel_rejects_non_list_videos`,
+  `test_make_item_id_caps_overlong_ids`,
+  `test_generate_rss_feed_tolerates_hostile_shapes`,
+  `test_optimize_audio_missing_input_returns_false`.
+
+## O. Flask endpoints: non-JSON bodies + type-confusion crashes
+
+- **Probe:** `POST`ing `text/plain` to the 10 endpoints using `request.json`
+  raised `415` (Werkzeug, unhandled HTML error page); non-string
+  `name`/`url`/`channel_id`/`identifier` raised `AttributeError` on `.strip()`
+  → **500**; `{"channels": "UC123"}` iterated a string into corrupt
+  `--channels U,C,1,2,3` argv; `compute_state_key("notadict")` raised
+  `AttributeError`; numeric `timestamp` raised on `.replace()`; unbounded
+  `name`/`link_selector`/`identifier`/`url` flowed into stored JSON.
+- **Fix** (`desktop/gui.py`): all 10 `request.json` sites → silent
+  `get_json(silent=True)` + `isinstance(dict)` guard; per-field
+  `isinstance(str)` checks with 400s before `.strip()`; `channels` must be a
+  list; `compute_state_key`/`_enrich…` skip non-dicts; `state/channel`
+  validates `channel_id`/`state_key`/`timestamp` types; length caps (`name`
+  256, `channel_id` 128, `url`/`identifier` 2048, `link_selector` 512, prompt
+  text 200k).
+- **Tests** (`TestRequestHardening`, 6 new): garbage-body sweep,
+  channels-type, non-string source fields, non-string timestamp, non-string
+  prompt text.
+
+## P. Handler construction: KeyError on dirty `sources.json` rows
+
+- **Probe:** any loader-passing row with a wrong-typed field
+  (`max_items: "lots"`, `category: 123`, missing `name`) raised
+  `KeyError`/`TypeError` inside `create_handler` or handler `__init__`.
+- **Fix** (`factory.py`, `rss_handler.py`, `webpage_handler.py`):
+  `create_handler` validates `name`/`channel_id`/`url` (descriptive
+  `ValueError` per row — `main.py` already catches per-source and skips);
+  category falls back to `"tech"`; `max_items` clamped to `[1, 50]` at factory
+  and handler `__init__` (bool-safe); non-string `link_selector` → `""`.
+- **Tests:** existing `test_factory` + `test_sources_loader` green (16
+  passing); clamp covered by `test_clamps_source_item_limit` (`5000` → `50`).
+
+## Q. Downloader: `ValueError` on garbage rank kills archival
+
+- **Probe:** `build_video_filename("x", …)` raised `Unknown format code 'd'`;
+  `download_top10_videos` with `rank: "abc"` raised `invalid literal for
+  int()` — one bad row aborted the whole Top-10 archival pass.
+- **Fix** (`desktop/top10_downloader.py`): rank coerced (`→ 0` filename,
+  `→ sequential` task). Verified `build_video_filename('x',…)` →
+  `"00 - S - T.mp4"`.
+
+## R. Swift store: blank/over-long ids bypass every 256-char cap
+
+- **Probe:** `markItemRead("   ")` stored a whitespace id; 500-char ids flowed
+  into all three stores — desyncing from the worker (`MAX_ID_LENGTH = 256`,
+  drops them) and dashboard (truncates), so one item had three keys.
+- **Fix** (`ContentStore.swift` + `CloudflareSyncClient.swift`): trim +
+  reject blank + reject `>256` at every store entry point
+  (`mark`/`unmark`, bookmarks, all state-map load/save/merge paths); sync
+  push sanitizes ids/states to worker bounds (trim, 256-cap, finite-only,
+  5000-cap) before encoding.
+- **Tests:** Swift `testStoreRejectsBlankAndOverlongIds`.
+
+## S. Swift decode on real-world nulls (verified, extended by M)
+
+- `audio_url: null` on all 20 Top-20 items and absent `summary_audio_url` —
+  already handled (`String?` optionals). Residual wrong-type risk covered in
+  M. Synthetic projection of the full mock feed (20 items / 23 channels,
+  producer keys stripped) verified contract-clean.
+
+## T. UI-spec drift: fabricated durations in two places
+
+- **Probe:** `ChannelsView` header rendered `"\(readMinutes ?? 4)m"` —
+  unknown read time displayed a fabricated `4m`; channel `+ Queue` fell back
+  to the same `4m`; negative `durationSeconds` summed into queue math.
+- **Fix** (`ChannelsView.swift`): header hides `· Nm` when `readMinutes` is
+  nil/≤0; queue label prefers positive-`durationSeconds` sum, then positive
+  `readMinutes`, else `""` (deck row already hides `·` on empty duration).
+
+## U. Stale `ios/TubeLM.ipa` (flagged, not replaced)
+
+- Committed `ios/TubeLM.ipa` (2.38 MB) predates the icon work — `unzip -l`
+  shows 5 files, **no `AppIcon*.png`**; fresh `build/TubeLM.ipa` (gitignored)
+  has all 10 files with icons, same `arm64` binary hash (`8dc16076…`).
+  Replacing a 2.4 MB binary is a release action for the owner (rebuild +
+  re-sign via CI `Package LiveContainer IPA`), not an audit side effect.
+  **Recommendation:** after merging, regenerate via
+  `scripts/package_ipa.sh`/CI and overwrite `ios/TubeLM.ipa`, or ignore
+  `ios/*.ipa` and ship CI artifacts only.
+
+## V. Checked and deliberately NOT changed (this cycle)
+
+- `worker/worker.js` — re-audited: LWW merge, tombstones, per-IP + per-key
+  rate limits, 1 MiB cap, header-only auth, CORS, Range/audio path correct.
+- `desktop/main.py`, `notebooklm_service.py`, `tts_service.py`,
+  `audio_storage.py`, `paths.py`, `run_control.py`, `sources_loader.py`,
+  `email_service.py`, `summary_quality.py`, `weekly_audio_service.py`,
+  `top10_service.py`, extractors — garbage timestamps / corrupt state files /
+  `None` handlers all fall back safely.
+- `desktop/templates/reader.html` — shipped Pages surface; merge/tombstone
+  logic already handles the mobile key space. Untouched.
+- `.workflow/mocks/build_mock1_full.py` f-string `SyntaxError` — still
+  present, still design-time mock tooling only (tracked, not a shipped path;
+  other 12 mock scripts compile). Not fixed: editing it risks invalidating
+  the UAT fixtures it emits.
+- Top-20 YouTube-only pin (`_source_candidates` skips non-YouTube rows
+  without `video_id`) — pre-existing product decision ("pure video top 20",
+  commit `6e49ac4`); conflicts with REQUIREMENTS §2 "20 videos/articles"
+  wording but out of scope for a crash-fix audit. Flagged, not changed.
+- `MinimumOSVersion 17.0` vs §1 "iOS 26 baseline" — floor vs tested target,
+  consistent as written.
+
+## W. Tests added this cycle
+
+- Python unit (+13 incl. extended): NaN/Inf/decimal coercion;
+  rank-garbage omission; non-list-videos rejection; over-long-id hashing;
+  hostile-RSS tolerance; missing-audio `False`; mobile-key preservation;
+  non-list sanitize rejection; missing-input ffmpeg `False`.
+- Python integration (+6 in `TestRequestHardening`): garbage-body sweep;
+  mobile-key round-trip; channels-type; non-string source fields; non-string
+  timestamp; non-string prompt text.
+- Swift (+2): lenient dirty-producer decode; blank/over-long id rejection.
+- Totals: **291 Python passing** (265 unit + 26 integration), **20 Swift
+  executed / 0 failures**, ruff clean, worker syntax clean.

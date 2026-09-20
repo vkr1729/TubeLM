@@ -24,7 +24,7 @@ final class TubeLMCoreTests: XCTestCase {
         }
 
         if data == nil {
-            var searchDirs: [URL] = [
+            let searchDirs: [URL] = [
                 URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
                 URL(fileURLWithPath: FileManager.default.currentDirectoryPath).deletingLastPathComponent(),
                 URL(fileURLWithPath: FileManager.default.currentDirectoryPath).deletingLastPathComponent().deletingLastPathComponent()
@@ -81,9 +81,25 @@ final class TubeLMCoreTests: XCTestCase {
             channels: []
         )
         try await store.saveFeed(dummyFeed)
-        let loadedFeed = try await store.loadCachedFeed()
+        let loadedFeed = await store.loadCachedFeed()
         XCTAssertEqual(loadedFeed?.schemaVersion, 1)
         XCTAssertEqual(loadedFeed?.top20.items.count, 1)
+
+        // Test Corrupt Cache Resilience (Never-throw + quarantine)
+        let corruptTempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let corruptStore = ContentStore(baseDirectory: corruptTempDir)
+        let cacheDir = corruptTempDir.appendingPathComponent("cache")
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let corruptFeedFile = cacheDir.appendingPathComponent("feed.json")
+        try "CORRUPT_TRUNCATED_GARBAGE_DATA".data(using: .utf8)?.write(to: corruptFeedFile)
+
+        // loadCachedFeed must never throw and must handle corruption gracefully
+        let healedFeed = await corruptStore.loadCachedFeed()
+        XCTAssertNotNil(healedFeed, "Should fall back to valid bundled/mock feed")
+        // The corrupt file should have been quarantined
+        let corruptFiles = (try? FileManager.default.contentsOfDirectory(atPath: cacheDir.path))?.filter { $0.contains(".corrupt") } ?? []
+        XCTAssertFalse(corruptFiles.isEmpty, "A quarantined corrupt file should exist in cache directory")
+        try? FileManager.default.removeItem(at: corruptTempDir)
 
         // 2. Test Bookmarks (Pinned)
         let bItem = FeedItem(id: "bm_1", rank: nil, title: "Saved Deep Explainer", sourceName: "3Blue1Brown")
@@ -237,5 +253,52 @@ final class TubeLMCoreTests: XCTestCase {
         )
         let resolved = CommuteQueueModel.resolveChannelPlayback(for: channel, readIDs: [])
         XCTAssertEqual(resolved.audioUrl, "audio/real.mp3")
+    }
+
+    func testStoreRejectsBlankAndOverlongIds() async throws {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("TubeLMTest-ids-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let store = ContentStore(baseDirectory: tempDir)
+        try await store.markItemRead("   ")
+        try await store.markItemRead(String(repeating: "x", count: 300))
+        let reads = await store.loadReadIDs()
+        XCTAssertTrue(reads.isEmpty)
+        let states = await store.loadItemStates()
+        XCTAssertTrue(states.isEmpty)
+        try await store.saveBookmark(FeedItem(id: "  ", title: "Blank"))
+        let bookmarks = await store.loadBookmarks()
+        XCTAssertTrue(bookmarks.isEmpty)
+    }
+
+    func testLenientDecodingToleratesDirtyProducerValues() throws {
+        let json = """
+        {"id": 123, "rank": "7", "title": 42, "source_name": true,
+         "source_type": "youtube", "duration_seconds": "45",
+         "url": "https://example.com/x", "audio_url": null}
+        """.data(using: .utf8)!
+        let item = try JSONDecoder().decode(FeedItem.self, from: json)
+        XCTAssertEqual(item.id, "123")
+        XCTAssertEqual(item.rank, 7)
+        XCTAssertEqual(item.title, "42")
+        XCTAssertEqual(item.sourceName, "true")
+        XCTAssertEqual(item.durationSeconds, 45)
+
+        let badRank = """
+        {"id": "a", "title": "T", "rank": "abc", "duration_seconds": "NaN"}
+        """.data(using: .utf8)!
+        let bad = try JSONDecoder().decode(FeedItem.self, from: badRank)
+        XCTAssertNil(bad.rank)
+        XCTAssertNil(bad.durationSeconds)
+
+        let badChannel = """
+        {"id": "", "name": 7, "category": true, "read_minutes": "bad", "videos": "nope"}
+        """.data(using: .utf8)!
+        let channel = try JSONDecoder().decode(Channel.self, from: badChannel)
+        XCTAssertFalse(channel.id.isEmpty)
+        XCTAssertEqual(channel.name, "7")
+        XCTAssertEqual(channel.category, "true")
+        XCTAssertNil(channel.readMinutes)
+        XCTAssertTrue(channel.videos.isEmpty)
     }
 }

@@ -294,6 +294,60 @@ class TestSourcesAPI:
         mock_build.assert_not_called()
 
 
+class TestRequestHardening:
+    def test_garbage_body_does_not_500(self, flask_client):
+        for path in ("/api/run", "/api/sources", "/api/reader/read-state",
+                     "/api/sources/validate", "/api/config"):
+            rv = flask_client.post(path, data="not json", content_type="text/plain")
+            assert rv.status_code in (200, 400, 415)
+
+    def test_read_state_preserves_mobile_keys(self, flask_client, tmp_path):
+        import paths
+        monkeypatch_read = tmp_path / "read_state.json"
+        orig = paths.get_read_state_file
+        try:
+            paths.get_read_state_file = lambda: monkeypatch_read
+            rv = flask_client.post("/api/reader/read-state", json={
+                "read_ids": ["dQw4w9WgXcQ", "https://example.com/a"]})
+            assert rv.status_code == 200
+            assert sorted(rv.get_json()["read_ids"]) == [
+                "dQw4w9WgXcQ", "https://example.com/a"]
+        finally:
+            paths.get_read_state_file = orig
+
+    def test_run_channels_must_be_list(self, flask_client, monkeypatch):
+        import gui
+        captured = {}
+
+        def fake_start(args):
+            captured["args"] = args
+            return True, "Pipeline started."
+
+        monkeypatch.setattr(gui.runner, "start", fake_start)
+        rv = flask_client.post("/api/run", json={"channels": "UC123"})
+        assert rv.status_code == 200
+        assert "--channels" not in captured["args"]
+
+    def test_sources_rejects_non_string_fields(self, flask_client):
+        rv = flask_client.post("/api/sources", json={
+            "name": ["not", "a", "string"], "type": "rss",
+            "url": "https://example.com/feed.xml"})
+        assert rv.status_code == 400
+        rv = flask_client.post("/api/sources", json={
+            "name": "X", "type": "rss", "url": ["not", "a", "url"]})
+        assert rv.status_code == 400
+
+    def test_state_channel_rejects_non_string_timestamp(self, flask_client):
+        rv = flask_client.post("/api/state/channel", json={
+            "state_key": "rss:abcd1234efgh", "timestamp": 12345})
+        assert rv.status_code == 400
+
+    def test_prompts_rejects_non_string_text(self, flask_client):
+        rv = flask_client.post("/api/prompts", json={
+            "category": "tech", "type": "summary", "text": ["x"]})
+        assert rv.status_code == 400
+
+
 class TestNotebookLoopAndLogin:
     def test_login_helper_symbol_is_importable(self):
         """BUG-025: fail loudly at test time if upstream renames the helper."""

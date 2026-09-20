@@ -86,6 +86,7 @@ jobs:
           if swift build -c debug --triple arm64-apple-ios17.0-simulator --sdk "$SIM_SDK_PATH"; then
             mkdir -p ../build/Simulator/TubeLM.app
             cp TubeLM/Info.plist ../build/Simulator/TubeLM.app/Info.plist
+            cp TubeLM/AppIcon*.png ../build/Simulator/TubeLM.app/ 2>/dev/null || true
             cp ../.workflow/mocks/mock_data.json ../build/Simulator/TubeLM.app/data.json
             SIM_BIN=$(find .build -name TubeLMApp -type f -perm +111 2>/dev/null | grep -E 'simulator.*/debug/TubeLMApp' | head -n 1 || find .build -name TubeLMApp -type f 2>/dev/null | head -n 1 || true)
             if [ -n "$SIM_BIN" ] && [ -f "$SIM_BIN" ]; then
@@ -126,8 +127,6 @@ jobs:
           mkdir -p build/Payload
           APP_DIR="build/Payload/TubeLM.app"
           mkdir -p "$APP_DIR"
-          cp ios/TubeLM/Info.plist "$APP_DIR/Info.plist"
-          cp .workflow/mocks/mock_data.json "$APP_DIR/data.json"
           
           echo "Locating built TubeLMApp binary..."
           find ios/.build -name TubeLMApp -type f || true
@@ -149,11 +148,10 @@ jobs:
           file "$BIN_PATH"
           cp "$BIN_PATH" "$APP_DIR/TubeLM"
           chmod +x "$APP_DIR/TubeLM"
-          
-          cd build && zip -qr -9 TubeLM.ipa Payload
-          echo "IPA contents:"
-          unzip -l TubeLM.ipa
-          ls -lh TubeLM.ipa
+
+          # Execute unified packaging script with icon staging, ad-hoc codesigning & validation
+          chmod +x scripts/package_ipa.sh
+          ./scripts/package_ipa.sh "$APP_DIR" "build/TubeLM.ipa"
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4

@@ -96,10 +96,12 @@ public struct ChannelsView: View {
                                         Text(isCompleted ? "✓ Channel Completed" : "\(watchedCount)/\(totalCount) Completed")
                                             .font(.system(size: 11, weight: .semibold))
                                             .foregroundColor(isCompleted ? AppTheme.accent : .primary)
-                                        Text("·")
-                                        Text("\(channel.readMinutes ?? 4)m")
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.secondary)
+                                        if let minutes = channel.readMinutes, minutes > 0 {
+                                            Text("·")
+                                            Text("\(minutes)m")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.secondary)
+                                        }
                                     }
                                 }
                             }
@@ -137,8 +139,15 @@ public struct ChannelsView: View {
                                 }
 
                                 Button(action: {
-                                    let totalSeconds = channel.videos.compactMap { $0.durationSeconds }.reduce(0, +)
-                                    let durationLabel = totalSeconds > 0 ? "\(totalSeconds / 60)m" : "\(channel.readMinutes ?? 4)m"
+                                    let totalSeconds = channel.videos.compactMap { $0.durationSeconds }.filter { $0 > 0 }.reduce(0, +)
+                                    let durationLabel: String
+                                    if totalSeconds > 0 {
+                                        durationLabel = "\(totalSeconds / 60)m"
+                                    } else if let minutes = channel.readMinutes, minutes > 0 {
+                                        durationLabel = "\(minutes)m"
+                                    } else {
+                                        durationLabel = ""
+                                    }
                                     let item = QueueItem(
                                         id: "ch_\(channel.id)",
                                         title: "\(channel.name) (\(totalCount) Items)",

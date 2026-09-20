@@ -169,13 +169,31 @@ public actor CloudflareSyncClient {
         guard isConfigured else { return nil }
         var request = authorizedRequest(method: "POST")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let cleanIds = Array(readIds.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty && $0.count <= 256 }.prefix(5000))
+        let cleanTop20 = Array(top20Read.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty && $0.count <= 256 }.prefix(5000))
+        var cleanStates: [String: Double] = [:]
+        for (key, ts) in itemStates {
+            let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256, ts.isFinite else { continue }
+            cleanStates[id] = ts
+        }
+        var cleanBookmarkStates: [String: Double] = [:]
+        for (key, ts) in bookmarkStates {
+            let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256, ts.isFinite else { continue }
+            cleanBookmarkStates[id] = ts
+        }
         request.httpBody = try JSONEncoder().encode(
             SyncPayload(
-                readIds: readIds,
-                top20Read: top20Read,
-                itemStates: itemStates,
+                readIds: cleanIds,
+                top20Read: cleanTop20,
+                itemStates: cleanStates,
                 bookmarks: bookmarks,
-                bookmarkStates: bookmarkStates
+                bookmarkStates: cleanBookmarkStates
             )
         )
         let data = try await perform(request)

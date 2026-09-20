@@ -186,3 +186,139 @@ not mock-only decoding.
    LiveContainer confirmed or descoped.
 4. Retention: pin-exempt + caps (50 items / 500 MB suggested) accepted.
 5. Typographic token: system mono instead of JetBrains Mono.
+
+---
+
+## Phase 6 review — App Icon & Launch Crash (code-verified 2026-09-20)
+
+Code-verified status of Phase 6 prerequisites (read against `ios/`,
+`scripts/`, `.github/workflows/build-ios.yml`, not spec-read):
+
+- Icons: DONE on disk — all 5 PNGs in `ios/TubeLM/` with correct dimensions
+  (1024, 120, 180, 152, 167) and RGB, no alpha. Generator
+  `scripts/generate_icons.py` is deterministic (Pillow LANCZOS from 2048 master).
+- Icons: OPEN on declaration — `ios/TubeLM/Info.plist` has zero
+  `CFBundleIcons*` keys; the device-IPA CI step and `scripts/package_ipa.sh`
+  never stage icons. Files present + undeclared = still blank icon.
+  Asset generation without plist/packaging is unverifiable alone.
+- Audio: OPEN — `AudioPlayerManager.init()` still calls `setupAudioSession()`
+  → `setCategory(.playback)` + `setActive(true)`; `RootTabView` instantiates
+  `.shared` at view init, so eager activation fires at launch. Exactly what
+  §4.2.2 bans.
+- Cache: HALF-OPEN — `#if SWIFT_PACKAGE` guard + `Bundle.main` fallback exist,
+  but `loadCachedFeed()` still `throws` when `feed.json` exists-but-corrupt
+  (`ContentStore.swift:64-67`, throwing `Data(contentsOf:)` + `decode`).
+  Caller uses `try?`, so no crash — but the result is silent blank rather
+  than healed fallback. This is the residual risk Q2 flagged.
+- Signing: OPEN — simulator step runs `codesign -s - --force --deep`; the
+  device IPA step and `package_ipa.sh` run no signing and assert nothing.
+
+### P6-1 — Split Phase 6 into independently verifiable slices (sequencing risk)
+
+Phase 6 bundles four independent failure modes (undeclared icons, eager
+audio, throwing cache, unsigned binary) under one heading with one exit. If
+AMFI kills the binary, the icon fix cannot even be observed — slices must
+order so each is verifiable before the next:
+
+1. Plist + icon staging (no code risk; verifiable by unzip + PlistBuddy).
+2. Cache never-throw (pure `TubeLMCore`, Linux-testable via `swift test`).
+3. Audio defer (needs device/simulator ear-test; see P6-3).
+4. Signing + CI gate last (only meaningful once 1–3 land).
+
+Recommendation: record four sub-exits, not one Phase 6 checkbox.
+
+### P6-2 — Icon declaration is the actual fix, not generation (pitfall)
+
+Generation is done; the defect is declaration + staging. Concrete gaps:
+
+- `Info.plist` needs `CFBundleIcons` (+ `CFBundleIcons~ipad`),
+  `CFBundleIconFiles` (basenames without extension), plus platform keys
+  `CFBundleSupportedPlatforms=[iPhoneOS]`, `MinimumOSVersion`,
+  `CFBundleSignature` (`CFBundlePackageType` already present).
+- Spec drift: REQUIREMENTS §4.1 names 4 PNGs, plan Phase 6 names 5 (adds
+  83.5@2x). Disk has 5. Lock the plan's 5-file set as canonical and fix
+  §4.1 wording.
+- Staging duplication: CI's "Package LiveContainer IPA" step inlines
+  `cp Info.plist` + `cp mock_data.json` + `find binary` instead of calling
+  `scripts/package_ipa.sh`. Fixing the script alone leaves CI broken. Unify:
+  CI calls the script (single packaging path), or both updated in lockstep.
+- LiveContainer caches icons aggressively — acceptance must say delete +
+  reimport, not overwrite, or a fixed build reports "still blank."
+
+Do NOT introduce an asset catalog (`.car`) for v1 — loose PNGs + plist keys
+are the correct LiveContainer packaging; `.car` is over-engineering here.
+
+### P6-3 — Audio defer must move category too, and play() must ensure it (pitfall)
+
+Phase 6 wording ("defer `setActive(true)` to `play()`/`playTrack()`") is
+directionally right but under-specified:
+
+- `setupRemoteCommands()` in `init()` is harmless (no session activation) —
+  keep it there so lockscreen controls register at launch.
+- `setCategory(.playback, …)` must move WITH `setActive(true)` into a shared
+  `ensureAudioSession()` called at the top of `play()` and `playTrack()`
+  (playable branch only). Deleting the init call without adding the play-time
+  call silently breaks background audio instead of fixing launch.
+- `play()` with `player==nil` currently sets `isPlaying=true` with nothing to
+  play; after the move it should no-op or reuse `playTrack`'s honest-idle
+  path — otherwise remote-command "play" at launch activates the session with
+  no audio, recreating the conflict in a new shape.
+- Verification needs an ear-test, not just "launches": simctl launch → tap
+  play → background the app → audio continues + lockscreen title correct.
+  "No crash" alone proves nothing about the audio contract.
+
+### P6-4 — Cache path still throws on the exact tunnel case (pitfall)
+
+A truncated download on flaky Wi-Fi poisoning the next cold start is the
+field case Q2 named. Fix within `TubeLMCore` so it stays Linux-testable:
+
+- Never-throw launch path: cache miss/corrupt → `Bundle.main` candidates →
+  staged empty state. Quarantine the corrupt file
+  (`feed.json.corrupt.<ts>`) instead of deleting, so the failure stays
+  diagnosable.
+- Validate-then-save on the seed path: a bundled seed failing
+  `schema_version`/non-empty-items validation must NOT be written into
+  `feed.json` (current `try? saveFeed(feed)` persists whatever decoded).
+- Add a Linux regression test: garbage in `feed.json` → returns bundled
+  seed (or nil), never throws. Update `RootTabView` to the non-throwing call
+  and drop `try?` so a future `throws` reintroduction is a compile error,
+  not a silent blank.
+- "Staged empty state" wording in Phase 6 action 2 is stale — the empty
+  state already exists (audit §H). Reference it; do not re-specify.
+
+### P6-5 — Signing: pick codesign, gate it, keep ldid as footnote (over-engineering cut)
+
+- CI runs on `macos-15` where `codesign -s - --force --deep` works — that is
+  the v1 path for BOTH simulator and device steps. `ldid -S` is for
+  on-device resigning workflows that do not exist in this repo; naming both
+  as equals invites "either is fine" drift where the device step gets
+  neither (current state). Spec: `codesign` mandatory, `ldid` footnote only.
+- Proportionate gate (shell function in `package_ipa.sh`, called by CI — not
+  manual): assert 5 PNGs present with size check, `PlistBuddy` print of icon
+  + platform keys, `codesign -dv` success,
+  `otool -l | grep LC_CODE_SIGNATURE`. Fail closed. This is NOT
+  over-engineering — it is the §4 exit criteria Q1 asked for.
+- Also assert the binary is the device (`arm64-apple-ios` release) build, not
+  the simulator slice — a signed simulator binary in the device IPA passes a
+  naive signature check and still dies on device.
+
+### Phase 6 acceptance gates (concrete)
+
+```bash
+# 1. Icons declared + staged
+/usr/libexec/PlistBuddy -c "Print :CFBundleIcons" Payload/TubeLM.app/Info.plist
+unzip -l TubeLM.ipa | grep -E "AppIcon.*\.png"   # expect 5 entries
+# 2. Fresh-install proof: delete + reimport into LiveContainer (icon cache), launch, no crash
+# 3. Audio: tap play -> background -> audio continues, lockscreen title correct
+# 4. Corrupt-cache drill: garbage into Documents/cache/feed.json -> relaunch -> seed/empty state, no crash
+```
+
+### Decisions needed (Phase 6)
+
+1. Lock 5-icon set; correct §4.1 "4 PNGs" wording.
+2. `MinimumOSVersion` value (17.0 floor per `Package.swift` `.iOS(.v17)` vs
+   §1 iOS 26 baseline) — state floor + tested baseline explicitly.
+3. CI calls `package_ipa.sh` (single packaging path) vs dual maintenance —
+   pick single path.
+4. Confirm `ensureAudioSession()`-at-play design and the background-audio
+   ear-test as exit criteria.

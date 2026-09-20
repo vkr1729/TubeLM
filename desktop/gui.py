@@ -258,6 +258,8 @@ _CANONICAL_READ_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_.+")
 
 def _sanitize_read_ids(read_ids, canonical_only: bool = False) -> list[str]:
     """Keep only string ids, de-duplicated, sorted, and bounded."""
+    if not isinstance(read_ids, list):
+        return []
     clean = sorted({
         item[:MAX_READ_ID_LENGTH]
         for item in read_ids
@@ -894,10 +896,12 @@ def api_get_read_state():
 
 @app.route("/api/reader/read-state", methods=["POST"])
 def api_save_read_state():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
     read_ids = data.get("read_ids")
     state_file = paths.get_read_state_file()
-    
+
     if not isinstance(read_ids, list):
         item_id = data.get("id")
         if isinstance(item_id, str) and item_id:
@@ -907,16 +911,19 @@ def api_save_read_state():
                     cur = json.loads(state_file.read_text(encoding="utf-8")).get("read_ids", [])
                 except Exception:
                     cur = []
+            if not isinstance(cur, list):
+                cur = []
             s = set(item for item in cur if isinstance(item, str))
             if data.get("is_read", True):
                 s.add(item_id[:MAX_READ_ID_LENGTH])
             else:
                 s.discard(item_id)
+                s.discard(item_id[:MAX_READ_ID_LENGTH])
             read_ids = sorted(s)
         else:
             return jsonify({"error": "Missing read_ids or id"}), 400
 
-    read_ids = _sanitize_read_ids(read_ids, canonical_only=True)
+    read_ids = _sanitize_read_ids(read_ids)
     try:
         _atomic_write_json_file(state_file, {"read_ids": read_ids})
         return jsonify({"success": True, "read_ids": read_ids})
@@ -1053,9 +1060,14 @@ def extract_youtube_channel_info(url):
 
 @app.route("/api/sources/youtube/extract", methods=["POST"])
 def api_extract_channel():
-    data = request.json or {}
-    url = data.get("url", "").strip()
-    if not url:
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    url = data.get("url", "")
+    if not isinstance(url, str):
+        return jsonify({"error": "Missing URL"}), 400
+    url = url.strip()
+    if not url or len(url) > 2048:
         return jsonify({"error": "Missing URL"}), 400
         
     try:
@@ -1144,6 +1156,8 @@ def _valid_http_url(value: str) -> bool:
 
 
 def compute_state_key(source):
+    if not isinstance(source, dict):
+        return "unknown:invalid"
     stype = source.get("type", "youtube")
     if stype == "youtube":
         cid = source.get("channel_id")
@@ -1169,6 +1183,8 @@ def compute_state_key(source):
 def _enrich_sources_with_state_keys(sources):
     enriched = []
     for s in sources:
+        if not isinstance(s, dict):
+            continue
         item = copy.deepcopy(s)
         item["state_key"] = compute_state_key(item)
         enriched.append(item)
@@ -1178,14 +1194,24 @@ def _enrich_sources_with_state_keys(sources):
 @app.route("/api/sources", methods=["GET", "POST"])
 def api_sources():
     if request.method == "POST":
-        data = request.json or {}
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            data = {}
         source_type = data.get("type", "youtube")
-        name = data.get("name", "").strip()
+        if not isinstance(source_type, str):
+            return jsonify({"error": "Unknown source type."}), 400
+        name = data.get("name", "")
+        if not isinstance(name, str):
+            return jsonify({"error": "Missing name"}), 400
+        name = name.strip()
 
-        if not name:
+        if not name or len(name) > 256:
             return jsonify({"error": "Missing name"}), 400
 
-        category = data.get("category", "tech").strip()
+        category = data.get("category", "tech")
+        if not isinstance(category, str):
+            return jsonify({"error": "Unknown category."}), 400
+        category = category.strip()
         valid_categories = {"health", "tech", "deep_explainer", "news_feed"}
         if category not in valid_categories:
             return jsonify({"error": f"Unknown category: {category}"}), 400
@@ -1195,8 +1221,11 @@ def api_sources():
         # explicit false here would silently override a global true.
         podcast_opt_in = bool(data.get("generate_podcast", False))
         if source_type == "youtube":
-            channel_id = data.get("channel_id", "").strip()
-            if not channel_id:
+            channel_id = data.get("channel_id", "")
+            if not isinstance(channel_id, str):
+                return jsonify({"error": "Missing channel_id"}), 400
+            channel_id = channel_id.strip()
+            if not channel_id or len(channel_id) > 128:
                 return jsonify({"error": "Missing channel_id"}), 400
             entry = {
                 "name": name,
@@ -1205,8 +1234,11 @@ def api_sources():
                 "category": category,
             }
         elif source_type == "rss":
-            url = data.get("url", "").strip()
-            if not _valid_http_url(url):
+            url = data.get("url", "")
+            if not isinstance(url, str):
+                return jsonify({"error": "A valid http(s) URL is required"}), 400
+            url = url.strip()
+            if not _valid_http_url(url) or len(url) > 2048:
                 return jsonify({"error": "A valid http(s) URL is required"}), 400
             entry = {
                 "name": name, "type": "rss", "url": url,
@@ -1215,13 +1247,19 @@ def api_sources():
                 "category": category,
             }
         elif source_type == "webpage":
-            url = data.get("url", "").strip()
-            if not _valid_http_url(url):
+            url = data.get("url", "")
+            if not isinstance(url, str):
                 return jsonify({"error": "A valid http(s) URL is required"}), 400
+            url = url.strip()
+            if not _valid_http_url(url) or len(url) > 2048:
+                return jsonify({"error": "A valid http(s) URL is required"}), 400
+            link_selector = data.get("link_selector", "")
+            if not isinstance(link_selector, str) or len(link_selector) > 512:
+                return jsonify({"error": "link_selector is too long."}), 400
             entry = {
                 "name": name, "type": "webpage", "url": url,
                 "is_index_page": bool(data.get("is_index_page", False)),
-                "link_selector": str(data.get("link_selector", "")),
+                "link_selector": link_selector,
                 "max_items": _bounded_int(data.get("max_items"), 10),
                 "category": category,
             }
@@ -1255,10 +1293,14 @@ def api_sources():
 
 @app.route("/api/sources/podcast", methods=["POST"])
 def api_update_source_podcast():
-    data = request.json or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     identifier = data.get("identifier", "")
     enabled = data.get("enabled")
-    if not identifier or not isinstance(enabled, bool):
+    if not isinstance(identifier, str) or not identifier or len(identifier) > 2048:
+        return jsonify({"error": "identifier and boolean enabled are required"}), 400
+    if not isinstance(enabled, bool):
         return jsonify({"error": "identifier and boolean enabled are required"}), 400
 
     try:
@@ -1315,9 +1357,11 @@ def api_delete_source(identifier):
 
 @app.route("/api/sources/delete", methods=["POST"])
 def api_delete_source_post():
-    data = request.json or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     identifier = data.get("identifier")
-    if not identifier:
+    if not isinstance(identifier, str) or not identifier or len(identifier) > 2048:
         return jsonify({"error": "Missing identifier"}), 400
 
     try:
@@ -1336,9 +1380,14 @@ def api_delete_source_post():
 
 @app.route("/api/sources/validate", methods=["POST"])
 def api_validate_source():
-    data = request.json or {}
-    url = data.get("url", "").strip()
-    if not url:
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    url = data.get("url", "")
+    if not isinstance(url, str):
+        return jsonify({"error": "Missing url"}), 400
+    url = url.strip()
+    if not url or len(url) > 2048:
         return jsonify({"error": "Missing url"}), 400
 
     try:
@@ -1405,24 +1454,30 @@ def api_get_state():
 
 @app.route("/api/state/channel", methods=["POST"])
 def api_update_channel_state():
-    data = request.json or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     state_key = data.get("state_key")
     channel_id = data.get("channel_id")
     timestamp = data.get("timestamp")  # ISO format UTC string or None/"Never"
 
     if not state_key and channel_id:
+        if not isinstance(channel_id, str):
+            return jsonify({"error": "channel_id must be a string."}), 400
         if ":" in channel_id:
             state_key = channel_id
         else:
             state_key = f"youtube:{channel_id}"
 
-    if not state_key:
+    if not state_key or not isinstance(state_key, str):
         return jsonify({"error": "Missing state_key or channel_id"}), 400
 
     state = {"last_run_time": None, "sources": {}}
     if STATE_FILE.exists():
         try:
-            state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            loaded = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                state = loaded
         except Exception:
             pass
 
@@ -1434,6 +1489,8 @@ def api_update_channel_state():
         if state_key in state["sources"]:
             del state["sources"][state_key]
     else:
+        if not isinstance(timestamp, str):
+            return jsonify({"error": "Invalid timestamp format. Must be ISO8601."}), 400
         # Validate timestamp format, normalizing Zulu to an explicit offset so
         # the pipeline parser honors exactly what the dashboard stored.
         try:
@@ -1454,7 +1511,9 @@ def api_update_channel_state():
 @app.route("/api/config", methods=["GET", "POST"])
 def api_config():
     if request.method == "POST":
-        updates = request.json or {}
+        updates = request.get_json(silent=True)
+        if not isinstance(updates, dict):
+            updates = {}
         try:
             write_env_file(updates)
             return jsonify({"success": True})
@@ -1486,10 +1545,19 @@ def api_prompts():
     user_prompts_dir = paths.get_user_prompts_dir()
 
     if request.method == "POST":
-        data = request.json or {}
-        category = data.get("category", "").strip()
-        prompt_type = data.get("type", "").strip()
-        text = data.get("text", "").strip()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            data = {}
+        category = data.get("category", "")
+        prompt_type = data.get("type", "")
+        text = data.get("text", "")
+        if not isinstance(category, str) or not isinstance(prompt_type, str) or not isinstance(text, str):
+            return jsonify({"error": "category, type, and text must be strings."}), 400
+        category = category.strip()
+        prompt_type = prompt_type.strip()
+        text = text.strip()
+        if len(text) > 200_000:
+            return jsonify({"error": "Prompt text is too large."}), 400
 
         if category not in valid_categories:
             return jsonify({"error": f"Invalid category: {category}"}), 400
@@ -1554,7 +1622,9 @@ def api_scheduler_setup():
     day = "Sat"
     time_str = "08:00"
     if request.is_json:
-        req_data = request.json or {}
+        req_data = request.get_json(silent=True)
+        if not isinstance(req_data, dict):
+            req_data = {}
         day = req_data.get("day_of_week", "Sat")
         time_str = req_data.get("time", "08:00")
 
@@ -2119,12 +2189,17 @@ def api_get_digest(filename):
 
 @app.route("/api/run", methods=["POST"])
 def api_trigger_run():
-    data = request.json or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     dry_run = data.get("dry_run", False)
     skip_email = data.get("skip_email", False)
     shutdown_after_run = data.get("shutdown_after_run", False)
     channels = data.get("channels", [])
-    
+    if not isinstance(channels, list):
+        channels = []
+    channels = [str(c).strip() for c in channels if str(c).strip()]
+
     args = []
     if dry_run:
         args.append("--dry-run")

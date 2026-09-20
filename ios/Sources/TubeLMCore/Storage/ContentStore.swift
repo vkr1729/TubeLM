@@ -61,31 +61,61 @@ public actor ContentStore {
 
     // MARK: - Feed Cache
 
-    public func loadCachedFeed() throws -> DigestFeed? {
+    public func loadCachedFeed() -> DigestFeed? {
         if FileManager.default.fileExists(atPath: feedCacheFile.path) {
-            let data = try Data(contentsOf: feedCacheFile)
-            return try JSONDecoder().decode(DigestFeed.self, from: data)
-        }
-
-        // Fallback to bundled seed feed on initial launch
-        #if SWIFT_PACKAGE
-        if let bundleUrl = Bundle.module.url(forResource: "data", withExtension: "json") ??
-                           Bundle.module.url(forResource: "data", withExtension: "json", subdirectory: "Resources") {
-            if let data = try? Data(contentsOf: bundleUrl),
-               let feed = try? JSONDecoder().decode(DigestFeed.self, from: data) {
-                try? saveFeed(feed)
-                return feed
+            if let data = try? Data(contentsOf: feedCacheFile) {
+                if let feed = try? JSONDecoder().decode(DigestFeed.self, from: data),
+                   !feed.top20.items.isEmpty {
+                    return feed
+                } else {
+                    // Corrupt or empty cache file detected: quarantine to preserve diagnostics and heal
+                    let corruptPath = feedCacheFile.path + ".corrupt.\(Int(Date().timeIntervalSince1970))"
+                    try? FileManager.default.moveItem(atPath: feedCacheFile.path, toPath: corruptPath)
+                }
             }
         }
-        #endif
 
+        // Fallback to bundled seed feed on initial launch or after cache corruption
         let mainCandidates = [
             Bundle.main.url(forResource: "data", withExtension: "json"),
             Bundle.main.url(forResource: "mock_data", withExtension: "json")
         ]
         for url in mainCandidates.compactMap({ $0 }) {
             if let data = try? Data(contentsOf: url),
-               let feed = try? JSONDecoder().decode(DigestFeed.self, from: data) {
+               let feed = try? JSONDecoder().decode(DigestFeed.self, from: data),
+               !feed.top20.items.isEmpty {
+                try? saveFeed(feed)
+                return feed
+            }
+        }
+
+        // Fallback file paths for development / test environments without Bundle.main resources
+        let envCandidates = [
+            ProcessInfo.processInfo.environment["MOCK_DATA_PATH"],
+            ProcessInfo.processInfo.environment["DATA_PATH"]
+        ].compactMap { $0 }
+        for envPath in envCandidates {
+            let url = URL(fileURLWithPath: envPath)
+            if let data = try? Data(contentsOf: url),
+               let feed = try? JSONDecoder().decode(DigestFeed.self, from: data),
+               !feed.top20.items.isEmpty {
+                try? saveFeed(feed)
+                return feed
+            }
+        }
+
+        let fallbackRelativePaths = [
+            "Resources/data.json",
+            "Resources/mock_data.json",
+            "../.workflow/mocks/mock_data.json",
+            ".workflow/mocks/mock_data.json"
+        ]
+        for rel in fallbackRelativePaths {
+            let url = URL(fileURLWithPath: rel)
+            if FileManager.default.fileExists(atPath: url.path),
+               let data = try? Data(contentsOf: url),
+               let feed = try? JSONDecoder().decode(DigestFeed.self, from: data),
+               !feed.top20.items.isEmpty {
                 try? saveFeed(feed)
                 return feed
             }
@@ -110,7 +140,15 @@ public actor ContentStore {
             return []
         }
         var seen = Set<String>()
-        return ids.filter { seen.insert($0).inserted }.prefix(Self.maxReadIDs).map { $0 }
+        var ordered: [String] = []
+        ordered.reserveCapacity(min(ids.count, Self.maxReadIDs))
+        for raw in ids {
+            let id = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256, seen.insert(id).inserted else { continue }
+            ordered.append(id)
+            if ordered.count >= Self.maxReadIDs { break }
+        }
+        return ordered
     }
 
     public func loadReadIDs() -> Set<String> {
@@ -123,21 +161,25 @@ public actor ContentStore {
     }
 
     public func markItemRead(_ id: String) throws {
+        let clean = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 256 else { return }
         var current = loadReadIDsOrdered()
-        current.removeAll(where: { $0 == id })
-        current.insert(id, at: 0)
+        current.removeAll(where: { $0 == clean })
+        current.insert(clean, at: 0)
         try persistReadIDs(current)
         var states = loadItemStates()
-        states[id] = Date().timeIntervalSince1970 * 1000
+        states[clean] = Date().timeIntervalSince1970 * 1000
         try saveItemStates(states)
     }
 
     public func unmarkItemRead(_ id: String) throws {
+        let clean = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 256 else { return }
         var current = loadReadIDsOrdered()
-        current.removeAll(where: { $0 == id })
+        current.removeAll(where: { $0 == clean })
         try persistReadIDs(current)
         var states = loadItemStates()
-        states[id] = -Date().timeIntervalSince1970 * 1000
+        states[clean] = -Date().timeIntervalSince1970 * 1000
         try saveItemStates(states)
     }
 
@@ -149,11 +191,24 @@ public actor ContentStore {
               let decoded = try? JSONDecoder().decode([String: Double].self, from: data) else {
             return [:]
         }
-        return decoded.filter { _, ts in ts.isFinite }
+        var clean: [String: Double] = [:]
+        clean.reserveCapacity(min(decoded.count, Self.maxItemStates))
+        for (key, ts) in decoded {
+            let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256, ts.isFinite else { continue }
+            clean[id] = ts
+        }
+        return clean
     }
 
     public func saveItemStates(_ states: [String: Double]) throws {
-        let finite = states.filter { _, ts in ts.isFinite }
+        var finite: [String: Double] = [:]
+        finite.reserveCapacity(min(states.count, Self.maxItemStates))
+        for (key, ts) in states {
+            let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256, ts.isFinite else { continue }
+            finite[id] = ts
+        }
         let capped: [String: Double]
         if finite.count > Self.maxItemStates {
             var kept = [String: Double](minimumCapacity: Self.maxItemStates)
@@ -173,10 +228,11 @@ public actor ContentStore {
     public func applyRemoteStates(_ remote: [String: Double]) throws -> Set<String> {
         var local = loadItemStates()
         for (key, ts) in remote {
-            guard ts.isFinite else { continue }
-            let cur = local[key] ?? 0
+            let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256, ts.isFinite else { continue }
+            let cur = local[id] ?? 0
             if abs(ts) >= abs(cur) {
-                local[key] = ts
+                local[id] = ts
             }
         }
         try saveItemStates(local)
@@ -207,7 +263,14 @@ public actor ContentStore {
         if FileManager.default.fileExists(atPath: bookmarkStatesFile.path),
            let data = try? Data(contentsOf: bookmarkStatesFile),
            let decoded = try? JSONDecoder().decode([String: Double].self, from: data) {
-            return decoded.filter { _, ts in ts.isFinite }
+            var clean: [String: Double] = [:]
+            clean.reserveCapacity(min(decoded.count, Self.maxBookmarkStates))
+            for (key, ts) in decoded {
+                let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty, id.count <= 256, ts.isFinite else { continue }
+                clean[id] = ts
+            }
+            return clean
         }
         // Seed from existing bookmarks if states file does not exist yet
         let existing = loadBookmarks()
@@ -221,7 +284,13 @@ public actor ContentStore {
     }
 
     public func saveBookmarkStates(_ states: [String: Double]) throws {
-        let finite = states.filter { _, ts in ts.isFinite }
+        var finite: [String: Double] = [:]
+        finite.reserveCapacity(min(states.count, Self.maxBookmarkStates))
+        for (key, ts) in states {
+            let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256, ts.isFinite else { continue }
+            finite[id] = ts
+        }
         let capped: [String: Double]
         if finite.count > Self.maxBookmarkStates {
             var kept = [String: Double](minimumCapacity: Self.maxBookmarkStates)
@@ -237,8 +306,10 @@ public actor ContentStore {
     }
 
     public func saveBookmark(_ item: FeedItem) throws {
+        let clean = item.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 256 else { return }
         var current = loadBookmarks()
-        current.removeAll(where: { $0.id == item.id })
+        current.removeAll(where: { $0.id == item.id || $0.id == clean })
         current.insert(item, at: 0)
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
@@ -246,28 +317,31 @@ public actor ContentStore {
         try atomicWrite(data: data, to: bookmarksFile)
 
         var states = loadBookmarkStates()
-        states[item.id] = Date().timeIntervalSince1970 * 1000
+        states[clean] = Date().timeIntervalSince1970 * 1000
         try saveBookmarkStates(states)
     }
 
     public func removeBookmark(id: String) throws {
+        let clean = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 256 else { return }
         var current = loadBookmarks()
-        current.removeAll(where: { $0.id == id })
+        current.removeAll(where: { $0.id == id || $0.id == clean })
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
         let data = try encoder.encode(current)
         try atomicWrite(data: data, to: bookmarksFile)
 
         var states = loadBookmarkStates()
-        states[id] = -Date().timeIntervalSince1970 * 1000
+        states[clean] = -Date().timeIntervalSince1970 * 1000
         try saveBookmarkStates(states)
     }
 
     /// Merges remote bookmarks and bookmark states into local storage using LWW tombstones.
     public func applyRemoteBookmarks(remoteBookmarks: [FeedItem], remoteStates: [String: Double]) throws -> [FeedItem] {
         var localStates = loadBookmarkStates()
-        for (id, ts) in remoteStates {
-            guard ts.isFinite else { continue }
+        for (key, ts) in remoteStates {
+            let id = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256, ts.isFinite else { continue }
             let cur = localStates[id] ?? 0
             if abs(ts) >= abs(cur) {
                 localStates[id] = ts
@@ -276,15 +350,19 @@ public actor ContentStore {
 
         var itemsMap = [String: FeedItem]()
         for item in loadBookmarks() {
-            itemsMap[item.id] = item
-            if localStates[item.id] == nil {
-                localStates[item.id] = Date().timeIntervalSince1970 * 1000
+            let id = item.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256 else { continue }
+            itemsMap[id] = item
+            if localStates[id] == nil {
+                localStates[id] = Date().timeIntervalSince1970 * 1000
             }
         }
         for item in remoteBookmarks {
-            itemsMap[item.id] = item
-            if localStates[item.id] == nil {
-                localStates[item.id] = Date().timeIntervalSince1970 * 1000
+            let id = item.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.count <= 256 else { continue }
+            itemsMap[id] = item
+            if localStates[id] == nil {
+                localStates[id] = Date().timeIntervalSince1970 * 1000
             }
         }
         try saveBookmarkStates(localStates)

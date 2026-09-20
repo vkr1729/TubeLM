@@ -289,7 +289,7 @@ final class AutomatedSimulatorUATTests: XCTestCase {
             return try JSONDecoder().decode(DigestFeed.self, from: data)
         }
 
-        var searchDirs: [URL] = [
+        let searchDirs: [URL] = [
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath).deletingLastPathComponent(),
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath).deletingLastPathComponent().deletingLastPathComponent()

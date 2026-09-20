@@ -233,7 +233,7 @@ public struct RootTabView: View {
     // MARK: - State & Actions
 
     private func loadInitialState() async {
-        if let cached = try? await store.loadCachedFeed() {
+        if let cached = await store.loadCachedFeed() {
             self.feed = cached
         }
         self.readIDs = await store.loadReadIDs()

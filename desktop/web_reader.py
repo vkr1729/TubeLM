@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -42,20 +43,26 @@ _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 def _safe_int_seconds(value: Any) -> int:
     """Coerce a duration-seconds field to int; malformed input yields 0, never a crash."""
     try:
-        return int(str(value or "").strip() or 0)
+        number = float(str(value or "").strip() or 0)
     except (ValueError, TypeError):
         return 0
+    if not math.isfinite(number):
+        return 0
+    return int(number)
 
 
 def _safe_channel_int(value: Any) -> int:
     """Coerce an aggregate counter (read_minutes, audio_seconds) to int."""
     try:
-        return int(value or 0)
+        number = float(value if value is not None else 0)
     except (ValueError, TypeError):
         try:
-            return int(float(str(value).strip()))
+            number = float(str(value).strip())
         except (ValueError, TypeError):
             return 0
+    if not math.isfinite(number):
+        return 0
+    return int(number)
 
 
 def _clean_video_id(value) -> str:
@@ -79,9 +86,10 @@ def _make_item_id(item: dict[str, Any]) -> str:
     across AppState, read_ids, CommuteQueue, and Bookmarks.
     """
     raw_id = item.get("id") or item.get("video_id")
-    if raw_id and str(raw_id).strip():
-        return str(raw_id).strip()
-    url = (item.get("url") or item.get("link") or "").strip()
+    if raw_id is not None and str(raw_id).strip():
+        text = str(raw_id).strip()
+        return text if len(text) <= MAX_READ_ID_LENGTH else hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    url = str(item.get("url") or item.get("link") or "").strip()
     if url:
         if len(url) <= 200:
             return url
@@ -131,14 +139,18 @@ def purge_old_digests_and_audio(summaries_dir: Path, audio_dir: Path, max_age_da
                     except ValueError:
                         pass
 
-    # Clean up stale entries in read_state.json older than cutoff. Non-date ids
-    # are truncated and the whole list is de-duplicated and capped, mirroring
-    # the dashboard sanitizer — nothing in this file may grow without bound.
+    # Clean up stale entries in read_state.json older than cutoff. Mobile ids
+    # (video_id / URL keys) and other non-date ids have no retention date and
+    # are always kept; date-scoped ids older than the cutoff are dropped. The
+    # whole list is truncated, de-duplicated, and capped, mirroring the
+    # dashboard sanitizer — nothing in this file may grow without bound.
     read_state_file = paths.get_read_state_file()
     if read_state_file.exists():
         try:
             cur_data = json.loads(read_state_file.read_text(encoding="utf-8"))
             cur_ids = cur_data.get("read_ids", [])
+            if not isinstance(cur_ids, list):
+                cur_ids = []
             valid_ids = []
             for rid in cur_ids:
                 if not isinstance(rid, str) or not rid:
@@ -155,8 +167,17 @@ def purge_old_digests_and_audio(summaries_dir: Path, audio_dir: Path, max_age_da
                 else:
                     valid_ids.append(rid)
             valid_ids = list(dict.fromkeys(valid_ids))[:MAX_READ_IDS]
-            if valid_ids != cur_ids:
-                read_state_file.write_text(json.dumps({"read_ids": valid_ids}, indent=2), encoding="utf-8")
+            if valid_ids != list(cur_ids):
+                tmp_state = read_state_file.with_name(
+                    f".{read_state_file.name}.{os.getpid()}.tmp")
+                try:
+                    tmp_state.write_text(json.dumps({"read_ids": valid_ids}, indent=2), encoding="utf-8")
+                    os.replace(tmp_state, read_state_file)
+                finally:
+                    try:
+                        tmp_state.unlink(missing_ok=True)
+                    except OSError:
+                        pass
         except Exception:
             pass
 
@@ -184,8 +205,15 @@ def optimize_audio_for_web(input_audio: Path, output_audio: Path) -> bool:
     Reduces file size by ~75% and ensures seamless buffering on mobile Safari/Chrome.
     Falls back to a plain copy when ffmpeg is missing, fails, or exceeds
     FFMPEG_TIMEOUT_SECONDS so one corrupt file can never hang the site build.
+    Returns False (no crash) when the input is missing or unreadable.
     """
     output_audio.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if not input_audio.exists() or not input_audio.is_file():
+            logger.warning("Audio input %s is missing; skipping transcode.", input_audio)
+            return False
+    except OSError:
+        return False
     try:
         cmd = [
             "ffmpeg",
@@ -217,7 +245,11 @@ def optimize_audio_for_web(input_audio: Path, output_audio: Path) -> bool:
     except Exception as exc:
         logger.warning("ffmpeg audio transcoding failed for %s: %s", input_audio, exc)
 
-    shutil.copy(input_audio, output_audio)
+    try:
+        shutil.copy(input_audio, output_audio)
+    except (OSError, shutil.Error) as exc:
+        logger.warning("Audio fallback copy failed for %s: %s", input_audio, exc)
+        return False
     return False
 
 
@@ -315,6 +347,11 @@ def _normalize_mobile_item(raw: dict[str, Any], rank: int | None = None) -> dict
     sidecar is the source.
     """
     why = str(raw.get("why_it_matters") or raw.get("summary") or "").strip()
+    rank_value = raw.get("rank") if rank is None else rank
+    try:
+        rank_num = int(rank_value) if rank_value is not None else None
+    except (ValueError, TypeError):
+        rank_num = None
     item: dict[str, Any] = {
         "id": _make_item_id(raw),
         "title": str(raw.get("title") or ""),
@@ -326,8 +363,8 @@ def _normalize_mobile_item(raw: dict[str, Any], rank: int | None = None) -> dict
         "url": str(raw.get("url") or ""),
         "audio_url": str(raw.get("audio_url") or ""),
     }
-    if rank is not None:
-        item["rank"] = rank
+    if rank_num is not None:
+        item["rank"] = rank_num
     return item
 
 
@@ -348,8 +385,13 @@ def _normalize_mobile_video(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_mobile_channel(raw: dict[str, Any]) -> dict[str, Any]:
     """Project a channel dict onto the mobile data.json contract."""
+    if not isinstance(raw, dict):
+        raw = {}
     channel_id = str(raw.get("id") or "").strip() or str(
         raw.get("name", "channel")).lower().replace(" ", "_")
+    videos = raw.get("videos", [])
+    if not isinstance(videos, list):
+        videos = []
     return {
         "id": channel_id,
         "name": str(raw.get("name") or "Channel"),
@@ -359,7 +401,7 @@ def _normalize_mobile_channel(raw: dict[str, Any]) -> dict[str, Any]:
         "summary_audio_url": str(
             raw.get("summary_audio_url") or raw.get("audio_url") or ""),
         "audio_url": str(raw.get("audio_url") or ""),
-        "videos": [_normalize_mobile_video(v) for v in raw.get("videos", [])
+        "videos": [_normalize_mobile_video(v) for v in videos
                    if isinstance(v, dict)],
     }
 
@@ -692,14 +734,26 @@ def generate_rss_feed(site_data: dict[str, Any], output_path: Path, base_url: st
             return datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
 
     current_week = site_data.get("weeks", {}).get("current", {})
+    if not isinstance(current_week, dict):
+        current_week = {}
     run_date = str(current_week.get("run_date") or "")
     channels = current_week.get("channels", [])
-    top20_items = current_week.get("top20", {}).get("items", [])
+    if not isinstance(channels, list):
+        channels = []
+    top20_raw = current_week.get("top20", {})
+    top20_items = top20_raw.get("items", []) if isinstance(top20_raw, dict) else []
+    if not isinstance(top20_items, list):
+        top20_items = []
 
     rss_items = []
 
-    if top20_items:
-        desc = "<ul>" + "".join(f"<li><strong>#{it['rank']} {it['title']}</strong> ({it['source_name']}): {it['why_it_matters']}</li>" for it in top20_items[:10]) + "</ul>"
+    valid_top = [it for it in top20_items[:10] if isinstance(it, dict)]
+    if valid_top:
+        desc = "<ul>" + "".join(
+            f"<li><strong>#{it.get('rank', '')} {it.get('title', '')}</strong>"
+            f" ({it.get('source_name', '')}): {it.get('why_it_matters', '')}</li>"
+            for it in valid_top
+        ) + "</ul>"
         rss_items.append(f"""
     <item>
       <title>{xml_escape(f"TubeLM Executive Top 20 · Week of {run_date}")}</title>
@@ -710,6 +764,8 @@ def generate_rss_feed(site_data: dict[str, Any], output_path: Path, base_url: st
     </item>""")
 
     for ch in channels:
+        if not isinstance(ch, dict):
+            continue
         desc = ch.get("full_summary_html") or ch.get("summary_preview") or "Weekly briefing"
         link = ch.get("notebook_url") or base_url
         rss_items.append(f"""
@@ -1167,8 +1223,14 @@ def build_reader_site(
             pass
     data_json_path = site_dir / "data.json"
     temp_json_path = site_dir / "data.json.tmp"
-    temp_json_path.write_text(json.dumps(mobile_data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_json_path.replace(data_json_path)
+    try:
+        temp_json_path.write_text(json.dumps(mobile_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temp_json_path, data_json_path)
+    finally:
+        try:
+            temp_json_path.unlink(missing_ok=True)
+        except OSError:
+            pass
     logger.info("Successfully exported mobile data.json at %s", data_json_path)
 
     # Write .nojekyll
