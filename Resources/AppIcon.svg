@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Vibrant Lime / Chartreuse Background matching user specification -->
+  <rect width="1024" height="1024" fill="#d8ff63"/>
+  
+  <!-- Centered Bold Sans-Serif 'T' in Deep Charcoal / Black (#1d1e1c) -->
+  <path d="M 378 344 H 646 V 416 H 548 V 681 H 476 V 416 H 378 Z" fill="#1d1e1c"/>
+</svg>

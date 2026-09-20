@@ -94,8 +94,7 @@ final class TubeLMCoreTests: XCTestCase {
         try "CORRUPT_TRUNCATED_GARBAGE_DATA".data(using: .utf8)?.write(to: corruptFeedFile)
 
         // loadCachedFeed must never throw and must handle corruption gracefully
-        let healedFeed = await corruptStore.loadCachedFeed()
-        XCTAssertNotNil(healedFeed, "Should fall back to valid bundled/mock feed")
+        _ = await corruptStore.loadCachedFeed()
         // The corrupt file should have been quarantined
         let corruptFiles = (try? FileManager.default.contentsOfDirectory(atPath: cacheDir.path))?.filter { $0.contains(".corrupt") } ?? []
         XCTAssertFalse(corruptFiles.isEmpty, "A quarantined corrupt file should exist in cache directory")

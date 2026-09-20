@@ -11,9 +11,13 @@ on:
 jobs:
   build-ipa:
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Select Xcode Version
         run: |
@@ -152,6 +156,27 @@ jobs:
           # Execute unified packaging script with icon staging, ad-hoc codesigning & validation
           chmod +x scripts/package_ipa.sh
           ./scripts/package_ipa.sh "$APP_DIR" "build/TubeLM.ipa"
+
+      - name: Commit and Push IPA to repository & Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist_ios ios
+          cp build/TubeLM.ipa dist_ios/TubeLM.ipa
+          cp build/TubeLM.ipa ios/TubeLM.ipa
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add dist_ios/TubeLM.ipa ios/TubeLM.ipa
+          git commit -m "chore(release): update LiveContainer IPA with arm64 binary and graceful icon [skip ci]" || echo "No changes to commit"
+          git push origin main || echo "Push failed or nothing to push"
+          
+          if gh release view v4.1.0 &>/dev/null; then
+            gh release upload v4.1.0 build/TubeLM.ipa --clobber
+          else
+            gh release create v4.1.0 build/TubeLM.ipa --title "TubeLM v4.1.0 (LiveContainer)" --notes "Automated build with graceful app icon and arm64-apple-ios binary for LiveContainer sideloading."
+          fi
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
