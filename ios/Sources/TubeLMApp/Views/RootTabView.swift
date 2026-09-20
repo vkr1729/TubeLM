@@ -9,6 +9,13 @@ private enum SyncDefaults {
     static let defaultEndpoint = "https://tubelm-sync.kedarvreddy.workers.dev"
 }
 
+private enum SyncConnectionState: Equatable {
+    case unconfigured
+    case testing
+    case connected
+    case disrupted(String)
+}
+
 public struct RootTabView: View {
     @StateObject private var player = AudioPlayerManager.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -24,6 +31,7 @@ public struct RootTabView: View {
     @State private var isRefreshing: Bool = false
     @State private var syncTask: Task<Void, Never>? = nil
     @State private var syncClient: CloudflareSyncClient
+    @State private var syncState: SyncConnectionState
 
     private let store = ContentStore()
 
@@ -39,6 +47,11 @@ public struct RootTabView: View {
         let key = UserDefaults.standard.string(forKey: SyncDefaults.keyKey) ?? ""
         let url = URL(string: endpoint) ?? URL(string: SyncDefaults.defaultEndpoint)!
         _syncClient = State(initialValue: CloudflareSyncClient(baseURL: url, syncKey: key))
+        if key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            _syncState = State(initialValue: .unconfigured)
+        } else {
+            _syncState = State(initialValue: .connected)
+        }
     }
 
     public var body: some View {
@@ -71,7 +84,8 @@ public struct RootTabView: View {
                         case 2:
                             BookmarksView(
                                 bookmarks: bookmarks,
-                                onRemoveBookmark: removeBookmark
+                                onRemoveBookmark: removeBookmark,
+                                onOpenSettings: { isShowingSyncSettings = true }
                             )
                         default:
                             EmptyView()
@@ -82,20 +96,18 @@ public struct RootTabView: View {
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(action: { isShowingSyncSettings = true }) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
+                    if shouldShowSyncButton {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            syncToolbarButton
                         }
-                        .accessibilityLabel("Sync settings")
                     }
                 }
                 #else
                 .toolbar {
-                    ToolbarItem(placement: .automatic) {
-                        Button(action: { isShowingSyncSettings = true }) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
+                    if shouldShowSyncButton {
+                        ToolbarItem(placement: .automatic) {
+                            syncToolbarButton
                         }
-                        .accessibilityLabel("Sync settings")
                     }
                 }
                 #endif
@@ -126,6 +138,10 @@ public struct RootTabView: View {
                         Text("TL")
                             .font(.system(size: 13, weight: .black))
                             .foregroundColor(AppTheme.accentBadgeText)
+                    }
+                    .onLongPressGesture {
+                        Haptics.tap()
+                        isShowingSyncSettings = true
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -223,6 +239,65 @@ public struct RootTabView: View {
         }
     }
 
+    // MARK: - Sync Toolbar Button & Visibility
+
+    private var shouldShowSyncButton: Bool {
+        switch syncState {
+        case .connected:
+            return false
+        case .unconfigured, .testing, .disrupted:
+            return true
+        }
+    }
+
+    @ViewBuilder
+    private var syncToolbarButton: some View {
+        Button(action: { isShowingSyncSettings = true }) {
+            switch syncState {
+            case .unconfigured:
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("Sync")
+                        .font(.system(size: 12, weight: .bold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(AppTheme.accent.opacity(0.12))
+                .foregroundColor(AppTheme.accent)
+                .clipShape(Capsule())
+            case .testing:
+                HStack(spacing: 5) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(AppTheme.accent)
+                    Text("Connecting...")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(AppTheme.accent.opacity(0.12))
+                .foregroundColor(AppTheme.accent)
+                .clipShape(Capsule())
+            case .disrupted:
+                HStack(spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("Sync Offline")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.orange.opacity(0.16))
+                .foregroundColor(.orange)
+                .clipShape(Capsule())
+            case .connected:
+                EmptyView()
+            }
+        }
+        .accessibilityLabel("Sync settings")
+    }
+
     // MARK: - Sync Configuration
 
     private func configureSync(endpoint: String, key: String) {
@@ -232,9 +307,42 @@ public struct RootTabView: View {
         UserDefaults.standard.set(trimmedKey, forKey: SyncDefaults.keyKey)
         let url = URL(string: trimmedEndpoint) ?? URL(string: SyncDefaults.defaultEndpoint)!
         syncClient = CloudflareSyncClient(baseURL: url, syncKey: trimmedKey)
+
+        guard !trimmedKey.isEmpty else {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                syncState = .unconfigured
+            }
+            showToast("Local Storage Only")
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            syncState = .testing
+        }
+        showToast("Testing Connection...")
+
         Task {
-            await pullRemoteState()
-            scheduleSyncPush()
+            do {
+                if let remote = try await syncClient.fetchRemoteState() {
+                    let mergedReads = try await store.applyRemoteStates(remote.itemStates)
+                    self.readIDs = mergedReads
+                    let mergedBookmarks = try await store.applyRemoteBookmarks(
+                        remoteBookmarks: remote.bookmarks,
+                        remoteStates: remote.bookmarkStates
+                    )
+                    self.bookmarks = mergedBookmarks
+                }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    syncState = .connected
+                }
+                showToast("Sync Connected")
+                scheduleSyncPush()
+            } catch {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    syncState = .disrupted(error.localizedDescription)
+                }
+                showToast("Connection Failed")
+            }
         }
     }
 
@@ -246,7 +354,13 @@ public struct RootTabView: View {
         }
         self.readIDs = await store.loadReadIDs()
         self.bookmarks = await store.loadBookmarks()
-        await pullRemoteState()
+        if syncClient.isConfigured {
+            await pullRemoteState()
+        } else {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                syncState = .unconfigured
+            }
+        }
         await refreshFeedIfNeeded()
     }
 
@@ -295,6 +409,10 @@ public struct RootTabView: View {
     }
 
     private func pullRemoteState() async {
+        guard syncClient.isConfigured else {
+            withAnimation(.easeInOut(duration: 0.25)) { syncState = .unconfigured }
+            return
+        }
         do {
             if let remote = try await syncClient.fetchRemoteState() {
                 let mergedReads = try await store.applyRemoteStates(remote.itemStates)
@@ -305,8 +423,9 @@ public struct RootTabView: View {
                 )
                 self.bookmarks = mergedBookmarks
             }
+            withAnimation(.easeInOut(duration: 0.25)) { syncState = .connected }
         } catch {
-            // Unpaired or unreachable: local state remains authoritative.
+            withAnimation(.easeInOut(duration: 0.25)) { syncState = .disrupted(error.localizedDescription) }
         }
     }
 
@@ -337,8 +456,11 @@ public struct RootTabView: View {
                     )
                     self.bookmarks = mergedBookmarks
                 }
+                if syncState != .connected {
+                    withAnimation(.easeInOut(duration: 0.25)) { syncState = .connected }
+                }
             } catch {
-                // Next mutation retries; never interrupt the user.
+                withAnimation(.easeInOut(duration: 0.25)) { syncState = .disrupted(error.localizedDescription) }
             }
         }
     }

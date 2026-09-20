@@ -5,10 +5,16 @@ import TubeLMCore
 public struct BookmarksView: View {
     public let bookmarks: [FeedItem]
     public let onRemoveBookmark: (String) -> Void
+    public let onOpenSettings: (() -> Void)?
 
-    public init(bookmarks: [FeedItem], onRemoveBookmark: @escaping (String) -> Void) {
+    public init(
+        bookmarks: [FeedItem],
+        onRemoveBookmark: @escaping (String) -> Void,
+        onOpenSettings: (() -> Void)? = nil
+    ) {
         self.bookmarks = bookmarks
         self.onRemoveBookmark = onRemoveBookmark
+        self.onOpenSettings = onOpenSettings
     }
 
     public var body: some View {
@@ -24,6 +30,23 @@ public struct BookmarksView: View {
                     Text("Saved articles and deep explainers will appear here.")
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
+
+                    if let onOpenSettings {
+                        Button(action: onOpenSettings) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "gearshape.fill")
+                                    .font(.system(size: 12))
+                                Text("Settings & Appearance")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(AppTheme.secondarySystemBackground)
+                            .foregroundColor(.primary)
+                            .clipShape(Capsule())
+                        }
+                        .padding(.top, 8)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
@@ -73,12 +96,28 @@ public struct BookmarksView: View {
                             .padding(14)
                             .background(AppTheme.systemBackground)
                             .cornerRadius(16)
-                            .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
-                            .padding(.horizontal, 16)
                         }
                     }
-                    .padding(.top, 12)
-                    .padding(.bottom, 120)
+                    if let onOpenSettings {
+                        Button(action: onOpenSettings) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "gearshape.fill")
+                                    .font(.system(size: 12))
+                                Text("Settings & Appearance")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(AppTheme.secondarySystemBackground)
+                            .foregroundColor(.primary)
+                            .clipShape(Capsule())
+                        }
+                        .padding(.top, 16)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 120)
                 }
             }
         }
