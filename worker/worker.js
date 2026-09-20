@@ -470,7 +470,8 @@ export default {
         return new Response('R2 bucket binding (SYNC_BUCKET) not configured', { status: 500 });
       }
       const objKey = url.pathname.replace(/^\/+/, '');
-      const hasRange = request.headers.has('range');
+      const rangeHeader = request.headers.get('range');
+      const hasRange = Boolean(rangeHeader && rangeHeader.trim());
       const getOpts = hasRange ? { range: request.headers, onlyIf: request.headers } : { onlyIf: request.headers };
       try {
         const obj = await env.SYNC_BUCKET.get(objKey, getOpts);
@@ -482,13 +483,33 @@ export default {
         if (obj.httpEtag) headers.set('etag', obj.httpEtag);
         headers.set('Cache-Control', 'public, max-age=31536000, immutable');
         headers.set('Access-Control-Allow-Origin', '*');
+        headers.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        headers.set('Access-Control-Allow-Headers', 'Range, Content-Type');
+        headers.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Type, ETag');
         headers.set('Accept-Ranges', 'bytes');
         if (!headers.has('Content-Type')) {
           headers.set('Content-Type', 'audio/mpeg');
         }
-        return new Response(obj.body, {
+
+        const isHead = request.method === 'HEAD';
+        const body = isHead ? null : obj.body;
+
+        if (hasRange && obj.range) {
+          const start = obj.range.offset;
+          const end = obj.range.offset + obj.range.length - 1;
+          const total = obj.size;
+          headers.set('Content-Range', `bytes ${start}-${end}/${total}`);
+          headers.set('Content-Length', String(obj.range.length));
+          return new Response(body, {
+            headers,
+            status: 206,
+          });
+        }
+
+        headers.set('Content-Length', String(obj.size));
+        return new Response(body, {
           headers,
-          status: obj.range ? 206 : 200,
+          status: 200,
         });
       } catch (err) {
         try {

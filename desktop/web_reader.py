@@ -350,7 +350,7 @@ def _lead_for(text: str, max_words: int = 60) -> str:
     return " ".join(parts[:max_words]) + "…"
 
 
-def _normalize_mobile_item(raw: dict[str, Any], rank: int | None = None) -> dict[str, Any]:
+def _normalize_mobile_item(raw: dict[str, Any], rank: int | None = None, fallback_audio: str = "") -> dict[str, Any]:
     """Project a pipeline item onto the mobile data.json contract.
 
     Pipeline dicts carry producer keys (candidate_id, summary, video_id,
@@ -372,14 +372,14 @@ def _normalize_mobile_item(raw: dict[str, Any], rank: int | None = None) -> dict
         "duration_seconds": _safe_int_seconds(raw.get("duration_seconds")),
         "why_it_matters": why,
         "url": str(raw.get("url") or ""),
-        "audio_url": str(raw.get("audio_url") or ""),
+        "audio_url": str(raw.get("audio_url") or fallback_audio or ""),
     }
     if rank_num is not None:
         item["rank"] = rank_num
     return item
 
 
-def _normalize_mobile_video(raw: dict[str, Any]) -> dict[str, Any]:
+def _normalize_mobile_video(raw: dict[str, Any], fallback_audio: str = "") -> dict[str, Any]:
     """Project a channel video onto the mobile data.json contract."""
     return {
         "id": _make_item_id(raw),
@@ -389,7 +389,7 @@ def _normalize_mobile_video(raw: dict[str, Any]) -> dict[str, Any]:
         "duration_seconds": _safe_int_seconds(raw.get("duration_seconds")),
         "summary_html": str(raw.get("summary_html") or ""),
         "url": str(raw.get("url") or ""),
-        "audio_url": str(raw.get("audio_url") or ""),
+        "audio_url": str(raw.get("audio_url") or fallback_audio or ""),
         "source_type": str(raw.get("source_type") or "youtube"),
         "lead": str(raw.get("lead") or ""),
     }
@@ -404,16 +404,17 @@ def _normalize_mobile_channel(raw: dict[str, Any]) -> dict[str, Any]:
     videos = raw.get("videos", [])
     if not isinstance(videos, list):
         videos = []
+    summary_audio = str(
+        raw.get("summary_audio_url") or raw.get("audio_url") or "")
     return {
         "id": channel_id,
         "name": str(raw.get("name") or "Channel"),
         "category": str(raw.get("category") or "tech"),
         "read_minutes": _safe_channel_int(raw.get("read_minutes")),
         "summary_text": str(raw.get("summary_text") or ""),
-        "summary_audio_url": str(
-            raw.get("summary_audio_url") or raw.get("audio_url") or ""),
+        "summary_audio_url": summary_audio,
         "audio_url": str(raw.get("audio_url") or ""),
-        "videos": [_normalize_mobile_video(v) for v in videos
+        "videos": [_normalize_mobile_video(v, fallback_audio=summary_audio) for v in videos
                    if isinstance(v, dict)],
     }
 
@@ -1208,6 +1209,18 @@ def build_reader_site(
     # Export canonical mobile data.json (schema_version: 1)
     current_week = weeks_data.get("current", {})
     raw_top20 = current_week.get("top20", {}) or {}
+    channels_list = current_week.get("channels", [])
+
+    channel_audio_map = {}
+    for ch in channels_list:
+        if isinstance(ch, dict):
+            ch_audio = str(ch.get("summary_audio_url") or ch.get("audio_url") or "").strip()
+            if ch_audio:
+                if ch.get("name"):
+                    channel_audio_map[ch["name"].strip().lower()] = ch_audio
+                if ch.get("id"):
+                    channel_audio_map[ch["id"].strip().lower()] = ch_audio
+
     mobile_items = []
     for idx, raw_item in enumerate(raw_top20.get("items", []), start=1):
         if not isinstance(raw_item, dict):
@@ -1215,13 +1228,14 @@ def build_reader_site(
         rank = raw_item.get("rank")
         parsed_rank = _safe_int_or_none(rank)
         rank_num = parsed_rank if parsed_rank is not None else idx
-        mobile_items.append(_normalize_mobile_item(raw_item, rank=rank_num))
+        fallback_audio = channel_audio_map.get((raw_item.get("source_name") or "").strip().lower(), "")
+        mobile_items.append(_normalize_mobile_item(raw_item, rank=rank_num, fallback_audio=fallback_audio))
     mobile_data = {
         "schema_version": 1,
         "built_at": site_data["built_at"],
         "run_date": "",
         "top20": {"items": mobile_items, "candidate_count": len(mobile_items)},
-        "channels": [_normalize_mobile_channel(ch) for ch in current_week.get("channels", [])
+        "channels": [_normalize_mobile_channel(ch) for ch in channels_list
                      if isinstance(ch, dict)],
     }
     raw_run_date = str(current_week.get("run_date") or "")

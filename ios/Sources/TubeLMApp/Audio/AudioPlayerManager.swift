@@ -19,6 +19,7 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
     private var player: AVPlayer?
     private var timeObserverToken: Any?
     private var endOfPlaybackObserver: NSObjectProtocol?
+    private var playbackFailedObserver: NSObjectProtocol?
 
     public override init() {
         super.init()
@@ -32,6 +33,20 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
                 guard let self = self else { return }
                 guard let finished = notification.object as? AVPlayerItem,
                       finished == self.player?.currentItem else { return }
+                self.isPlaying = false
+                self.updateNowPlayingInfo()
+            }
+        }
+        playbackFailedObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.failedToPlayToEndTimeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self = self else { return }
+                guard let failed = notification.object as? AVPlayerItem,
+                      failed == self.player?.currentItem else { return }
+                print("[AudioPlayerManager] Playback failed: \(String(describing: failed.error))")
                 self.isPlaying = false
                 self.updateNowPlayingInfo()
             }

@@ -392,8 +392,9 @@ public struct RootTabView: View {
             }
             guard (200..<300).contains(http.statusCode) else { return }
             let newFeed = try JSONDecoder().decode(DigestFeed.self, from: data)
-            self.feed = newFeed
-            try? await store.saveFeed(newFeed)
+            let merged = Self.mergeFeedAudio(incoming: newFeed, fallback: self.feed)
+            self.feed = merged
+            try? await store.saveFeed(merged)
             var updated = meta
             updated.lastChecked = Date()
             if let etag = http.value(forHTTPHeaderField: "ETag"), !etag.isEmpty {
@@ -526,9 +527,26 @@ public struct RootTabView: View {
         }
     }
 
+    private func resolveAudioUrl(for item: FeedItem) -> String? {
+        if let direct = item.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !direct.isEmpty {
+            return direct
+        }
+        if let ch = feed?.channels.first(where: {
+            $0.name.caseInsensitiveCompare(item.sourceName) == .orderedSame ||
+            $0.id.caseInsensitiveCompare(item.sourceName) == .orderedSame
+        }) {
+            let chAudio = (ch.summaryAudioUrl ?? ch.audioUrl)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let chAudio = chAudio, !chAudio.isEmpty {
+                return chAudio
+            }
+        }
+        return nil
+    }
+
     private func playItemAudio(_ item: FeedItem) {
         markItemRead(item)
-        player.playTrack(title: item.title, source: item.sourceName, urlString: item.audioUrl)
+        let resolved = resolveAudioUrl(for: item)
+        player.playTrack(title: item.title, source: item.sourceName, urlString: resolved)
     }
 
     private func playChannelAudio(_ channel: Channel) {
@@ -537,8 +555,82 @@ public struct RootTabView: View {
     }
 
     private func enqueueFeedItem(_ item: FeedItem) {
-        let q = QueueItem(id: item.id, title: item.title, sourceName: item.sourceName, duration: item.duration ?? "", audioUrl: item.audioUrl)
+        let resolved = resolveAudioUrl(for: item)
+        let q = QueueItem(id: item.id, title: item.title, sourceName: item.sourceName, duration: item.duration ?? "", audioUrl: resolved)
         enqueueQueueItem(q)
+    }
+
+    private static func mergeFeedAudio(incoming: DigestFeed, fallback: DigestFeed?) -> DigestFeed {
+        guard let fallback = fallback else { return incoming }
+
+        var channelAudioMap: [String: String] = [:]
+        for ch in fallback.channels {
+            if let a = (ch.summaryAudioUrl ?? ch.audioUrl)?.trimmingCharacters(in: .whitespacesAndNewlines), !a.isEmpty {
+                channelAudioMap[ch.name.lowercased()] = a
+                channelAudioMap[ch.id.lowercased()] = a
+            }
+        }
+
+        let mergedChannels = incoming.channels.map { ch -> Channel in
+            let existingAudio = (ch.summaryAudioUrl ?? ch.audioUrl)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let fallbackAudio = existingAudio.isEmpty ? (channelAudioMap[ch.name.lowercased()] ?? channelAudioMap[ch.id.lowercased()]) : nil
+            let summaryAudio = ch.summaryAudioUrl?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? ch.summaryAudioUrl : fallbackAudio
+
+            let mergedVideos = ch.videos.map { vid -> VideoItem in
+                let vidAudio = vid.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let resolvedVidAudio = vidAudio.isEmpty ? (summaryAudio ?? fallbackAudio) : vidAudio
+                return VideoItem(
+                    id: vid.id,
+                    videoId: vid.videoId,
+                    title: vid.title,
+                    duration: vid.duration,
+                    durationSeconds: vid.durationSeconds,
+                    summaryHtml: vid.summaryHtml,
+                    url: vid.url,
+                    audioUrl: resolvedVidAudio,
+                    sourceType: vid.sourceType,
+                    lead: vid.lead
+                )
+            }
+
+            return Channel(
+                id: ch.id,
+                name: ch.name,
+                category: ch.category,
+                readMinutes: ch.readMinutes,
+                summaryText: ch.summaryText,
+                summaryAudioUrl: summaryAudio,
+                audioUrl: ch.audioUrl,
+                videos: mergedVideos
+            )
+        }
+
+        let mergedItems = incoming.top20.items.map { it -> FeedItem in
+            let itemAudio = it.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let fallbackAudio = itemAudio.isEmpty ? channelAudioMap[it.sourceName.lowercased()] : nil
+            let finalAudio = itemAudio.isEmpty ? fallbackAudio : itemAudio
+            return FeedItem(
+                id: it.id,
+                videoId: it.videoId,
+                rank: it.rank,
+                title: it.title,
+                sourceName: it.sourceName,
+                sourceType: it.sourceType,
+                duration: it.duration,
+                durationSeconds: it.durationSeconds,
+                whyItMatters: it.whyItMatters,
+                url: it.url,
+                audioUrl: finalAudio
+            )
+        }
+
+        return DigestFeed(
+            schemaVersion: incoming.schemaVersion,
+            builtAt: incoming.builtAt,
+            runDate: incoming.runDate,
+            top20: Top20Container(items: mergedItems),
+            channels: mergedChannels
+        )
     }
 
     private func enqueueQueueItem(_ item: QueueItem) {

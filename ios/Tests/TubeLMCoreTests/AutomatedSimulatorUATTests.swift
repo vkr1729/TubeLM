@@ -266,6 +266,27 @@ final class AutomatedSimulatorUATTests: XCTestCase {
         XCTAssertEqual(resolvedAbs?.absoluteString, absoluteAudio)
     }
 
+    /// UAT-071: Audio URL presence on Top 20 items and channel summaries
+    func test_UAT071_BriefingAndChannelAudioPresence() throws {
+        let feed = try loadMockFeed()
+        XCTAssertEqual(feed.top20.items.count, 20)
+
+        // Verify top 20 items have valid audio URLs
+        for item in feed.top20.items {
+            let audio = item.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            XCTAssertFalse(audio.isEmpty, "Top 20 item '\(item.title)' must have a valid audio URL")
+            XCTAssertTrue(audio.hasPrefix("https://") || audio.hasPrefix("http://"), "Audio URL must use http/https")
+        }
+
+        // Verify channels have summary audio URLs
+        for channel in feed.channels {
+            let chAudio = (channel.summaryAudioUrl ?? channel.audioUrl)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            XCTAssertFalse(chAudio.isEmpty, "Channel '\(channel.name)' must have a summary audio URL")
+            let resolved = CommuteQueueModel.resolveChannelPlayback(for: channel, readIDs: [])
+            XCTAssertNotNil(resolved.audioUrl, "resolveChannelPlayback must return a valid audioUrl")
+        }
+    }
+
     // MARK: - Helper
 
     private func loadMockFeed() throws -> DigestFeed {
