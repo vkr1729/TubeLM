@@ -62,7 +62,7 @@ public struct ChannelsView: View {
                 LazyVStack(spacing: 12) {
                     ForEach(filteredChannels) { channel in
                         let isExpanded = expandedChannels.contains(channel.id)
-                        let watchedCount = channel.videos.filter { ! $0.aliases.intersection(readIDs).isEmpty }.count
+                        let watchedCount = channel.videos.filter { !$0.aliases.intersection(readIDs).isEmpty }.count
                         let totalCount = channel.videos.count
                         let isCompleted = totalCount > 0 && watchedCount == totalCount
 
