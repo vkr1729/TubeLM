@@ -175,17 +175,13 @@ public struct ChannelsView: View {
 
                             // Expanded Video Items Panel
                             if isExpanded {
-                                var originalVideoIndices: [String: Int] = [:]
-                                for (offset, element) in channel.videos.enumerated() {
-                                    originalVideoIndices[element.id] = originalVideoIndices[element.id] ?? (offset + 1)
-                                }
                                 let partitionedVideos = FeedPartition.unreadFirst(items: channel.videos) { vid in
                                     !vid.aliases.intersection(readIDs).isEmpty
                                 }
 
                                 VStack(spacing: 10) {
                                     ForEach(partitionedVideos, id: \.id) { vid in
-                                        let vIdx = originalVideoIndices[vid.id] ?? 1
+                                        let vIdx = videoIndex(vid, in: channel.videos)
                                         let isVidRead = !vid.aliases.intersection(readIDs).isEmpty
 
                                         VStack(alignment: .leading, spacing: 6) {
@@ -317,6 +313,10 @@ public struct ChannelsView: View {
             UIApplication.shared.open(url)
             #endif
         }
+    }
+
+    private func videoIndex(_ vid: VideoItem, in videos: [VideoItem]) -> Int {
+        (videos.firstIndex(where: { $0.id == vid.id }) ?? 0) + 1
     }
 }
 #endif

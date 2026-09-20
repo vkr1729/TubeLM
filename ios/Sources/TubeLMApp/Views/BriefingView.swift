@@ -48,10 +48,6 @@ public struct BriefingView: View {
                 .padding()
             } else {
                 let top20 = Array(items.prefix(20))
-                var originalRanks: [String: Int] = [:]
-                for (offset, element) in top20.enumerated() {
-                    originalRanks[element.id] = originalRanks[element.id] ?? (element.rank ?? (offset + 1))
-                }
                 let partitioned = FeedPartition.unreadFirst(items: top20) { item in
                     !item.aliases.intersection(readIDs).isEmpty
                 }
@@ -59,7 +55,7 @@ public struct BriefingView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(partitioned, id: \.id) { item in
-                            let rank = originalRanks[item.id] ?? (item.rank ?? 1)
+                            let rank = itemRank(item, in: top20)
                             let isRead = !item.aliases.intersection(readIDs).isEmpty
                             let bookmarked = isBookmarked(item.id)
 
@@ -213,6 +209,14 @@ public struct BriefingView: View {
             UIApplication.shared.open(url)
             #endif
         }
+    }
+
+    private func itemRank(_ item: FeedItem, in top20: [FeedItem]) -> Int {
+        if let r = item.rank { return r }
+        if let idx = top20.firstIndex(where: { $0.id == item.id }) {
+            return idx + 1
+        }
+        return 1
     }
 }
 #endif
