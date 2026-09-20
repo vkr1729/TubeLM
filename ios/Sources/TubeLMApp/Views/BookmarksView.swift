@@ -95,29 +95,28 @@ public struct BookmarksView: View {
                             }
                             .padding(14)
                             .background(AppTheme.systemBackground)
-                            .cornerRadius(16)
                         }
-                    }
-                    if let onOpenSettings {
-                        Button(action: onOpenSettings) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "gearshape.fill")
-                                    .font(.system(size: 12))
-                                Text("Settings & Appearance")
-                                    .font(.system(size: 13, weight: .semibold))
+
+                        if let onOpenSettings {
+                            Button(action: onOpenSettings) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 12))
+                                    Text("Settings & Appearance")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(AppTheme.secondarySystemBackground)
+                                .foregroundColor(.primary)
+                                .clipShape(Capsule())
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(AppTheme.secondarySystemBackground)
-                            .foregroundColor(.primary)
-                            .clipShape(Capsule())
+                            .padding(.top, 16)
+                            .frame(maxWidth: .infinity)
                         }
-                        .padding(.top, 16)
-                        .frame(maxWidth: .infinity)
                     }
-                }
-                .padding(.top, 12)
-                .padding(.bottom, 120)
+                    .padding(.top, 12)
+                    .padding(.bottom, 120)
                 }
             }
         }

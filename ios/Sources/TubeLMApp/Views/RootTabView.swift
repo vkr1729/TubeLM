@@ -354,7 +354,7 @@ public struct RootTabView: View {
         }
         self.readIDs = await store.loadReadIDs()
         self.bookmarks = await store.loadBookmarks()
-        if syncClient.isConfigured {
+        if await syncClient.isConfigured {
             await pullRemoteState()
         } else {
             withAnimation(.easeInOut(duration: 0.25)) {
@@ -409,7 +409,7 @@ public struct RootTabView: View {
     }
 
     private func pullRemoteState() async {
-        guard syncClient.isConfigured else {
+        guard await syncClient.isConfigured else {
             withAnimation(.easeInOut(duration: 0.25)) { syncState = .unconfigured }
             return
         }
