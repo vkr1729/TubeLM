@@ -257,13 +257,13 @@ _CANONICAL_READ_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_.+")
 
 
 def _sanitize_read_ids(read_ids, canonical_only: bool = False) -> list[str]:
-    """Keep only string ids, de-duplicated, sorted, and bounded."""
+    """Keep only non-blank string ids, de-duplicated, sorted, and bounded."""
     if not isinstance(read_ids, list):
         return []
     clean = sorted({
-        item[:MAX_READ_ID_LENGTH]
+        item.strip()[:MAX_READ_ID_LENGTH]
         for item in read_ids
-        if isinstance(item, str) and item and (not canonical_only or _CANONICAL_READ_ID_RE.match(item))
+        if isinstance(item, str) and item.strip() and (not canonical_only or _CANONICAL_READ_ID_RE.match(item.strip()))
     })
     return clean[:MAX_READ_IDS]
 
@@ -1145,7 +1145,7 @@ def _bounded_int(value, default: int, minimum: int = 1, maximum: int = 50) -> in
         value = int(value)
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
     return max(minimum, min(parsed, maximum))
 

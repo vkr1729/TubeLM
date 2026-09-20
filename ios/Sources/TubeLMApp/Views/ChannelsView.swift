@@ -5,7 +5,8 @@ import TubeLMCore
 public struct ChannelsView: View {
     public let channels: [Channel]
     public let readIDs: Set<String>
-    public let onToggleRead: (String) -> Void
+    public let onMarkRead: (VideoItem) -> Void
+    public let onToggleRead: (VideoItem) -> Void
     public let onPlayChannel: (Channel) -> Void
     public let onEnqueueItem: (QueueItem) -> Void
     public let onToggleBookmark: (FeedItem) -> Void
@@ -16,13 +17,15 @@ public struct ChannelsView: View {
     public init(
         channels: [Channel],
         readIDs: Set<String>,
-        onToggleRead: @escaping (String) -> Void,
+        onMarkRead: @escaping (VideoItem) -> Void,
+        onToggleRead: @escaping (VideoItem) -> Void,
         onPlayChannel: @escaping (Channel) -> Void,
         onEnqueueItem: @escaping (QueueItem) -> Void,
         onToggleBookmark: @escaping (FeedItem) -> Void
     ) {
         self.channels = channels
         self.readIDs = readIDs
+        self.onMarkRead = onMarkRead
         self.onToggleRead = onToggleRead
         self.onPlayChannel = onPlayChannel
         self.onEnqueueItem = onEnqueueItem
@@ -59,7 +62,7 @@ public struct ChannelsView: View {
                 LazyVStack(spacing: 12) {
                     ForEach(filteredChannels) { channel in
                         let isExpanded = expandedChannels.contains(channel.id)
-                        let watchedCount = channel.videos.filter { readIDs.contains($0.id) }.count
+                        let watchedCount = channel.videos.filter { ! $0.aliases.intersection(readIDs).isEmpty }.count
                         let totalCount = channel.videos.count
                         let isCompleted = totalCount > 0 && watchedCount == totalCount
 
@@ -172,19 +175,32 @@ public struct ChannelsView: View {
 
                             // Expanded Video Items Panel
                             if isExpanded {
+                                var originalVideoIndices: [String: Int] = [:]
+                                for (offset, element) in channel.videos.enumerated() {
+                                    originalVideoIndices[element.id] = originalVideoIndices[element.id] ?? (offset + 1)
+                                }
+                                let partitionedVideos = FeedPartition.unreadFirst(items: channel.videos) { vid in
+                                    !vid.aliases.intersection(readIDs).isEmpty
+                                }
+
                                 VStack(spacing: 10) {
-                                    ForEach(Array(channel.videos.enumerated()), id: \.element.id) { vIdx, vid in
-                                        let isVidRead = readIDs.contains(vid.id)
+                                    ForEach(partitionedVideos, id: \.id) { vid in
+                                        let vIdx = originalVideoIndices[vid.id] ?? 1
+                                        let isVidRead = !vid.aliases.intersection(readIDs).isEmpty
 
                                         VStack(alignment: .leading, spacing: 6) {
                                             HStack(alignment: .top, spacing: 8) {
-                                                Button(action: { onToggleRead(vid.id) }) {
+                                                Button(action: {
+                                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                                        onToggleRead(vid)
+                                                    }
+                                                }) {
                                                     Image(systemName: isVidRead ? "checkmark.square.fill" : "square")
                                                         .foregroundColor(isVidRead ? AppTheme.accent : .secondary)
                                                         .font(.system(size: 16))
                                                 }
 
-                                                Text("\(vIdx + 1). \(vid.title)")
+                                                Text("\(vIdx). \(vid.title)")
                                                     .font(AppTheme.subcardTitle)
                                                     .foregroundColor(.primary)
                                                     .onTapGesture {
@@ -240,6 +256,7 @@ public struct ChannelsView: View {
                                                 Button(action: {
                                                     let fItem = FeedItem(
                                                         id: vid.id,
+                                                        videoId: vid.videoId,
                                                         title: vid.title,
                                                         sourceName: channel.name,
                                                         sourceType: vid.sourceType ?? "youtube",
@@ -290,7 +307,9 @@ public struct ChannelsView: View {
     }
 
     private func openVideoLink(_ vid: VideoItem) {
-        onToggleRead(vid.id)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            onMarkRead(vid)
+        }
         if let urlStr = vid.url,
            let url = URL(string: urlStr),
            url.scheme == "http" || url.scheme == "https" {

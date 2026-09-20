@@ -9,7 +9,7 @@ def _bounded_max_items(value, default: int) -> int:
         return default
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
     return max(1, min(parsed, 50))
 

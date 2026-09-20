@@ -585,10 +585,11 @@ class TestMobileExportContract:
         }
         item = _normalize_mobile_item(raw, rank=1)
         assert item["id"] == "dQw4w9WgXcQ"
+        assert item["video_id"] == "dQw4w9WgXcQ"
         assert item["why_it_matters"] == "Sidecar summary"
         assert item["rank"] == 1
         assert item["duration_seconds"] == 0
-        for leaked in ("candidate_id", "summary", "video_id", "published"):
+        for leaked in ("candidate_id", "summary", "published"):
             assert leaked not in item
 
     def test_normalize_channel_drops_pipeline_bloat(self):
@@ -614,11 +615,17 @@ class TestMobileExportContract:
                        "full_summary_html", "summary_preview"):
             assert leaked not in ch
 
-    def test_normalize_video_drops_video_id_key(self):
+    def test_normalize_video_keeps_video_id_key(self):
         v = _normalize_mobile_video({"title": "V", "url": "https://example.com/v",
                                      "video_id": "dQw4w9WgXcQ"})
         assert v["id"] == "dQw4w9WgXcQ"
-        assert "video_id" not in v
+        assert v["video_id"] == "dQw4w9WgXcQ"
+
+    def test_normalize_item_rank_infinite_omits_rank(self):
+        assert "rank" not in _normalize_mobile_item(
+            {"title": "T", "url": "https://example.com/x", "rank": float("inf")})
+        assert "rank" not in _normalize_mobile_item(
+            {"title": "T", "url": "https://example.com/x", "rank": float("-inf")})
 
     def test_run_date_never_leaks_none_string(self, tmp_path, monkeypatch):
         for _k in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_PUBLIC_DOMAIN"):

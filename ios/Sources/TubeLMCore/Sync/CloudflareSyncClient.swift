@@ -98,7 +98,7 @@ public actor CloudflareSyncClient {
     private let session: URLSession
 
     public init(
-        baseURL: URL = URL(string: "https://tubelm-sync.vkr1729.workers.dev")!,
+        baseURL: URL = URL(string: "https://tubelm-sync.kedarvreddy.workers.dev")!,
         syncKey: String = "",
         session: URLSession = .shared
     ) {
@@ -187,12 +187,13 @@ public actor CloudflareSyncClient {
             guard !id.isEmpty, id.count <= 256, ts.isFinite else { continue }
             cleanBookmarkStates[id] = ts
         }
+        let cappedBookmarks = Array(bookmarks.prefix(200))
         request.httpBody = try JSONEncoder().encode(
             SyncPayload(
                 readIds: cleanIds,
                 top20Read: cleanTop20,
                 itemStates: cleanStates,
-                bookmarks: bookmarks,
+                bookmarks: cappedBookmarks,
                 bookmarkStates: cleanBookmarkStates
             )
         )

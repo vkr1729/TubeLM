@@ -1,132 +1,119 @@
-# Frontier Requirements Review — TubeLM iOS (LiveContainer Native)
+# Frontier Requirements Review — TubeLM iOS UAT Remediation (§5)
 
-Source: `.workflow/REQUIREMENTS.md`
+Source: `.workflow/REQUIREMENTS.md` §5 (diff vs `main`: +44 lines, uncommitted)
 Date: 2026-09-20
-Reviewer: Muse Spark (code-verified against `ios/`, `worker/worker.js`, `.github/workflows/build-ios.yml`)
+Reviewer: Muse Spark (code-verified against `ios/Sources`, `desktop/tts_service.py`, `desktop/main.py`, `desktop/web_reader.py`, `desktop/templates/reader.html`, `worker/worker.js`)
 
 ## Target User Scale Anchor
 
-**Single-Person Personal Use Exclusively** (§1). Carried as hard constraint through every recommendation:
+**Single-Person Personal Use Exclusively** (§1) — hard constraint carried through every recommendation:
 
 - Reject enterprise complexity: no multi-tenant DB, no auth framework, no maintained backend.
 - Host: sideloaded `.ipa` inside **LiveContainer** on iOS (JIT, unsigned, no reliable background daemons/push).
 - Baseline: **iOS 26 on iPhone 16**; usage 7–8 opens/week on Singapore commute with tunnel dead zones.
-- Tension to watch: §2 mandates a Cloudflare Worker (`tubelm-sync.<subdomain>.workers.dev`, R2 + Durable Object `SyncCoordinator`, Bearer passphrase) that *is* a remote server. Review treats it as anchor-compliant only if it is zero-maintenance, optional, and never blocks offline use.
+- Every Q below is answered with the cheapest local-first fix that keeps the commute triage snappy; anything requiring per-user ops, server state, or background daemons is flagged as anchor-violating.
 
-## Section 4 Defect Verification (code-checked, not just spec-read)
-
-Spec §4 lists 2 incidents / 7 sub-requirements. Current code status:
-
-- **4.1 Missing icon — still open.** No `AppIcon*.png` in repo; `ios/TubeLM/Info.plist` has no `CFBundleIcons`, `CFBundleIcons~ipad`, `CFBundleIconFiles`, `CFBundleIconFile`; `build-ios.yml` "Package LiveContainer IPA" copies only `Info.plist` + `data.json` + binary, no icons.
-- **4.2.1 Bundle.module trap — mostly fixed.** `ContentStore.loadCachedFeed()` already guards `Bundle.module` behind `#if SWIFT_PACKAGE` with `Bundle.main` (`data`/`mock_data`) fallback. Residual risk is corrupt/empty fallback (see Q2).
-- **4.2.2 Eager audio session — NOT fixed.** `AudioPlayerManager.init()` still calls `setupAudioSession()` → `setCategory(.playback)` + `setActive(true)` at launch, exactly what §4 bans. Must defer both to `play()`/`playTrack()`.
-- **4.2.3 Missing plist keys — partially open.** Present: `CFBundlePackageType=APPL`, `UILaunchScreen`. Missing: `CFBundleSupportedPlatforms`, `MinimumOSVersion`, `CFBundleSignature`. Note version skew: §4 requires `MinimumOSVersion 17.0` while §1 declares iOS 26 baseline — floor vs. target needs a decision.
-- **4.2.4 Unsigned Mach-O — open in CI.** Simulator step runs `codesign -s - --force --deep`; device IPA packaging step does not run `codesign`/`ldid` at all and never verifies `LC_CODE_SIGNATURE`.
-
-All Qs below assume §4 must close with automated gates, not manual "it launched once" checks.
+Prior review of §4 (icon / launch crash / signing) stands — this review covers only the new §5 UAT items. Code status: **none of §5.1–5.5 is implemented** (verified below).
 
 ---
 
-## Q1 — What is the acceptance proof for "icon fixed + launch-crash fixed"?
+## Q1 — §5.1: What does "Light Mode Default + toggle" concretely mean in code?
 
-**Ambiguity:** §4 prescribes artifacts (4 PNG sizes, plist keys, `codesign -s -`) but no verification contract. "Package icons into `TubeLM.app` root" + "ensure ad-hoc signing" can silently regress — wrong dimensions, corrupt PNG, missing `~ipad` key, `codesign` pass on macOS yet AMFI kill under LiveContainer JIT, LiveContainer icon cache showing stale blank.
+**Ambiguity:** §5.1 requires enforcing Light default (`.preferredColorScheme(.light)`) *and* adding Light/Dark/System selection defaulting to Light. No storage, scope, or palette contract is specified.
 
-**Edge cases / failure modes:**
-- PNG exists but wrong pixel size / wrong color profile → iOS silently falls back to blank icon, CI still green.
-- `CFBundleIcons` added but `CFBundleIcons~ipad` or `CFBundleIconFiles` misspelled → iPhone OK, LiveContainer grid blank.
-- `codesign -s -` runs on the simulator `.app` but device IPA ships unsigned → `unzip -l` looks fine, AMFI kills on device.
-- `MinimumOSVersion 17.0` vs §1 iOS 26 baseline: building with iOS 17 SDK APIs that behave differently on 26, or vice versa.
-
-**Recommended approach:**
-- CI gate in `build-ios.yml` after packaging: assert 4 PNGs exist in `Payload/TubeLM.app/`, verify dimensions via `sips -g pixelWidth/Height` or `file`, lint plist keys with `PlistBuddy`, verify signature with `codesign -dv --verbose=4` / `otool -l | grep LC_CODE_SIGNATURE`, fail build on miss. Add LiveContainer import smoke note (install + `simctl launch` + screenshot, already partially done for sim).
-- Lock semantics: `MinimumOSVersion 17.0` = floor, iOS 26 + iPhone 16 = tested baseline; state both explicitly.
-
-**Alternatives:**
-- Manual screenshot check ("looks right on my phone") — catches nothing in CI; rejected as sole gate.
-- Full Apple asset catalog (`Assets.car`) instead of loose PNGs — more correct on stock iOS but heavier toolchain for LiveContainer loose-bundle packaging; defer.
-- Skip verification, trust packaging script — reproduces the original incident; rejected.
-
-**Decision needed:** Confirm CI icon+plist+signature assertions as §4 exit criteria and clarify 17.0-floor vs 26-baseline wording.
-
-## Q2 — What renders on first launch with no cache, no bundle feed, and no network?
-
-**Ambiguity:** §4.2.1 fixes the `fatalError` but specifies only "fallback to sandbox documents with zero crash risk." Combined with §2's stale-while-revalidate (launch → ETag check → atomic swap), the cold-start-in-tunnel path is undefined: corrupt `feed.json`, missing bundled `data.json` (CI copies `mock_data.json` today, production IPA may differ), ETag check timing out.
-
-**Edge cases / failure modes:**
-- First install opened in MRT tunnel: no `Documents/cache/feed.json`, bundled `data.json` missing/stale, network unreachable → `loadCachedFeed()` returns `nil`; does UI blank-crash, spin forever, or show readable empty state?
-- Truncated download replaces good cache (header check OK, body truncated on flaky Wi-Fi) → next cold start has corrupt JSON and no fallback.
-- `DigestFeed` tolerant decoding already exists (`decodeIfPresent` + defaults) but `loadCachedFeed` uses `try JSONDecoder().decode` on the cache path — a corrupt cache file *throws* instead of healing.
+**Code-verified edge cases / failure modes:**
+- `ios/Sources/TubeLMApp/TubeLMApp.swift:11` is still `.preferredColorScheme(nil)` — current behavior is system-following, the exact bug §5.1 reports.
+- `AppTheme` (`ios/Sources/TubeLMApp/Views/Theme/Typography.swift`) uses semantic `Color(uiColor: .systemBackground / .secondarySystemBackground / .separator)` — these auto-adapt to the system theme. Forcing `.light` at the root changes what they resolve to, but any view relying on raw `.primary/.secondary` or hard-coded dark-tuned values has unverified contrast; "high-contrast typography, off-white cards, crisp borders" has no measurable definition.
+- No Settings view, no `@AppStorage` theme key, no `ThemeMode` enum exists anywhere in `ios/Sources`.
+- LiveContainer host in dark mode + forced-light app risks a dark→light flash on launch and a mismatched keyboard/alert appearance.
 
 **Recommended approach:**
-- Never-throw launch path: cache read failure → try `Bundle.main` → else render staged empty state ("No briefing yet — pull to retry"), never block on network. Download-to-temp → validate (JSON parses + `items` non-empty + `schema_version` supported) → atomic `replaceItemAt`; failed validation keeps last good cache silently.
-- Make cache decode tolerant too (`try?` + fallback, or quarantining corrupt file), matching the already-tolerant `DigestFeed.init(from:)`.
+- Single `@AppStorage("tubelm.themeMode")` (`light` default) + root `.preferredColorScheme(mappedOrNil)` on `RootTabView`; Settings segmented control (Light / Dark / System). Audit `AppTheme` once: keep semantic backgrounds (they resolve correctly under forced light) and spot-check `accent #15803d` on off-white cards for contrast; fix only failing pairs.
+- Anchor-fit: one local default, zero server, zero migration.
 
 **Alternatives:**
-- `fatalError`/force-unwrap on missing feed — simplest, reproduces crash; rejected.
-- Block cold start on network fetch for correctness — violates "instantaneous cold starts" + tunnel requirement; rejected.
-- Ship large bundled seed feed to mask the case — bloats IPA, goes stale weekly; rejected as primary (small seed OK, network-independent launch required).
+- Hard-force `.light` everywhere with no toggle — smallest diff, but directly violates the "user theme selection" clause; rejected.
+- Custom in-app theme engine (own color tokens per mode) — full control, but over-engineered for a 1-user app when SwiftUI already handles it; rejected.
+- Keep `.preferredColorScheme(nil)` and call it "System" — reproduces the reported bug; rejected.
 
-**Decision needed:** Confirm "offline-first empty-state + validate-then-swap" as the launch contract; fix `AudioPlayerManager` eager `setActive` in the same pass since both fire at launch.
+**Decision needed:** Confirm AppStorage-backed Light-default + 3-way toggle as the contract, and define "polish" as a contrast spot-check rather than a full redesign.
 
-## Q3 — Does silent refresh or auto-sync ever interrupt reading, scrolling, or playback?
+## Q2 — §5.2: How does "watched to bottom" sort without breaking rank, order, or animation?
 
-**Ambiguity:** §2 demands *both* "silent single-flight ETag check on every launch/foreground, atomically updates without interrupting" *and* "auto-syncs in background on every state mutation (watched, queued, bookmarked), no manual sync." No concurrency, ordering, debounce, or conflict rule. The 120Hz triage + 56pt Commute Deck + 15s skip experience collides with mid-scroll feed swaps and tunnel-flaky POSTs.
+**Ambiguity:** §5.2 says sort unread-first in `BriefingView` and `ChannelsView`, preserve `#1–#20` badges, auto-mark on Play/Watch/Read/title-tap, animate transitions. Unspecified: sort key stability, whether *channels* reorder or only *videos within* a channel, and when the mark fires relative to URL-open success.
 
-**Edge cases / failure modes:**
-- Rapid foreground/background cycling in subway → overlapping `URLSession` checks race; older response overwrites newer, or feed re-renders mid-scroll.
-- Refresh lands while user reads item #7 or drags queue → force-reload yanks scroll / reorders "Up Next."
-- Mutation in tunnel (mark read + queue + bookmark) with Worker unreachable → does the app retry, drop, or block UI? `CloudflareSyncClient` timeout is 15s with `unauthorized/rateLimited/payloadTooLarge` errors — no specified UX.
-- ETag says modified but full `data.json` takes 30s on edge network; user already reading cached copy.
+**Code-verified edge cases / failure modes:**
+- `BriefingView.swift:52` renders `ForEach(Array(items.prefix(20).enumerated()))` with `rank = index + 1` — rank is **position-derived**, so any reorder shifts badges unless the view switches to the model's stable `FeedItem.rank`. `FeedItem.rank` exists (`DigestFeed.swift:73`) but is unused in both views.
+- No sorting exists today: neither `BriefingView` nor `ChannelsView` partitions by `readIDs`. Web/PWA reference behavior is richer than the spec states: `reader.html:2717-2723` partitions into normal-unread / deferred-unread / read (plus a `hideSeen` toggle at `:2721`), and channel videos sort `[...normalUnread, ...deferredUnread, ...readVideos]` (`:2868`) — none of which exists on iOS. Blindly copying index-based rank breaks the badge guarantee on day one.
+- Auto-mark on title-tap: if the YouTube/Safari open fails (no network, LiveContainer URL-scheme block), the item is already marked read with no undo path specified. Queue/bookmark lists referencing original order go stale after a mid-scroll re-sort; rapid successive taps can thrash `LazyVStack` animation and yank scroll.
 
 **Recommended approach:**
-- Single-flight refresh with debounce (min ~60s between checks), conditional GET, 15s timeout; validate-then-stage — if user is scrolled/reading/playing, show quiet "New briefing available — tap to refresh" pill instead of force-swap; never move scroll under touch.
-- Sync as best-effort background: local-first (ContentStore LWW tombstones already correct), silent retry with backoff, never block mutation UI; surface 401/429/413 only in Settings/debug, not as alerts. Leverages existing `item_states`/`bookmark_states` LWW merge in worker + client.
+- Stable partition, not a re-sort: `unread (original feed order) + read (original feed order)` computed at render time in both views (and inside each expanded channel's video list; channel *directory* order stays alphabetical/searchable). Badge shows `item.rank ?? originalIndex+1`. Wrap the mutation in `withAnimation` and mark-read immediately on user intent (tap/Play), matching spec wording.
+- Anchor-fit: pure client-side array partition, no persistence or server change.
 
 **Alternatives:**
-- Blocking refresh on every foreground — simplest, kills snappy cold start; rejected.
-- Force-reload feed on arrival — simple code, janky triage; rejected.
-- Fire-and-forget sync with no retry — loses commute triage state; rejected.
+- Hide watched items entirely (web `hideSeen` toggle) — cleaner triage, but spec explicitly says "push to bottom," not hide; rejected as default (optional toggle later).
+- Re-sort channels themselves by completion — breaks directory findability for 23 sources; rejected.
+- Mark-read only after confirmed URL-open/playback-start — more "correct," but delays the triage feedback the spec wants and complicates every tap handler; rejected.
 
-**Decision needed:** Confirm single-flight + debounce + staged-apply pill + silent-retry sync as the concurrency contract.
+**Decision needed:** Confirm partition-not-sort + stable-rank-badge + immediate-mark semantics; confirm channels directory order is out of scope.
 
-## Q4 — Which audio URL is canonical, and what bounds the offline cache?
+## Q3 — §5.3: What is the canonical cross-device identity key, and what ships the endpoint migration?
 
-**Ambiguity:** §2 allows audio on R2 `/tubelm/audio/...` *or* Pages `/audio/...` with "transparent local disk caching so subway tunnels are protected," but names no canonical URL, no cache key, no storage ceiling, no cellular-vs-Wi-Fi rule. Tab 3 promises "unlimited bookmarks, audio caching dropped entirely" while the Commute Deck implies queued audio must survive tunnels.
+**Ambiguity:** §5.3 requires changing the default worker endpoint to `kedarvreddy`, syncing/matching `video_id` + `url` + normalized URL keys bidirectionally, and adding persistent passphrase input with status. No canonical key, no migration path, no status state machine.
 
-**Edge cases / failure modes:**
-- Pipeline flips R2 mid-week → same episode has two URLs; URL-keyed cache double-stores or re-downloads on cellular.
-- Partial download in tunnel (stream cut mid-file) → 15s skip/scrub on truncated file, or spinner with full text available but unplayed.
-- `Documents/` fills LiveContainer quota with queued audio → launch failures; no eviction or "audio unavailable offline" state specified.
-- Stream-only fallback dies in tunnel with no degraded UX.
+**Code-verified edge cases / failure modes:**
+- Both iOS defaults still point at the old host: `CloudflareSyncClient.swift:101` and `RootTabView.swift:8` hardcode `tubelm-sync.vkr1729.workers.dev`. Changing the default orphans state stored under the old Worker's Durable Object unless migration is defined.
+- Key asymmetry is the real bug, not just the URL: iOS writes a **single** key per mutation (`ContentStore.markItemRead` → `SyncPayload.itemStates[item.id]`), while web fans out **three** keys per action (`reader.html:2270-2285` `markVideoWatchedState` writes `vid`, `url`, and `normalizeVideoUrl(...)`). The worker (`worker.js:239-291` `mergeSyncState`) and iOS (`ContentStore.applyRemoteStates`) merge on **exact-string LWW** with no normalization — so an iOS `video_id`-keyed mark never matches a web `url`-keyed lookup and vice versa. RSS/article items have empty `video_id` (`data.json:104` `"video_id": ""`), falling back to URL/title-hash keys (`web_reader.py:79-100` `_make_item_id`) where trailing-slash/query/case differences silently fork identity. iOS `FeedItem/VideoItem` decoders mint a random `UUID` when `id` is missing (`DigestFeed.swift:122-128, 280-286`) — unstable across weekly feeds.
+- No connection-status UI exists: only a transient `syncToastText` (`RootTabView.swift:99`) and a `SyncSettingsSheet` whose helper text already says "leave empty to stay local-only" (`:445`). Passphrase persists in `UserDefaults` plaintext (`SyncDefaults.keyKey`), never Keychain.
 
 **Recommended approach:**
-- Pipeline emits single canonical `audio_url` + `audio_sha`/`bytes` per item at build time; app never chooses source. Cache key = content hash, not URL, so source flips don't duplicate. Temp-download → validate → atomic swap.
-- Bounded hybrid: manual "Download for commute" + auto top-N only on unmetered Wi-Fi (`allowsExpensiveNetworkAccess=false`); hard ceiling (e.g. ~1 GB) with LRU eviction, bookmarked/queued pins exempt; always show size before tap. Offline-missing audio degrades to fully readable text + inline "audio unavailable offline" instead of spinner.
+- Lock the canonical key to the pipeline's `_make_item_id` output (11-char `video_id` when present, else raw URL ≤200 chars, else hash) and make iOS fan out the same alias set web writes (`id` + `video_id`/`url` + normalized URL) on every mark, matching on *any* alias on read. Single shared helper on iOS; no worker logic change (keeps zero-maintenance infra). Ship endpoint change with one-time fallback (try new, on network-error try old once, then persist working value) so existing state isn't stranded. Passphrase in Keychain; Settings shows persistent `Synced ✓ / Connecting… / Error <reason>` driven by last push/fetch outcome.
+- Anchor-fit: local-first stays authoritative; sync remains best-effort and optional.
 
 **Alternatives:**
-- Stream-only — fails core tunnel requirement; rejected.
-- Download-everything — guarantees offline, blows LiveContainer storage + Pages bandwidth; rejected.
-- Background prefetch via BGTask — unreliable in LiveContainer guest (§4 context); rejected as primary, foreground-only.
+- Normalize server-side in the worker — fixes future matches but leaves offline iOS lookups broken and adds maintained server logic; rejected.
+- URL-only or id-only keys — each breaks one content class (YouTube ids vs RSS URLs); rejected.
+- Force state reset/re-pair on migration — simplest code, destroys commute triage history for the one user who matters; rejected.
 
-**Decision needed:** Confirm canonical-URL + hash-key + ceiling + degraded-text state; clarify bookmark-audio exclusion vs queue-audio pinning.
+**Decision needed:** Confirm alias-fan-out + `_make_item_id` canonical contract, old→new endpoint fallback, Keychain storage, and the 3-state status row as §5.3 exit criteria.
 
-## Q5 — Is Worker sync required or optional, and where does the passphrase live?
+## Q4 — §5.4: Which execution contexts must the TTS fix cover, and what bounds the backfill?
 
-**Ambiguity:** §1 anchor says "strictly reject … remote cloud server maintenance" while §2 mandates event-driven sync to `tubelm-sync.<subdomain>.workers.dev` with `Authorization: Bearer <passphrase>` on *every* mutation. Unspecified: provisioning/rotation, unconfigured state, offline behavior, and whether the app is useful with no key. `CloudflareSyncClient.isConfigured` already gates on non-empty key, but spec never says so.
+**Ambiguity:** §5.4 correctly diagnoses `asyncio.run()` inside a running loop and requires a fix + backfill of the 2026-09-18 digest + `data.json` update. Unspecified: the full caller set that must keep working, backfill idempotency/scope, and which audio-URL field is canonical.
 
-**Edge cases / failure modes:**
-- Fresh install with no passphrase entered opens in tunnel → every tap fires failing POSTs, 15s timeouts pile up, or errors spam the commuter.
-- 401 (rotated key) / 429 (rate limit: 60/min/IP, 240/key in DO) / 413 (1 MiB cap) during commute → silent data divergence across devices with no merge UX (LWW exists server-side, client `applyRemoteStates` exists, but trigger policy undefined).
-- Passphrase bundled into IPA or checked into repo → credential leak; key knowledge = read+write per worker header comment.
-- Worker/R2/DO treated as "no maintenance" until custom domain, bindings, or rate tuning need changes — who owns that for a 1-user app?
+**Code-verified edge cases / failure modes:**
+- Two `asyncio.run` entry points: `tts_service.py:166` (`generate_summary_tts`) and `:265` (`backfill_week`). The crash path is `main.py:723-725`: `generate_summary_tts` called from inside `async_main` (async context) → `RuntimeError`. `web_reader.py:1081-1085` calls it from sync `build_reader_site` (safe today) — so "fails in both" is really "fails wherever the caller is async," and any fix must be loop-agnostic, not just moved.
+- `_backfill_week_async:224-229` wraps the *sync* `generate_summary_tts` in `asyncio.to_thread` (thread without a loop, so it accidentally works) instead of awaiting the async core directly — wasteful and masks the real layering bug. A naive "detect running loop and create a new one in the same thread" fix re-raises; a naive "always new thread" fix hides errors and complicates cancellation.
+- Backfill scope is unbounded as specified: no idempotency rule (re-synthesizing existing non-empty MP3s wastes edge-tts time/money), no per-channel failure isolation (today one channel's exception is caught at call site, but a backfill crash aborts the week), and two competing URL fields (`summary_audio_url` vs `audio_url` on `Channel`, `web_reader.py:1091/1102`) with no statement of which the app plays when both exist.
 
-**Recommended approach (anchor-compliant):**
-- Local-first, sync-optional: app is fully functional with empty key (commute reading, queue, bookmarks all work offline); sync is best-effort when configured. Passphrase entered in Settings, stored in Keychain/sandbox, never bundled. Silent retry, union-merge via existing LWW; explicit "Sync status" row for 401/429/413 instead of alerts.
-- Document Worker as zero-touch infra (static bindings, no per-user ops), explicitly exempted from the "no server" ban — or the ban must be reworded.
+**Recommended approach:**
+- Split layers: keep `_generate_audio_async` as the single async core; make `generate_summary_tts` a loop-agnostic sync wrapper (if a loop is running in this thread, execute the coroutine on a dedicated short-lived thread with its own loop; else `asyncio.run` inline). Make `_backfill_week_async` call the async core directly with its semaphore, per-channel try/except + `{scanned, generated, skipped, failed}` stats. Backfill is idempotent (skip non-empty MP3 unless `--force`), then rewrite `data.json` audio URLs and play-verify one item per surface.
+- Anchor-fit: pipeline-only change, no app or infra change, bounded cost.
 
 **Alternatives:**
-- Hard-require sync (block usage until key valid) — bricks the tunnel use case; rejected.
-- Embed key in binary/plist — leaks credential, breaks rotation; rejected.
-- Drop Worker, local-only + manual export/import — purest anchor reading, but discards already-built CRDT sync; defer as fallback if Worker ops prove burdensome.
+- Always run TTS on a fresh thread — works in both contexts but adds thread-hopping to the hot sync path and obscures tracebacks; rejected as the primary pattern.
+- Make all callers async — correct long-term, but forces `build_reader_site` and pipeline finalization into async for a one-user weekly job; rejected for this fix.
+- Fix forward only, skip the 2026-09-18 backfill — violates the explicit requirement and leaves the current digest silent; rejected.
 
-**Decision needed:** Lock v1 as local-first + optional best-effort sync; forbid bundled keys; clarify Worker exemption in §1 wording.
+**Decision needed:** Confirm loop-agnostic wrapper + direct-async backfill + idempotent scope, and declare the canonical audio-URL field the app reads.
+
+## Q5 — §5.5: What are the measurable acceptance bars for the Player Deck redesign?
+
+**Ambiguity:** §5.5 mandates "Apple Podcasts / Castro standards" with artwork card, custom scrubber, balanced controls, and re-orderable Up Next — all subjective with no sizes, gestures, or accessibility floor.
+
+**Code-verified edge cases / failure modes:**
+- Current sheet (`PlayerDeckSheet.swift:50-58`) is the reported bug verbatim: 100×100 `accentBadge` square with `"TL"`, standard `Slider` (`:76-80`), skip buttons 44×44 (`:97`), play 62×62 (`:104`), speed as a 44×44 circle (`:121-125`). §2 separately requires **56pt touch targets** — the redesign must satisfy both "balanced proportions" and the 56pt floor; 44pt skips fail it today.
+- Queue reorder uses desktop drag idiom (`:179-180` `.onDrag`/`.onDrop` with `NSItemProvider` + `UTType.text` + `QueueDropDelegate`), which is unreliable as the primary iOS-touch reorder path inside a LiveContainer sheet; only removal affordance is a small `xmark` (`:167-174`), no swipe-to-delete. No channel badge, no artwork asset, mono time labels exist (`:87`) but the scrubber hit area is the stock slider's.
+- Custom scrubber drag inside a scrollable sheet fights the sheet's own pan gesture; without `minimumDistance`/hit-area rules, scrub attempts scroll the queue instead. No VoiceOver labels on transport controls.
+
+**Recommended approach:**
+- Set numeric bars: artwork card ~180–200pt, 24pt radius, soft shadow, channel-badge overlay (keep refined TL monogram — no new asset pipeline); custom capsule scrubber with ≥24pt hit height + drag gesture that claims the touch, mono time labels retained; transport row at ≥56pt targets (emerald play ~64pt, 15s skips 56pt, speed pill); Up Next with native `EditMode` reorder + swipe-to-delete (keep xmark as fallback), replacing drag-drop as primary.
+- Anchor-fit: pure SwiftUI, no new dependencies, no artwork downloads (tunnel-safe).
+
+**Alternatives:**
+- Restyle the stock `Slider` — least code, but keeps the exact control the feedback calls out and the gesture conflict; rejected.
+- Remote artwork images per episode — prettier, but adds a network dependency into the tunnel use case and an asset pipeline for one user; rejected.
+- Third-party audio-UI kit — faster polish, but a new dependency for a single sheet; rejected.
+
+**Decision needed:** Lock the numeric bars (artwork size, 56pt floor, scrubber hit area, native reorder + swipe-delete) as the §5.5 acceptance test.

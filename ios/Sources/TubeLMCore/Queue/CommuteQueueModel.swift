@@ -63,9 +63,10 @@ public struct CommuteQueueModel: Sendable {
         items.removeAll()
     }
 
-    /// Dynamically calculates unwatched summaries for a channel, skipping items in `readIDs`.
+    /// Dynamically calculates unwatched summaries for a channel, matching on
+    /// any alias (id, video_id, url, normalized URL) so web/app keys converge.
     public static func unwatchedVideos(for channel: Channel, readIDs: Set<String>) -> [VideoItem] {
-        return channel.videos.filter { !readIDs.contains($0.id) }
+        return channel.videos.filter { $0.aliases.intersection(readIDs).isEmpty }
     }
 
     /// Computes the playback target for a channel based on read state.

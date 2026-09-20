@@ -132,6 +132,11 @@ class TestAtomicStateWrites:
         assert gui._sanitize_read_ids(None) == []
         assert gui._sanitize_read_ids({"a": 1}) == []
 
+    def test_read_ids_reject_blank_and_trim_surrounding_whitespace(self):
+        import gui
+        assert gui._sanitize_read_ids(["  ", "", "   \t  "]) == []
+        assert gui._sanitize_read_ids(["  abc  ", "abc"]) == ["abc"]
+
     def test_read_ids_preserve_mobile_keys(self):
         import gui
         mobile = ["dQw4w9WgXcQ", "https://example.com/a", "2026-09-04_AI_Explained"]

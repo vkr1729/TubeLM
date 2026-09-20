@@ -65,6 +65,19 @@ def _safe_channel_int(value: Any) -> int:
     return int(number)
 
 
+def _safe_int_or_none(value: Any) -> int | None:
+    """Coerce a rank-like field to int; garbage/None/non-finite yields None, never raises."""
+    if value is None:
+        return None
+    try:
+        number = float(value.strip() or "nan") if isinstance(value, str) else float(value)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(number)
+
+
 def _clean_video_id(value) -> str:
     """Allowlist YouTube video ids at the producer boundary.
 
@@ -280,7 +293,7 @@ def parse_top20_digest(top20_file: Path) -> dict[str, Any]:
 
             try:
                 rank_num = int(rank_text)
-            except ValueError:
+            except (ValueError, OverflowError):
                 rank_num = len(items) + 1
 
             p_elem = tr.find("p")
@@ -348,12 +361,10 @@ def _normalize_mobile_item(raw: dict[str, Any], rank: int | None = None) -> dict
     """
     why = str(raw.get("why_it_matters") or raw.get("summary") or "").strip()
     rank_value = raw.get("rank") if rank is None else rank
-    try:
-        rank_num = int(rank_value) if rank_value is not None else None
-    except (ValueError, TypeError):
-        rank_num = None
+    rank_num = _safe_int_or_none(rank_value)
     item: dict[str, Any] = {
         "id": _make_item_id(raw),
+        "video_id": str(raw.get("video_id") or ""),
         "title": str(raw.get("title") or ""),
         "source_name": str(raw.get("source_name") or ""),
         "source_type": str(raw.get("source_type") or "youtube"),
@@ -372,6 +383,7 @@ def _normalize_mobile_video(raw: dict[str, Any]) -> dict[str, Any]:
     """Project a channel video onto the mobile data.json contract."""
     return {
         "id": _make_item_id(raw),
+        "video_id": str(raw.get("video_id") or ""),
         "title": str(raw.get("title") or ""),
         "duration": str(raw.get("duration") or ""),
         "duration_seconds": _safe_int_seconds(raw.get("duration_seconds")),
@@ -1201,10 +1213,8 @@ def build_reader_site(
         if not isinstance(raw_item, dict):
             continue
         rank = raw_item.get("rank")
-        try:
-            rank_num = int(rank) if rank is not None else idx
-        except (ValueError, TypeError):
-            rank_num = idx
+        parsed_rank = _safe_int_or_none(rank)
+        rank_num = parsed_rank if parsed_rank is not None else idx
         mobile_items.append(_normalize_mobile_item(raw_item, rank=rank_num))
     mobile_data = {
         "schema_version": 1,

@@ -160,27 +160,48 @@ public actor ContentStore {
         try atomicWrite(data: data, to: readStateFile)
     }
 
-    public func markItemRead(_ id: String) throws {
-        let clean = id.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean.count <= 256 else { return }
+    public func markItemRead(aliases: Set<String>) throws {
+        let valid = aliases.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count <= 256 }
+        guard !valid.isEmpty else { return }
         var current = loadReadIDsOrdered()
-        current.removeAll(where: { $0 == clean })
-        current.insert(clean, at: 0)
-        try persistReadIDs(current)
+        let now = Date().timeIntervalSince1970 * 1000
         var states = loadItemStates()
-        states[clean] = Date().timeIntervalSince1970 * 1000
+        for alias in valid {
+            current.removeAll(where: { $0 == alias })
+            current.insert(alias, at: 0)
+            states[alias] = now
+        }
+        try persistReadIDs(current)
         try saveItemStates(states)
     }
 
-    public func unmarkItemRead(_ id: String) throws {
-        let clean = id.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean.count <= 256 else { return }
+    public func unmarkItemRead(aliases: Set<String>) throws {
+        let valid = aliases.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count <= 256 }
+        guard !valid.isEmpty else { return }
         var current = loadReadIDsOrdered()
-        current.removeAll(where: { $0 == clean })
-        try persistReadIDs(current)
+        let now = Date().timeIntervalSince1970 * 1000
         var states = loadItemStates()
-        states[clean] = -Date().timeIntervalSince1970 * 1000
+        for alias in valid {
+            current.removeAll(where: { $0 == alias })
+            states[alias] = -now
+        }
+        try persistReadIDs(current)
         try saveItemStates(states)
+    }
+
+    public func isItemRead(aliases: Set<String>) -> Bool {
+        let current = loadReadIDs()
+        return !aliases.isDisjoint(with: current)
+    }
+
+    public func markItemRead(_ id: String) throws {
+        try markItemRead(aliases: [id])
+    }
+
+    public func unmarkItemRead(_ id: String) throws {
+        try unmarkItemRead(aliases: [id])
     }
 
     // MARK: - Item States (LWW Tombstone Map for Sync)

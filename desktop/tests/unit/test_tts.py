@@ -99,6 +99,23 @@ class TestGenerate:
         assert generate_summary_tts("This is a long enough summary text for narration testing.", out, force=True) is True
         assert out.read_bytes() == b"new-tts-bytes"
 
+    def test_generate_from_inside_running_event_loop(self, tmp_path, monkeypatch):
+        import asyncio
+
+        async def fake_save(self, path):
+            Path(path).write_bytes(b"event-loop-tts-bytes")
+
+        monkeypatch.setattr(tts_service.edge_tts.Communicate, "save", fake_save)
+        out = tmp_path / "loop.mp3"
+
+        async def _caller():
+            # This simulates calling generate_summary_tts from inside an active asyncio loop (e.g. main.py)
+            return generate_summary_tts("This is a long enough summary text for narration testing.", out)
+
+        res = asyncio.run(_caller())
+        assert res is True
+        assert out.exists() and out.read_bytes() == b"event-loop-tts-bytes"
+
     def test_network_failure_returns_false(self, tmp_path, monkeypatch):
         async def boom(self, path):
             raise ConnectionError("offline")

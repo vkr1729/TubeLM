@@ -55,7 +55,7 @@ def build_video_filename(rank: int, source_name: str, title: str) -> str:
     """Build the standardized video filename: {rank:02d} - {source_name} - {title}.mp4."""
     try:
         rank_num = int(rank)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         rank_num = 0
     clean_source = sanitize_filename_part(source_name, max_length=60)
     clean_title = sanitize_filename_part(title, max_length=140)
@@ -72,7 +72,7 @@ def extract_items_from_top10_html(html_path: Path) -> list[dict[str, Any]]:
         rank_str = rank_cell.get_text(strip=True)
         try:
             rank = int(rank_str)
-        except ValueError:
+        except (ValueError, OverflowError):
             rank = len(items) + 1
 
         parent_table = rank_cell.find_parent("table")
@@ -258,7 +258,7 @@ def download_top10_videos(
 
         try:
             rank_num = int(item.get("rank") or len(download_tasks) + 1)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             rank_num = len(download_tasks) + 1
         rank = rank_num
         source_name = str(item.get("source_name") or "YouTube")

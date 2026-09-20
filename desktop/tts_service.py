@@ -39,8 +39,11 @@ def parse_tts_timeout_seconds(raw: str | None) -> int:
     """
     text = (raw or "").strip() or str(DEFAULT_TTS_TIMEOUT_SECONDS)
     try:
-        value = int(float(text))
-    except ValueError:
+        parsed = float(text)
+        if not parsed == parsed or parsed in (float("inf"), float("-inf")):
+            raise ValueError(text)
+        value = int(parsed)
+    except (ValueError, OverflowError):
         logger.warning(
             "Invalid TTS_TIMEOUT_SECONDS=%r; using default %d.",
             raw, DEFAULT_TTS_TIMEOUT_SECONDS,
@@ -159,11 +162,24 @@ def generate_summary_tts(
     rate: str | None = None,
     force: bool = False,
 ) -> bool:
-    """Synchronous entrypoint for pipeline calls."""
+    """Synchronous entrypoint for pipeline calls. Loop-agnostic."""
     if not force and output_path.exists() and output_path.stat().st_size > 0:
         return True
     try:
-        return asyncio.run(_generate_audio_async(text, output_path, voice=voice, rate=rate, force=force))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                def _run_in_worker():
+                    return asyncio.run(_generate_audio_async(text, output_path, voice=voice, rate=rate, force=force))
+                future = pool.submit(_run_in_worker)
+                return future.result()
+        else:
+            return asyncio.run(_generate_audio_async(text, output_path, voice=voice, rate=rate, force=force))
     except Exception as e:
         logger.warning("Failed running async TTS: %s", e)
         return False
@@ -224,9 +240,16 @@ async def _backfill_week_async(
     async def process_one(digest: Path, tts_path: Path):
         async with sem:
             text = _plain_text_from_digest(digest)
-            return await asyncio.to_thread(
-                generate_summary_tts, text, tts_path, voice=voice, rate=rate, force=force
-            )
+            generate_fn = globals().get("generate_summary_tts")
+            try:
+                if generate_fn is not None and generate_fn is not _generate_audio_async:
+                    return await asyncio.to_thread(
+                        generate_fn, text, tts_path, voice=voice, rate=rate, force=force
+                    )
+                return await _generate_audio_async(text, tts_path, voice=voice, rate=rate, force=force)
+            except Exception as exc:
+                logger.warning("Failed TTS for %s: %s", tts_path.name, exc)
+                return False
 
     for digest in files:
         if "Top_20" in digest.name or "Top_10" in digest.name:
@@ -243,9 +266,9 @@ async def _backfill_week_async(
         tasks.append(process_one(digest, tts_path))
 
     if tasks:
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         for ok in results:
-            if ok:
+            if ok is True:
                 stats["generated"] += 1
             else:
                 stats["failed"] += 1
@@ -262,11 +285,23 @@ def backfill_week(
     concurrency: int = 3,
 ) -> dict[str, int]:
     """Generate missing (or force-regenerated) summary_*.mp3 files for one run date. Returns counts."""
-    return asyncio.run(
-        _backfill_week_async(
-            summaries_dir, audio_dir, run_date, voice=voice, rate=rate, force=force, concurrency=concurrency
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(
+            _backfill_week_async(
+                summaries_dir, audio_dir, run_date, voice=voice, rate=rate, force=force, concurrency=concurrency
+            )
         )
-    )
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(
+            asyncio.run,
+            _backfill_week_async(
+                summaries_dir, audio_dir, run_date, voice=voice, rate=rate, force=force, concurrency=concurrency
+            ),
+        ).result()
 
 
 def main(argv: list[str] | None = None) -> int:

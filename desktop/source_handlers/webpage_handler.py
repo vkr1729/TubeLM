@@ -26,7 +26,7 @@ class WebpageScraperHandler(BaseSourceHandler):
         self._link_selector = link_selector if isinstance(link_selector, str) else ""
         try:
             max_count = int(max_items)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             max_count = 10
         self._max_items = max(1, min(max_count, 50))
         self._category = category

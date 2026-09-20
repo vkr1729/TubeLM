@@ -77,3 +77,47 @@
   3. **Missing Info.plist Platform Keys:** Missing `CFBundleSupportedPlatforms` (`iPhoneOS`), `MinimumOSVersion` (`17.0`), `CFBundlePackageType` (`APPL`), `CFBundleSignature` (`????`), and launch screen declarations. Requirement: Complete `Info.plist` according to Apple and LiveContainer specifications.
   4. **Unsigned Mach-O Binary (AMFI Rejection):** Packaging script produced Mach-O binary without `LC_CODE_SIGNATURE`, causing iOS AMFI to kill the process on launch. Requirement: Ensure ad-hoc code signing (`codesign -s - --force --deep` or `ldid -S`) is executed during packaging.
 
+---
+
+## 5. UAT Remediation Requirements (Phase 2 Feedback)
+
+### 5.1 Light Mode Default & Polish (Issue 1)
+- **Problem:** App rendered in dark mode by default because `.preferredColorScheme(nil)` adopted the device/LiveContainer system dark theme.
+- **Requirement:**
+  - Enforce **Light Mode Default** across all views (`.preferredColorScheme(.light)`).
+  - Add user theme selection (Light / Dark / System) in Settings, defaulting to Light.
+  - Ensure high-contrast typography, clean off-white card backgrounds, and crisp borders in Light Mode.
+
+### 5.2 Dynamic Feed Sorting: Watched Items to Bottom (Issue 2)
+- **Problem:** When a video or article is played or marked watched, it remained at the top in place.
+- **Requirement:**
+  - Align with Web/PWA behavior: In `BriefingView` and `ChannelsView`, sort unread/unwatched items first, and push watched/read items to the bottom.
+  - Preserve original item rank badges (`#1`, `#2`, etc.) regardless of position.
+  - Automatically mark item watched when tapping "Play", "Watch", "Read", or the item title.
+  - Animate item transitions smoothly so the next unwatched video immediately occupies the top slot.
+
+### 5.3 Cloudflare Sync Fix & Key Alignment (Issue 3)
+- **Problem:** Watched state sync failed between iOS app and web reader; worker URL was hardcoded to outdated `vkr1729.workers.dev`; article IDs differed between web and app.
+- **Requirement:**
+  - Update default worker endpoint to `https://tubelm-sync.kedarvreddy.workers.dev`.
+  - In `ContentStore` and sync payload, sync and match both `video_id`, article `url`, and normalized URL keys bidirectionally.
+  - Provide a clear, persistent sync passphrase input with visual connection status (Synced ✓, Connecting..., or Error).
+
+### 5.4 Audio Summaries Investigation & Pipeline Fix (Issue 4)
+- **Problem:** App and web reader have no audio summaries for the 2026-09-18 weekly digest.
+- **Root Cause:** `desktop/tts_service.py` called `asyncio.run()` while inside an already running asyncio event loop in `main.py` and `web_reader.py`, throwing `RuntimeError: asyncio.run() cannot be called from a running event loop` for all channels.
+- **Requirement:**
+  - Fix event loop handling in `tts_service.py` to safely execute in both sync and async contexts.
+  - Backfill TTS audio summaries for the 2026-09-18 digest.
+  - Update `data.json` with generated audio URLs and verify audio playback in both the app and web reader.
+
+### 5.5 Player Deck Sheet Redesign (Issue 5)
+- **Problem:** The Now Playing modal appears awkward with an oversized neon yellow square ("TL"), standard slider, and unbalanced controls.
+- **Requirement:**
+  - Redesign `PlayerDeckSheet` to match modern Apple Podcasts / Castro design standards:
+    - Elegant artwork card with refined proportions, rounded corners, soft shadow, and dynamic channel badge.
+    - Custom scrubber bar with smooth drag and mono time labels.
+    - Balanced media controls: proportional 15s skip buttons, emerald accent play/pause button, and clean speed pill.
+    - Clean "Up Next" queue section with reordering and swipe-to-delete.
+
+

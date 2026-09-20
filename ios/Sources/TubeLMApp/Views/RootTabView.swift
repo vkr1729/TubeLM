@@ -5,7 +5,8 @@ import TubeLMCore
 private enum SyncDefaults {
     static let endpointKey = "tubelm.syncEndpoint"
     static let keyKey = "tubelm.syncKey"
-    static let defaultEndpoint = "https://tubelm-sync.vkr1729.workers.dev"
+    static let themeKey = "tubelm.themeMode"
+    static let defaultEndpoint = "https://tubelm-sync.kedarvreddy.workers.dev"
 }
 
 public struct RootTabView: View {
@@ -27,8 +28,14 @@ public struct RootTabView: View {
     private let store = ContentStore()
 
     public init() {
-        let endpoint = UserDefaults.standard.string(forKey: SyncDefaults.endpointKey)
-            ?? SyncDefaults.defaultEndpoint
+        let stored = UserDefaults.standard.string(forKey: SyncDefaults.endpointKey)
+        let endpoint: String
+        if let s = stored, !s.contains("vkr1729.workers.dev"), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            endpoint = s
+        } else {
+            endpoint = SyncDefaults.defaultEndpoint
+            UserDefaults.standard.set(SyncDefaults.defaultEndpoint, forKey: SyncDefaults.endpointKey)
+        }
         let key = UserDefaults.standard.string(forKey: SyncDefaults.keyKey) ?? ""
         let url = URL(string: endpoint) ?? URL(string: SyncDefaults.defaultEndpoint)!
         _syncClient = State(initialValue: CloudflareSyncClient(baseURL: url, syncKey: key))
@@ -45,7 +52,7 @@ public struct RootTabView: View {
                             BriefingView(
                                 items: feed?.top20.items ?? [],
                                 readIDs: readIDs,
-                                onMarkRead: markRead,
+                                onMarkRead: markItemRead,
                                 onPlayAudio: playItemAudio,
                                 onEnqueue: enqueueFeedItem,
                                 onToggleBookmark: toggleBookmark,
@@ -55,7 +62,8 @@ public struct RootTabView: View {
                             ChannelsView(
                                 channels: feed?.channels ?? [],
                                 readIDs: readIDs,
-                                onToggleRead: toggleRead,
+                                onMarkRead: markVideoRead,
+                                onToggleRead: toggleVideoRead,
                                 onPlayChannel: playChannelAudio,
                                 onEnqueueItem: enqueueQueueItem,
                                 onToggleBookmark: toggleBookmark
@@ -335,29 +343,41 @@ public struct RootTabView: View {
         }
     }
 
-    private func markRead(_ id: String) {
-        readIDs.insert(id)
+    private func markItemRead(_ item: FeedItem) {
+        let aliases = item.aliases
+        for a in aliases { readIDs.insert(a) }
         Haptics.confirm()
         Task {
-            try? await store.markItemRead(id)
+            try? await store.markItemRead(aliases: aliases)
             scheduleSyncPush()
         }
     }
 
-    private func toggleRead(_ id: String) {
-        let willBeRead = !readIDs.contains(id)
+    private func markVideoRead(_ vid: VideoItem) {
+        let aliases = vid.aliases
+        for a in aliases { readIDs.insert(a) }
+        Haptics.confirm()
+        Task {
+            try? await store.markItemRead(aliases: aliases)
+            scheduleSyncPush()
+        }
+    }
+
+    private func toggleVideoRead(_ vid: VideoItem) {
+        let aliases = vid.aliases
+        let willBeRead = aliases.intersection(readIDs).isEmpty
         if willBeRead {
-            readIDs.insert(id)
+            for a in aliases { readIDs.insert(a) }
             Haptics.confirm()
         } else {
-            readIDs.remove(id)
+            for a in aliases { readIDs.remove(a) }
             Haptics.tap()
         }
         Task {
             if willBeRead {
-                try? await store.markItemRead(id)
+                try? await store.markItemRead(aliases: aliases)
             } else {
-                try? await store.unmarkItemRead(id)
+                try? await store.unmarkItemRead(aliases: aliases)
             }
             scheduleSyncPush()
         }
@@ -385,6 +405,7 @@ public struct RootTabView: View {
     }
 
     private func playItemAudio(_ item: FeedItem) {
+        markItemRead(item)
         player.playTrack(title: item.title, source: item.sourceName, urlString: item.audioUrl)
     }
 
@@ -421,33 +442,63 @@ public struct RootTabView: View {
 
 private struct SyncSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var endpoint: String = UserDefaults.standard.string(forKey: SyncDefaults.endpointKey) ?? SyncDefaults.defaultEndpoint
-    @State private var passphrase: String = UserDefaults.standard.string(forKey: SyncDefaults.keyKey) ?? ""
+    @AppStorage("tubelm.themeMode") private var themeMode: String = AppThemeMode.light.rawValue
+    @State private var endpoint: String
+    @State private var passphrase: String
+
     let onSave: (String, String) -> Void
+
+    init(onSave: @escaping (String, String) -> Void) {
+        self.onSave = onSave
+        let storedEndpoint = UserDefaults.standard.string(forKey: SyncDefaults.endpointKey)
+        let resolvedEndpoint: String
+        if let s = storedEndpoint, !s.contains("vkr1729.workers.dev"), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            resolvedEndpoint = s
+        } else {
+            resolvedEndpoint = SyncDefaults.defaultEndpoint
+        }
+        _endpoint = State(initialValue: resolvedEndpoint)
+        _passphrase = State(initialValue: UserDefaults.standard.string(forKey: SyncDefaults.keyKey) ?? "")
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Worker URL") {
+                Section("Appearance") {
+                    Picker("Theme", selection: $themeMode) {
+                        ForEach(AppThemeMode.allCases) { mode in
+                            Text(mode.title).tag(mode.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section("Cloud Sync") {
                     #if os(iOS)
-                    TextField("https://tubelm-sync.<subdomain>.workers.dev", text: $endpoint)
+                    TextField("https://tubelm-sync.kedarvreddy.workers.dev", text: $endpoint)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
                     #else
-                    TextField("https://tubelm-sync.<subdomain>.workers.dev", text: $endpoint)
+                    TextField("https://tubelm-sync.kedarvreddy.workers.dev", text: $endpoint)
                         .autocorrectionDisabled(true)
                     #endif
-                }
-                Section("Sync Passphrase") {
                     SecureField("16+ character passphrase", text: $passphrase)
                 }
+
                 Section {
+                    HStack {
+                        Image(systemName: passphrase.isEmpty ? "bolt.slash" : "bolt.shield.fill")
+                            .foregroundColor(passphrase.isEmpty ? .secondary : AppTheme.accent)
+                        Text(passphrase.isEmpty ? "Mode: Local Storage Only" : "Mode: Cloudflare KV Sync Active")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
                     Text("Background sync runs automatically on every change once paired. Leave the passphrase empty to stay local-only.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
             }
-            .navigationTitle("Cloud Sync")
+            .navigationTitle("Settings & Sync")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif

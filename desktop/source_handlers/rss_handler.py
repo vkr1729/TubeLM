@@ -50,7 +50,7 @@ class GenericRSSHandler(BaseSourceHandler):
         self._behind_paywall = behind_paywall
         try:
             max_count = int(max_items)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             max_count = 15
         self._max_items = max(1, min(max_count, 50))
         self._category = category

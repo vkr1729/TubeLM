@@ -70,6 +70,7 @@ public struct Top20Container: Codable, Sendable, Equatable {
 
 public struct FeedItem: Codable, Identifiable, Sendable, Equatable {
     public let id: String
+    public let videoId: String?
     public let rank: Int?
     public let title: String
     public let sourceName: String
@@ -82,6 +83,7 @@ public struct FeedItem: Codable, Identifiable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case videoId = "video_id"
         case rank
         case title
         case sourceName = "source_name"
@@ -95,6 +97,7 @@ public struct FeedItem: Codable, Identifiable, Sendable, Equatable {
 
     public init(
         id: String,
+        videoId: String? = nil,
         rank: Int? = nil,
         title: String,
         sourceName: String = "",
@@ -106,6 +109,7 @@ public struct FeedItem: Codable, Identifiable, Sendable, Equatable {
         audioUrl: String? = nil
     ) {
         self.id = id
+        self.videoId = videoId
         self.rank = rank
         self.title = title
         self.sourceName = sourceName
@@ -126,6 +130,7 @@ public struct FeedItem: Codable, Identifiable, Sendable, Equatable {
         } else {
             self.id = UUID().uuidString
         }
+        self.videoId = try? c.decodeIfPresent(String.self, forKey: .videoId)
         self.rank = lenientInt(c, .rank)
         self.title = lenientString(c, .title)
         self.sourceName = lenientString(c, .sourceName)
@@ -144,6 +149,10 @@ public struct FeedItem: Codable, Identifiable, Sendable, Equatable {
 
     public var actionLabel: String {
         isArticle ? "Read" : "Watch"
+    }
+
+    public var aliases: Set<String> {
+        SyncIdentity.aliases(id: id, videoId: videoId, url: url)
     }
 }
 
@@ -232,6 +241,7 @@ public struct Channel: Codable, Identifiable, Sendable, Equatable {
 
 public struct VideoItem: Codable, Identifiable, Sendable, Equatable {
     public let id: String
+    public let videoId: String?
     public let title: String
     public let duration: String?
     public let durationSeconds: Int?
@@ -243,6 +253,7 @@ public struct VideoItem: Codable, Identifiable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case videoId = "video_id"
         case title
         case duration
         case durationSeconds = "duration_seconds"
@@ -255,6 +266,7 @@ public struct VideoItem: Codable, Identifiable, Sendable, Equatable {
 
     public init(
         id: String,
+        videoId: String? = nil,
         title: String,
         duration: String? = nil,
         durationSeconds: Int? = nil,
@@ -265,6 +277,7 @@ public struct VideoItem: Codable, Identifiable, Sendable, Equatable {
         lead: String? = nil
     ) {
         self.id = id
+        self.videoId = videoId
         self.title = title
         self.duration = duration
         self.durationSeconds = durationSeconds
@@ -284,6 +297,7 @@ public struct VideoItem: Codable, Identifiable, Sendable, Equatable {
         } else {
             self.id = UUID().uuidString
         }
+        self.videoId = try? c.decodeIfPresent(String.self, forKey: .videoId)
         self.title = lenientString(c, .title)
         self.duration = try? c.decodeIfPresent(String.self, forKey: .duration)
         self.durationSeconds = lenientInt(c, .durationSeconds)
@@ -301,5 +315,9 @@ public struct VideoItem: Codable, Identifiable, Sendable, Equatable {
 
     public var actionLabel: String {
         isArticle ? "Read" : "Watch"
+    }
+
+    public var aliases: Set<String> {
+        SyncIdentity.aliases(id: id, videoId: videoId, url: url)
     }
 }
