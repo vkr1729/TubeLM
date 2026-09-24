@@ -815,17 +815,16 @@ async def async_main(
         # Dynamic retry threshold gating (evaluated cumulatively after background artifact advancement)
         if not dry_run and total_initial_handlers > 0:
             cumulative_rate = len(completed_source_keys) / total_initial_handlers
-            if stage_idx == 0 and cumulative_rate >= 0.80:
+            if stage_idx == 0 and cumulative_rate >= 1.0:
                 logger.info(
-                    "Iteration 1 reached %.1f%% success (%d/%d sources >= 80%% threshold). Proceeding to digest generation.",
-                    cumulative_rate * 100,
+                    "Iteration 1 reached 100%% success (%d/%d sources). Proceeding to digest generation.",
                     len(completed_source_keys),
                     total_initial_handlers,
                 )
                 break
-            elif stage_idx == 1 and cumulative_rate >= 0.70:
+            elif stage_idx == 1 and cumulative_rate >= 0.90:
                 logger.info(
-                    "Iteration 2 reached %.1f%% success (%d/%d sources >= 70%% threshold). Proceeding to digest generation.",
+                    "Iteration 2 reached %.1f%% success (%d/%d sources >= 90%% threshold). Proceeding to digest generation.",
                     cumulative_rate * 100,
                     len(completed_source_keys),
                     total_initial_handlers,
