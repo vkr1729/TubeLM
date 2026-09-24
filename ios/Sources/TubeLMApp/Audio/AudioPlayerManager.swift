@@ -54,18 +54,6 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         }
     }
 
-    deinit {
-        statusObserverToken?.invalidate()
-        if let token = timeObserverToken {
-            player?.removeTimeObserver(token)
-        }
-        if let observer = endOfPlaybackObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        if let observer = playbackFailedObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-    }
 
     private func ensureAudioSession() {
         #if os(iOS)
