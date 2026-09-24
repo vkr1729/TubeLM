@@ -226,7 +226,7 @@ async def _backfill_week_async(
     force: bool = False,
     concurrency: int = 3,
 ) -> dict[str, int]:
-    """Generate missing summary_*.mp3 files concurrently."""
+    import paths
     from paths import safe_channel_name
 
     stats = {"scanned": 0, "generated": 0, "skipped": 0, "failed": 0}
@@ -252,7 +252,7 @@ async def _backfill_week_async(
                 return False
 
     for digest in files:
-        if "Top_20" in digest.name or "Top_10" in digest.name:
+        if paths.is_top_digest_file(digest):
             continue
         safe = safe_channel_name(digest.stem[len(run_date) + 1:].removesuffix("_digest"))
         if not safe or safe in seen:

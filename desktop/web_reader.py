@@ -350,6 +350,11 @@ def _lead_for(text: str, max_words: int = 60) -> str:
     return " ".join(parts[:max_words]) + "…"
 
 
+def _normalize_channel_key(name: str) -> str:
+    """Normalize channel name or id for robust dictionary joining."""
+    return re.sub(r"[^\w\s]", "", (name or "").lower()).strip()
+
+
 def _normalize_mobile_item(raw: dict[str, Any], rank: int | None = None, fallback_audio: str = "") -> dict[str, Any]:
     """Project a pipeline item onto the mobile data.json contract.
 
@@ -1058,7 +1063,7 @@ def build_reader_site(
         for d in dates_list:
             d_str = d.strftime("%Y-%m-%d")
             for f in sorted(date_map.get(d, [])):
-                if "Top_20" in f.name or "Top_10" in f.name:
+                if paths.is_top_digest_file(f):
                     if not top20_data.get("items"):
                         sidecar_top = f.with_suffix(".json")
                         if sidecar_top.exists():
@@ -1147,6 +1152,15 @@ def build_reader_site(
             top20_data["items"] = deduped_final
             top20_data["candidate_count"] = len(deduped_final)
 
+        week_audio_map = {}
+        for ch in channels:
+            ch_audio = str(ch.get("summary_audio_url") or ch.get("audio_url") or "").strip()
+            if ch_audio:
+                if ch.get("name"):
+                    week_audio_map[_normalize_channel_key(ch["name"])] = ch_audio
+                if ch.get("id"):
+                    week_audio_map[_normalize_channel_key(ch["id"])] = ch_audio
+
         for it in top20_data.get("items", []):
             vid = it.get("video_id") or it.get("url")
             if not it.get("duration") and vid in vid_to_dur:
@@ -1155,6 +1169,10 @@ def build_reader_site(
                 it["duration_seconds"] = _safe_int_seconds(
                     it.get("duration_seconds") or dur_secs)
             it["id"] = _make_item_id(it)
+            if not it.get("audio_url"):
+                src_key = _normalize_channel_key(it.get("source_name") or "")
+                if src_key in week_audio_map:
+                    it["audio_url"] = week_audio_map[src_key]
 
         for ch in channels:
             if not ch.get("id"):
@@ -1217,9 +1235,9 @@ def build_reader_site(
             ch_audio = str(ch.get("summary_audio_url") or ch.get("audio_url") or "").strip()
             if ch_audio:
                 if ch.get("name"):
-                    channel_audio_map[ch["name"].strip().lower()] = ch_audio
+                    channel_audio_map[_normalize_channel_key(ch["name"])] = ch_audio
                 if ch.get("id"):
-                    channel_audio_map[ch["id"].strip().lower()] = ch_audio
+                    channel_audio_map[_normalize_channel_key(ch["id"])] = ch_audio
 
     mobile_items = []
     for idx, raw_item in enumerate(raw_top20.get("items", []), start=1):
@@ -1228,7 +1246,7 @@ def build_reader_site(
         rank = raw_item.get("rank")
         parsed_rank = _safe_int_or_none(rank)
         rank_num = parsed_rank if parsed_rank is not None else idx
-        fallback_audio = channel_audio_map.get((raw_item.get("source_name") or "").strip().lower(), "")
+        fallback_audio = channel_audio_map.get(_normalize_channel_key(raw_item.get("source_name") or ""), "")
         mobile_items.append(_normalize_mobile_item(raw_item, rank=rank_num, fallback_audio=fallback_audio))
     mobile_data = {
         "schema_version": 1,

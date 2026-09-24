@@ -1,119 +1,275 @@
-# Frontier Requirements Review — TubeLM iOS UAT Remediation (§5)
+# Frontier Requirements Review — TubeLM Web & Mobile Sync
 
-Source: `.workflow/REQUIREMENTS.md` §5 (diff vs `main`: +44 lines, uncommitted)
-Date: 2026-09-20
-Reviewer: Muse Spark (code-verified against `ios/Sources`, `desktop/tts_service.py`, `desktop/main.py`, `desktop/web_reader.py`, `desktop/templates/reader.html`, `worker/worker.js`)
+Source: `.workflow/REQUIREMENTS.md` (working-tree rewrite, uncommitted diff vs `main`: +62/−109)
+Date: 2026-09-24
+Reviewer: Muse Spark (verified against `desktop/web_reader.py`, `desktop/tts_service.py`,
+`desktop/main.py`, `desktop/top10_service.py`, `desktop/email_service.py`,
+`desktop/scripts/`, `desktop/templates/reader.html`, `ios/Sources`, `.github/workflows/`)
+
+> Note: the prior review in this file (2026-09-20, old REQUIREMENTS §5: theme default,
+> watched-to-bottom, sync identity, TTS asyncio, player deck) is superseded by the
+> REQUIREMENTS rewrite and preserved in git history. This review covers only the new
+> scope (§2 A–D). The later plan-level findings in `.workflow/FRONTIER_PLAN_REVIEW.md`
+> (schema divergence resolved, worker sync contract, LiveContainer audio spike) still stand
+> where they do not conflict with the new requirements.
 
 ## Target User Scale Anchor
 
-**Single-Person Personal Use Exclusively** (§1) — hard constraint carried through every recommendation:
+**Single-Person Personal Use Exclusively** (§1) — hard constraint carried through every
+recommendation:
 
-- Reject enterprise complexity: no multi-tenant DB, no auth framework, no maintained backend.
-- Host: sideloaded `.ipa` inside **LiveContainer** on iOS (JIT, unsigned, no reliable background daemons/push).
-- Baseline: **iOS 26 on iPhone 16**; usage 7–8 opens/week on Singapore commute with tunnel dead zones.
-- Every Q below is answered with the cheapest local-first fix that keeps the commute triage snappy; anything requiring per-user ops, server state, or background daemons is flagged as anchor-violating.
-
-Prior review of §4 (icon / launch crash / signing) stands — this review covers only the new §5 UAT items. Code status: **none of §5.1–5.5 is implemented** (verified below).
+- Reject enterprise complexity: no auth frameworks, no microservices, no distributed DBs,
+  no maintained backend logic, no new dependencies for a one-user weekly job.
+- Hosts: GitHub Pages static site + Cloudflare Worker/R2 (already deployed) + sideloaded
+  `.ipa` in LiveContainer on iOS.
+- Every Q below is answered with the cheapest pipeline-local or client-local fix;
+  anything requiring per-user ops, server state changes, or background daemons is flagged
+  as anchor-violating.
 
 ---
 
-## Q1 — §5.1: What does "Light Mode Default + toggle" concretely mean in code?
+## Q1 — §2.A: Which N is canonical, and does the regex contradict §2.B?
 
-**Ambiguity:** §5.1 requires enforcing Light default (`.preferredColorScheme(.light)`) *and* adding Light/Dark/System selection defaulting to Light. No storage, scope, or palette contract is specified.
-
-**Code-verified edge cases / failure modes:**
-- `ios/Sources/TubeLMApp/TubeLMApp.swift:11` is still `.preferredColorScheme(nil)` — current behavior is system-following, the exact bug §5.1 reports.
-- `AppTheme` (`ios/Sources/TubeLMApp/Views/Theme/Typography.swift`) uses semantic `Color(uiColor: .systemBackground / .secondarySystemBackground / .separator)` — these auto-adapt to the system theme. Forcing `.light` at the root changes what they resolve to, but any view relying on raw `.primary/.secondary` or hard-coded dark-tuned values has unverified contrast; "high-contrast typography, off-white cards, crisp borders" has no measurable definition.
-- No Settings view, no `@AppStorage` theme key, no `ThemeMode` enum exists anywhere in `ios/Sources`.
-- LiveContainer host in dark mode + forced-light app risks a dark→light flash on launch and a mismatched keyboard/alert appearance.
-
-**Recommended approach:**
-- Single `@AppStorage("tubelm.themeMode")` (`light` default) + root `.preferredColorScheme(mappedOrNil)` on `RootTabView`; Settings segmented control (Light / Dark / System). Audit `AppTheme` once: keep semantic backgrounds (they resolve correctly under forced light) and spot-check `accent #15803d` on off-white cards for contrast; fix only failing pairs.
-- Anchor-fit: one local default, zero server, zero migration.
-
-**Alternatives:**
-- Hard-force `.light` everywhere with no toggle — smallest diff, but directly violates the "user theme selection" clause; rejected.
-- Custom in-app theme engine (own color tokens per mode) — full control, but over-engineered for a 1-user app when SwiftUI already handles it; rejected.
-- Keep `.preferredColorScheme(nil)` and call it "System" — reproduces the reported bug; rejected.
-
-**Decision needed:** Confirm AppStorage-backed Light-default + 3-way toggle as the contract, and define "polish" as a contrast spot-check rather than a full redesign.
-
-## Q2 — §5.2: How does "watched to bottom" sort without breaking rank, order, or animation?
-
-**Ambiguity:** §5.2 says sort unread-first in `BriefingView` and `ChannelsView`, preserve `#1–#20` badges, auto-mark on Play/Watch/Read/title-tap, animate transitions. Unspecified: sort key stability, whether *channels* reorder or only *videos within* a channel, and when the mark fires relative to URL-open success.
+**Ambiguity:** §2.A mandates matching `r".*_TubeLM_Top_(\d+)(?:_interim)?_digest\.(html|json)$"`
+while §2.B bans interim files from ever being created. The digest count N has at least
+four competing definitions (filename digits, `len(items)`, `candidate_count`,
+`cfg.top_digest_count`), and "everywhere file matching occurs" is not enumerated. The
+empty-digest case (N=0) is unspecified despite the iOS gate on non-empty items.
 
 **Code-verified edge cases / failure modes:**
-- `BriefingView.swift:52` renders `ForEach(Array(items.prefix(20).enumerated()))` with `rank = index + 1` — rank is **position-derived**, so any reorder shifts badges unless the view switches to the model's stable `FeedItem.rank`. `FeedItem.rank` exists (`DigestFeed.swift:73`) but is unused in both views.
-- No sorting exists today: neither `BriefingView` nor `ChannelsView` partitions by `readIDs`. Web/PWA reference behavior is richer than the spec states: `reader.html:2717-2723` partitions into normal-unread / deferred-unread / read (plus a `hideSeen` toggle at `:2721`), and channel videos sort `[...normalUnread, ...deferredUnread, ...readVideos]` (`:2868`) — none of which exists on iOS. Blindly copying index-based rank breaks the badge guarantee on day one.
-- Auto-mark on title-tap: if the YouTube/Safari open fails (no network, LiveContainer URL-scheme block), the item is already marked read with no undo path specified. Queue/bookmark lists referencing original order go stale after a mid-scroll re-sort; rapid successive taps can thrash `LazyVStack` animation and yank scroll.
+- Hardcoded match sites beyond the two named files: `web_reader.py:1061`
+  (`"Top_20" in f.name or "Top_10" in ...`), `tts_service.py:255` (same check),
+  `desktop/scripts/download_top10.py:31` (glob `*_TubeLM_Top_*_digest.html`),
+  `desktop/scripts/send_top10_from_digests.py:48` (`"TubeLM_Top_" in name`).
+- Filename N is informational only: `rank_top10_candidates` silently shrinks the target
+  via `effective_target_count = min(requested_count, len(candidates))`
+  (`top10_service.py:390`), so a "Top 20" request yields a `Top_14` file — the Top 14
+  breakdown in the primary objective is this line working as coded, not a separate bug.
+- `candidate_count` is always overwritten with `len()` after dedupe (`web_reader.py:1148`;
+  mobile export `web_reader.py:1237`), so `top20.candidate_count: N` can never disagree
+  with `len(items)` — the contract as written is untestable.
+- Display caps contradict dynamic-N: iOS `BriefingView.swift:50` does `prefix(20)`
+  (a Top 25 silently loses 5 items), `reader.html:2744` hardcodes "Top 20 curated videos",
+  and RSS truncates to `top20_items[:10]` (`web_reader.py:763`).
+- N=0: `ContentStore.swift` requires `!feed.top20.items.isEmpty` (4 sites), so a
+  zero-candidate week renders as blank/seed state with no specified fallback.
 
 **Recommended approach:**
-- Stable partition, not a re-sort: `unread (original feed order) + read (original feed order)` computed at render time in both views (and inside each expanded channel's video list; channel *directory* order stays alphabetical/searchable). Badge shows `item.rank ?? originalIndex+1`. Wrap the mutation in `withAnimation` and mark-read immediately on user intent (tap/Play), matching spec wording.
-- Anchor-fit: pure client-side array partition, no persistence or server change.
+- Canonical N = `len(final items after dedupe)`; filename digits are a hint, never parsed
+  for display. Drop `(?:_interim)?` from the canonical regex (interim is banned — matching
+  it re-admits the removed concept); instead do a one-time sweep deleting stale
+  `*_interim_digest.*` files (see Q3).
+- Enumerate and convert all five match sites above to the single regex helper; add a test
+  with Top_14/Top_20/Top_25 filenames plus a stale-interim file asserting skip-or-sweep.
+- Replace `prefix(20)` / hardcoded "Top 20" / `[:10]` with the dynamic count (or record an
+  explicit cap policy, e.g. "display all, RSS first 10" — state it, don't leave it).
+- Define N=0 explicitly: render an honest empty state ("No Top picks this week — N
+  candidates") rather than the corrupt-cache path.
+- Anchor-fit: pure pipeline + template string changes, no infra.
 
 **Alternatives:**
-- Hide watched items entirely (web `hideSeen` toggle) — cleaner triage, but spec explicitly says "push to bottom," not hide; rejected as default (optional toggle later).
-- Re-sort channels themselves by completion — breaks directory findability for 23 sources; rejected.
-- Mark-read only after confirmed URL-open/playback-start — more "correct," but delays the triage feedback the spec wants and complicates every tap handler; rejected.
+- Keep `(?:_interim)?` in the regex as stale-file tolerance — defensible, but it silently
+  preserves the removed feature's surface; rejected unless Q3 decides stale files linger.
+- Pad/truncate selection to exactly `top_digest_count` — predictable UI, but fabricates
+  rankings (pad) or discards signal (truncate) for one reader; rejected.
+- Treat filename N as canonical — breaks the day `min()` shrinks the set; rejected.
 
-**Decision needed:** Confirm partition-not-sort + stable-rank-badge + immediate-mark semantics; confirm channels directory order is out of scope.
+**Decision needed:** Confirm len-after-dedupe as canonical N, interim-free regex, the five
+match sites as the complete list, and the N=0 empty-state wording.
 
-## Q3 — §5.3: What is the canonical cross-device identity key, and what ships the endpoint migration?
+## Q2 — §2.B: What exactly is "success rate," and what does partial publish disclose?
 
-**Ambiguity:** §5.3 requires changing the default worker endpoint to `kedarvreddy`, syncing/matching `video_id` + `url` + normalized URL keys bidirectionally, and adding persistent passphrase input with status. No canonical key, no migration path, no status state machine.
+**Ambiguity:** The 80%/70%/unconditional thresholds name a "success rate" with no
+numerator, denominator, or cumulative-vs-per-stage semantics. "Proceed to digest
+generation and publish" after Iteration 3 at <70% does not say what a partial digest
+contains or discloses. The mapping onto the existing fixed 3-stage loop is undefined.
 
 **Code-verified edge cases / failure modes:**
-- Both iOS defaults still point at the old host: `CloudflareSyncClient.swift:101` and `RootTabView.swift:8` hardcode `tubelm-sync.vkr1729.workers.dev`. Changing the default orphans state stored under the old Worker's Durable Object unless migration is defined.
-- Key asymmetry is the real bug, not just the URL: iOS writes a **single** key per mutation (`ContentStore.markItemRead` → `SyncPayload.itemStates[item.id]`), while web fans out **three** keys per action (`reader.html:2270-2285` `markVideoWatchedState` writes `vid`, `url`, and `normalizeVideoUrl(...)`). The worker (`worker.js:239-291` `mergeSyncState`) and iOS (`ContentStore.applyRemoteStates`) merge on **exact-string LWW** with no normalization — so an iOS `video_id`-keyed mark never matches a web `url`-keyed lookup and vice versa. RSS/article items have empty `video_id` (`data.json:104` `"video_id": ""`), falling back to URL/title-hash keys (`web_reader.py:79-100` `_make_item_id`) where trailing-slash/query/case differences silently fork identity. iOS `FeedItem/VideoItem` decoders mint a random `UUID` when `id` is missing (`DigestFeed.swift:122-128, 280-286`) — unstable across weekly feeds.
-- No connection-status UI exists: only a transient `syncToastText` (`RootTabView.swift:99`) and a `SyncSettingsSheet` whose helper text already says "leave empty to stay local-only" (`:445`). Passphrase persists in `UserDefaults` plaintext (`SyncDefaults.keyKey`), never Keychain.
+- No gating exists today: `main.py:587-591` runs Initial/Fast-Retry-1/Fast-Retry-2
+  unconditionally with fixed 30s/60s delays; the only threshold is the interim trigger
+  (`completion_ratio >= 0.70` at `main.py:795-815`) — which §2.B deletes along with the
+  interim itself.
+- Counting is non-obvious: sources with no new content count as success
+  (`main.py:634-637`), transient discovery failures (`items is None`, `:629-632`) count as
+  failed, and a quota-deferral (`quota_deferred_until`, `:691-697`) breaks the stage loop
+  — none of these are assigned to the rate.
+- `completed_source_keys` (`main.py:594`) is already a cumulative set across stages, so
+  the machinery for a cumulative rate exists; but "retry failed sources" vs "reprocess
+  all" matters because the Top-10 batch accumulates via `record_top10_source`
+  (`main.py:729-732`) — reprocessing successes would double-record candidates.
+- With ~23 sources, 80% = 19 and 70% = 17 (rounding unspecified); one flaky source can
+  force a full extra iteration for zero gain.
 
 **Recommended approach:**
-- Lock the canonical key to the pipeline's `_make_item_id` output (11-char `video_id` when present, else raw URL ≤200 chars, else hash) and make iOS fan out the same alias set web writes (`id` + `video_id`/`url` + normalized URL) on every mark, matching on *any* alias on read. Single shared helper on iOS; no worker logic change (keeps zero-maintenance infra). Ship endpoint change with one-time fallback (try new, on network-error try old once, then persist working value) so existing state isn't stranded. Passphrase in Keychain; Settings shows persistent `Synced ✓ / Connecting… / Error <reason>` driven by last push/fetch outcome.
-- Anchor-fit: local-first stays authoritative; sync remains best-effort and optional.
+- Rate = `|completed_source_keys| / total_initial_handlers`, evaluated cumulatively after
+  each stage; keep no-new-content as success; quota-deferral pauses the run (neither
+  success nor retry-trigger — it exits to the existing deferral path).
+- Map Iteration 1/2/3 onto the existing three stages with gate checks between; retries
+  process only `failed_handlers`, never successes (protects batch accumulation).
+- Partial publish carries a one-line disclosure in the digest ("Built from X of Y
+  sources; Z deferred") so the single reader knows coverage without any new system.
+- Anchor-fit: ~20 lines of gating around the existing loop, no new scheduling.
 
 **Alternatives:**
-- Normalize server-side in the worker — fixes future matches but leaves offline iOS lookups broken and adds maintained server logic; rejected.
-- URL-only or id-only keys — each breaks one content class (YouTube ids vs RSS URLs); rejected.
-- Force state reset/re-pair on migration — simplest code, destroys commute triage history for the one user who matters; rejected.
+- Always run all 3 stages (status quo minus interim) — most predictable runtime for a
+  weekly cron, but wastes up to 90s + API calls when Iteration 1 is already clean;
+  acceptable fallback if thresholds prove flaky.
+- Time-box retries instead of percentage gates — simpler to reason about, but restarts
+  the tuning debate (how long?) the percentages already settled; rejected.
 
-**Decision needed:** Confirm alias-fan-out + `_make_item_id` canonical contract, old→new endpoint fallback, Keychain storage, and the 3-state status row as §5.3 exit criteria.
+**Decision needed:** Confirm cumulative-rate definition, retry-only-failures, rounding
+(ceil vs floor at 80%/70%), and the partial-publish disclosure line.
 
-## Q4 — §5.4: Which execution contexts must the TTS fix cover, and what bounds the backfill?
+## Q3 — §2.B: What is the full blast radius of "completely remove interim"?
 
-**Ambiguity:** §5.4 correctly diagnoses `asyncio.run()` inside a running loop and requires a fix + backfill of the 2026-09-18 digest + `data.json` update. Unspecified: the full caller set that must keep working, backfill idempotency/scope, and which audio-URL field is canonical.
+**Ambiguity:** §2.B names `desktop/main.py` and `desktop/top10_service.py`, but interim
+logic leaks into at least four more surfaces, plus on-disk and in-state leftovers. No
+disposition is given for stale interim files or old batch state.
 
 **Code-verified edge cases / failure modes:**
-- Two `asyncio.run` entry points: `tts_service.py:166` (`generate_summary_tts`) and `:265` (`backfill_week`). The crash path is `main.py:723-725`: `generate_summary_tts` called from inside `async_main` (async context) → `RuntimeError`. `web_reader.py:1081-1085` calls it from sync `build_reader_site` (safe today) — so "fails in both" is really "fails wherever the caller is async," and any fix must be loop-agnostic, not just moved.
-- `_backfill_week_async:224-229` wraps the *sync* `generate_summary_tts` in `asyncio.to_thread` (thread without a loop, so it accidentally works) instead of awaiting the async core directly — wasteful and masks the real layering bug. A naive "detect running loop and create a new one in the same thread" fix re-raises; a naive "always new thread" fix hides errors and complicates cancellation.
-- Backfill scope is unbounded as specified: no idempotency rule (re-synthesizing existing non-empty MP3s wastes edge-tts time/money), no per-channel failure isolation (today one channel's exception is caught at call site, but a backfill crash aborts the week), and two competing URL fields (`summary_audio_url` vs `audio_url` on `Channel`, `web_reader.py:1091/1102`) with no statement of which the app plays when both exist.
+- `top10_service.py`: `is_interim` parameter + branch (`:501-516`), batch fields
+  `interim_sent_at`/`interim_candidate_count`/`interim_selected_candidate_ids`
+  (`:510-514`), the final-identical-to-interim skip path (`:518-529`), `_interim` filename
+  suffix (`:570`), `rotate_downloads=(not had_interim)` coupling (`:538`).
+- `email_service.py`: `is_interim` → "EARLY EDITION" and `is_final_after_interim` →
+  "FINAL EDITION" labels (`:201-204`, `:416-421`) — dead labels after removal unless cut.
+- `main.py`: `interim_top10_sent` flag + Stage-0 trigger block (`:596`, `:795-815`).
+- Leftovers: prior runs' `*_interim_digest.html/.json` files on disk still match the §2.A
+  regex if `(?:_interim)?` survives (see Q1); old batch JSON with `interim_sent_at` set
+  must still parse; tests referencing interim behavior will fail.
 
 **Recommended approach:**
-- Split layers: keep `_generate_audio_async` as the single async core; make `generate_summary_tts` a loop-agnostic sync wrapper (if a loop is running in this thread, execute the coroutine on a dedicated short-lived thread with its own loop; else `asyncio.run` inline). Make `_backfill_week_async` call the async core directly with its semaphore, per-channel try/except + `{scanned, generated, skipped, failed}` stats. Backfill is idempotent (skip non-empty MP3 unless `--force`), then rewrite `data.json` audio URLs and play-verify one item per surface.
-- Anchor-fit: pipeline-only change, no app or infra change, bounded cost.
+- Single removal checklist: `main.py` trigger block + flag; `top10_service.py` param,
+  both branches, suffix, batch fields (tolerant-read old keys, never write them),
+  `rotate_downloads` constant; `email_service.py` edition labels; scripts + tests updated;
+  one-time startup sweep deleting `*_interim_digest.*` (log what was swept).
+- Verify by grep: zero hits for `is_interim|interim_sent_at|final_after_interim` outside
+  the tolerant-read shim, plus a test asserting no interim artifacts after a full run.
+- Anchor-fit: deletion-only change, zero new runtime behavior.
 
 **Alternatives:**
-- Always run TTS on a fresh thread — works in both contexts but adds thread-hopping to the hot sync path and obscures tracebacks; rejected as the primary pattern.
-- Make all callers async — correct long-term, but forces `build_reader_site` and pipeline finalization into async for a one-user weekly job; rejected for this fix.
-- Fix forward only, skip the 2026-09-18 backfill — violates the explicit requirement and leaves the current digest silent; rejected.
+- Keep interim behind a config flag — directly contradicts the decision log (Q4:
+  "Completely remove"); rejected.
+- Leave dead code paths in place — zero behavior risk today, but the next reader (or
+  model) will re-trigger the interim path by accident; rejected.
 
-**Decision needed:** Confirm loop-agnostic wrapper + direct-async backfill + idempotent scope, and declare the canonical audio-URL field the app reads.
+**Decision needed:** Confirm delete-vs-ignore for stale on-disk interim files, and that
+tolerant-read of old batch fields (without migrating them) is sufficient.
 
-## Q5 — §5.5: What are the measurable acceptance bars for the Player Deck redesign?
+## Q4 — §2.C: Where does each audio fix actually live? (Build-time vs client)
 
-**Ambiguity:** §5.5 mandates "Apple Podcasts / Castro standards" with artwork card, custom scrubber, balanced controls, and re-orderable Up Next — all subjective with no sizes, gestures, or accessibility floor.
+**Ambiguity:** §2.C prescribes fixes at specific layers, but the data flow already
+resolves audio upstream of two of the three prescribed fixes — so the symptom locations
+named may not be the defect locations. Each sub-item has an unspecified exact semantic.
 
 **Code-verified edge cases / failure modes:**
-- Current sheet (`PlayerDeckSheet.swift:50-58`) is the reported bug verbatim: 100×100 `accentBadge` square with `"TL"`, standard `Slider` (`:76-80`), skip buttons 44×44 (`:97`), play 62×62 (`:104`), speed as a 44×44 circle (`:121-125`). §2 separately requires **56pt touch targets** — the redesign must satisfy both "balanced proportions" and the 56pt floor; 44pt skips fail it today.
-- Queue reorder uses desktop drag idiom (`:179-180` `.onDrag`/`.onDrop` with `NSItemProvider` + `UTType.text` + `QueueDropDelegate`), which is unreliable as the primary iOS-touch reorder path inside a LiveContainer sheet; only removal affordance is a small `xmark` (`:167-174`), no swipe-to-delete. No channel badge, no artwork asset, mono time labels exist (`:87`) but the scrubber hit area is the stock slider's.
-- Custom scrubber drag inside a scrollable sheet fights the sheet's own pan gesture; without `minimumDistance`/hit-area rules, scrub attempts scroll the queue instead. No VoiceOver labels on transport controls.
+- Pipeline already embeds fallback audio: `_normalize_mobile_item` and
+  `_normalize_mobile_video` take `fallback_audio`, and the `data.json` exporter passes
+  `channel_audio_map` (`web_reader.py:1231-1232`), so `item.audio_url` is pre-resolved.
+  `RootTabView.resolveAudioUrl` (`:530-544`) is therefore a second-chance path hit only
+  when build-time resolution missed — and the miss happens at build time:
+  `channel_audio_map` keys are exact lowercased names (`web_reader.py:1220`), so
+  `Peter Attia, MD` (item `source_name`) vs `Peter Attia MD` (channel name) never joins.
+  Fuzzy matching in Swift patches over a build-time key bug per item per launch.
+- `buildQueue` is NotebookLM-only *by design comment* (`reader.html:3163` "ONLY
+  NotebookLM podcasts! Keep TTS completely separate"): mixing summaries in changes queue
+  identity (`isSummary` flag, `isHeard(src)` keys, title/category sort). "Include
+  summaries when podcasts are absent" needs the per-channel vs whole-queue trigger
+  defined, or one missing podcast flips the entire queue to TTS.
+- `playIndex` (`reader.html:3192-3217`) double-starts playback (`begin()` immediately at
+  `:3213` AND on `loadedmetadata` at `:3210`); errors are swallowed (`.catch(() => {})`
+  at `:3201`). The fix order matters: set `src` → await `canplay` → `play()` →
+  update icons from the promise outcome, not optimistically at `:3214-3215`.
+- `AudioPlayerManager.playTrack` (`:101-104`) resolves via `URL(string:relativeTo:)`
+  against the Pages base — pre-encoding the string first (as prescribed) breaks relative
+  resolution of `audio/...` paths; only the absolute-URL branch (R2 `https://...`) needs
+  sanitizing. `player.playImmediately(atRate:)` is for pre-rolled items and skips the
+  stall-recovery the same bullet asks to observe; `play()` + rate (already at `:113-114`)
+  is the correct primitive. No `AVPlayerItem.status` observation exists — adding KVO
+  needs a lifetime rule (observer tied to current item, torn down on replace) or it
+  leaks/over-fires across track changes.
+- Channel Audio Overview card renders only when `ch.has_audio && ch.audio_url`
+  (`reader.html:2823`); summary-listen buttons already exist in channel views (`:2929`,
+  `:3049`) — whether Editorial Picks cards have them is unverified and is the actual gap
+  to check, not the channel views.
 
 **Recommended approach:**
-- Set numeric bars: artwork card ~180–200pt, 24pt radius, soft shadow, channel-badge overlay (keep refined TL monogram — no new asset pipeline); custom capsule scrubber with ≥24pt hit height + drag gesture that claims the touch, mono time labels retained; transport row at ≥56pt targets (emerald play ~64pt, 15s skips 56pt, speed pill); Up Next with native `EditMode` reorder + swipe-to-delete (keep xmark as fallback), replacing drag-drop as primary.
-- Anchor-fit: pure SwiftUI, no new dependencies, no artwork downloads (tunnel-safe).
+- Fix the join at build time: normalize `channel_audio_map` keys (lowercase, strip
+  punctuation/extra spaces) and apply the same normalization to `source_name` lookup —
+  one function, tested with the `Peter Attia` / `Nutrition Made Simple!` pairs; keep the
+  iOS exact-match fallback as-is (no fuzzy engine).
+- `buildQueue`: per-channel fallback (a channel contributes its `summary_audio_url`
+  only when it has no `audio_url`), preserving the NotebookLM-first ordering; explicit
+  `isSummary` flags so `isHeard` keys never collide.
+- `playIndex`: single-start (await `canplay`, then one `play()`), icon state driven by
+  the promise + `playing`/`pause` events, errors surfaced to the mini-player, never
+  swallowed.
+- iOS: sanitize-and-encode only absolute URLs before `URL(string:)`; keep relative
+  resolution untouched; keep `play()` + rate; add item-scoped `status` observation with
+  teardown on `replaceCurrentItem`.
+- Anchor-fit: no new deps, no server change, no audio re-encoding.
 
 **Alternatives:**
-- Restyle the stock `Slider` — least code, but keeps the exact control the feedback calls out and the gesture conflict; rejected.
-- Remote artwork images per episode — prettier, but adds a network dependency into the tunnel use case and an asset pipeline for one user; rejected.
-- Third-party audio-UI kit — faster polish, but a new dependency for a single sheet; rejected.
+- Full fuzzy/slug engine in Swift — fixes display-time misses but re-runs per launch
+  and diverges from the pipeline's keys; rejected in favor of the build-time join.
+- Unified queue always mixing podcasts + summaries — simplest code, but destroys the
+  deliberate separation the comment documents and doubles queue length; rejected.
+- `playImmediately(atRate:)` everywhere — lower latency on pre-rolled items, but wrong
+  primitive for cold URL loads and fights stall handling; rejected.
 
-**Decision needed:** Lock the numeric bars (artwork size, 56pt floor, scrubber hit area, native reorder + swipe-delete) as the §5.5 acceptance test.
+**Decision needed:** Confirm build-time normalized join (and the normalization rule),
+per-channel vs whole-queue TTS fallback trigger, promise-driven icon semantics, and the
+item-scoped KVO lifetime for `AVPlayerItem.status`.
+
+## Q5 — §2.D: What are the runnable exit criteria for UAT, CI, and deploy?
+
+**Ambiguity:** §2.D names activities (Playwright UAT, CI build, deploy) without targets,
+assertions, or actors. "Push changes to GitHub" is process, not product. Headless audio
+verification, theme assertions, viewport breakpoints, the `verify.yml` role, and the
+deploy safety gates are all unspecified — and deploy has a hard refusal path that can
+fail the whole stage.
+
+**Code-verified edge cases / failure modes:**
+- Playwright harnesses already exist (`desktop/scripts/run_browser_uat.py`,
+  `desktop/scripts/test_gui_e2e.py`) but §2.D does not say whether the target is
+  `file://`, a localhost server, or the live Pages URL — `file://` breaks `fetch`-based
+  `data.json` loads; live-URL testing conflates deploy lag with regressions.
+- Headless Chromium autoplay policy blocks audible `.play()`; "verify audio playback
+  controls and audio element loading" cannot mean audible playback without a headed
+  browser + fake audio device. What *is* assertable: controls present, `src` resolves
+  HTTP 200, `canplay` fires.
+- Theme contract exists (`localStorage 'tubelm-theme'`, `data-theme`, `reader.html:31-33`)
+  but no assertion pins it; responsive breakpoints are undefined.
+- CI already does the named work (`build-ios.yml`: Core tests → simulator UAT +
+  screenshot → release build → `package_ipa.sh` → IPA commit). `verify.yml`'s role in
+  this stage is unstated — duplicate gate or separate lint/unit lane?
+- Deploy can hard-fail: `deploy_to_gh_pages` refuses any file > 5 MB (`web_reader.py:1280`)
+  and force-pushes an orphan branch (`:1272`); the R2-active path deletes large
+  `site/audio` files post-build (`:1263-1267`). A successful build with one stray MP3 =
+  built-but-never-deployed with no specified recovery or ordering (audio → R2 first,
+  `data.json` last, single atomic push).
+
+**Recommended approach:**
+- Playwright target: localhost server over the built `site/` dir (not `file://`, not
+  live). Assertions: Editorial Picks header/count for Top-14 and Top-20 fixtures; no
+  `TubeLM_Top_*` in channel list; audio = controls present + `src` 200 + `canplay`
+  (never audible); theme = `data-theme` flip persists via localStorage; viewports
+  390 / 768 / 1280.
+- CI: keep `build-ios.yml` as the single gate; document `verify.yml` as pre-build
+  unit/lint (or merge the lanes — pick one, don't run two authorities).
+- Deploy: local actor after UAT green; order audio→R2, `data.json` last, single push;
+  pre-deploy 5 MB scan as an explicit gate (not a surprise refusal); live check =
+  fetch `https://vkr1729.github.io/TubeLM/data.json`, assert `run_date` equals local.
+- Anchor-fit: uses existing harnesses and CI; no new services, no headed-browser farm.
+
+**Alternatives:**
+- Test against the live site only — zero local server setup, but every run depends on
+  deploy freshness and network; rejected as the primary gate (keep as a post-deploy
+  smoke check).
+- Full audible-playback verification — highest fidelity, but needs headed Chromium with
+  `--autoplay-policy=no-user-gesture-required` + fake audio on a runner for a static
+  page's `<audio>` tag; disproportionate for one user; rejected.
+
+**Decision needed:** Confirm localhost (not live) as the UAT target, the `canplay`-not-
+  audible audio bar, the three viewports, `verify.yml`'s lane, and the deploy
+  ordering + live `run_date` check as §2.D exit criteria.

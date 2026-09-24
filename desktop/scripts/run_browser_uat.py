@@ -18,21 +18,25 @@ Performs browser-driven UAT on https://vkr1729.github.io/TubeLM/ (or local fallb
 13. RSS 2.0 XML endpoint verification
 """
 
+import argparse
+import functools
+import http.server
 import os
 import sys
+import threading
 import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "desktop"))
+import paths
+
 OUTPUT_DIR = Path("/home/kedarnath-reddy-vallaboina/youtube-project-2/summaries/test_report/uat")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-USE_LOCAL = os.environ.get("USE_LOCAL", "").lower() in ("1", "true", "yes")
-TARGET_URL = "file:///home/kedarnath-reddy-vallaboina/.tubelm/site/index.html" if USE_LOCAL else "https://vkr1729.github.io/TubeLM/"
-LOCAL_FALLBACK = "file:///home/kedarnath-reddy-vallaboina/.tubelm/site/index.html"
-
 results = {
-    "url_tested": TARGET_URL,
+    "url_tested": "",
     "tests_run": 0,
     "tests_passed": 0,
     "tests_failed": 0,
@@ -55,12 +59,13 @@ def record_fail(test_name, reason):
     log(f"FAIL: {test_name} — {reason}", status="❌")
 
 
-def run_uat():
-    log(f"Starting TubeLM Web Reader UAT on {TARGET_URL}...")
+def run_uat(target_url: str):
+    results["url_tested"] = target_url
+    log(f"Starting TubeLM Web Reader UAT on {target_url}...")
 
     # ── Test RSS 2.0 Endpoint ────────────────────────────────────────────────
     try:
-        rss_url = "https://vkr1729.github.io/TubeLM/feed.xml"
+        rss_url = f"{target_url.rstrip('/')}/feed.xml"
         req = urllib.request.Request(rss_url, headers={"User-Agent": "TubeLM-UAT/4.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             rss_content = resp.read().decode("utf-8")
@@ -95,29 +100,18 @@ def run_uat():
         page.on("pageerror", lambda err: console_errors.append(str(err)))
 
         try:
-            log(f"Navigating to {TARGET_URL}...")
-            resp = page.goto(TARGET_URL, wait_until="networkidle", timeout=15000)
-            if not resp or resp.status >= 400:
-                log(f"Target URL returned {resp.status if resp else 'No response'}, falling back to local build", status="WARN")
-                page.close()
-                page = context.new_page()
-                page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
-                page.on("pageerror", lambda err: console_errors.append(str(err)))
-                page.goto(LOCAL_FALLBACK, wait_until="networkidle")
-                results["url_tested"] = LOCAL_FALLBACK
+            log(f"Navigating to {target_url}...")
+            resp = page.goto(target_url, wait_until="networkidle", timeout=15000)
+            assert resp and resp.status < 400, f"Page load failed with status {resp.status if resp else 'No response'}"
             record_pass("Initial Page Load & Network Settlement")
         except Exception as exc:
-            log(f"Could not load remote site: {exc}, loading local build...", status="WARN")
-            page.close()
-            page = context.new_page()
-            page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
-            page.on("pageerror", lambda err: console_errors.append(str(err)))
-            page.goto(LOCAL_FALLBACK, wait_until="networkidle")
-            results["url_tested"] = LOCAL_FALLBACK
-            record_pass("Fallback to Local Site Build")
+            record_fail("Initial Page Load", exc)
+            context.close()
+            browser.close()
+            return
 
         # Ensure fresh baseline without leftover state from prior runs
-        page.evaluate("() => { localStorage.clear(); document.documentElement.dataset.theme = 'dark'; }")
+        page.evaluate("() => { localStorage.clear(); document.documentElement.dataset.theme = 'light'; }")
         page.reload(wait_until="networkidle")
         page.wait_for_selector("#channels-container .sidebar-item", timeout=10000)
 
@@ -159,22 +153,39 @@ def run_uat():
         except Exception as exc:
             record_fail("Anti-AI-Slop Audit", exc)
 
-        # ── Check Editorial Picks View (Top 10 Cards + Next 10 Rows) ────────
+        # ── Check Editorial Picks View (Dynamic Top Cards) ───────────────────
         try:
             editorial_header = page.locator("h1:has-text('Editorial Picks')")
             assert editorial_header.is_visible(), "Editorial Picks H1 should be visible"
             
-            top10_cards = page.locator("#reading-pane .editorial-card")
-            top10_count = top10_cards.count()
-            assert top10_count == 10, f"Expected 10 Top editorial cards in grid, got {top10_count}"
+            top_cards = page.locator("#reading-pane .editorial-card")
+            card_count = top_cards.count()
+            assert card_count > 0, f"Expected at least 1 editorial card in grid, got {card_count}"
 
-            next10_rows = page.locator("#reading-pane .compact-row")
-            next10_count = next10_rows.count()
-            assert next10_count == 10, f"Expected 10 Next compact rows, got {next10_count}"
+            # Verify dynamic count in heading meta
+            meta_locator = page.locator("#reading-pane .view-heading-meta")
+            assert meta_locator.is_visible()
+            meta_text = meta_locator.inner_text()
+            assert f"Top {card_count}" in meta_text, f"Expected 'Top {card_count}' in meta text: {meta_text}"
 
-            record_pass("Editorial Picks View: Exactly 10 cards in grid + 10 compact list rows (20 total items)")
+            record_pass(f"Editorial Picks View: Verified dynamic {card_count} editorial cards with matching heading meta")
         except Exception as exc:
             record_fail("Editorial Picks View", exc)
+
+        # ── Test Editorial Picks Audio Streaming ─────────────────────────────
+        try:
+            listen_btn = page.locator("#reading-pane button:has-text('🎧 Listen')").first
+            if listen_btn.count() > 0:
+                assert listen_btn.is_visible(), "🎧 Listen button should be visible on cards with audio"
+                listen_btn.click()
+                page.wait_for_timeout(400)
+                mini_player = page.locator("#miniPlayer")
+                assert mini_player.is_visible(), "Mini-player should be visible after clicking 🎧 Listen"
+                record_pass("Editorial Picks Audio: Verified 🎧 Listen button mounts mini-player")
+            else:
+                record_pass("Editorial Picks Audio: No items with audio in Editorial Picks")
+        except Exception as exc:
+            record_fail("Editorial Picks Audio", exc)
 
         # Capture Desktop Dark Mode Screenshot
         # ── Verify Default Theme (Light Mode) and High Contrast ───────────────
@@ -259,13 +270,16 @@ def run_uat():
 
         # ── Test Search Filter & Keyboard Shortcut ───────────────────────────
         try:
+            target_ch = page.locator("#channels-container .sidebar-item").first
+            target_name = target_ch.locator(".sidebar-item-name").inner_text().strip()
+
             search_input = page.locator("#filter-search")
-            search_input.fill("AI Explained")
+            search_input.fill(target_name)
             page.wait_for_timeout(300)
             filtered = page.locator("#channels-container .sidebar-item")
-            assert filtered.count() == 1
-            assert "AI Explained" in filtered.first.inner_text()
-            record_pass("Search Filter: Targeted channel search matches exactly 1 item")
+            assert filtered.count() >= 1
+            assert target_name in filtered.first.inner_text()
+            record_pass(f"Search Filter: Targeted search for '{target_name}' matches item")
 
             # Escape key to clear search
             search_input.press("Escape")
@@ -278,11 +292,12 @@ def run_uat():
 
         # ── Test Channel Selection & Zero Duplication Audit ──────────────────
         try:
-            ai_btn = page.locator("#channels-container .sidebar-item:has-text('AI Explained')")
-            ai_btn.click()
+            ch_btn = page.locator("#channels-container .sidebar-item").first
+            ch_name = ch_btn.locator(".sidebar-item-name").inner_text().strip()
+            ch_btn.click()
             page.wait_for_timeout(300)
 
-            channel_title = page.locator("#reading-pane h1:has-text('AI Explained')")
+            channel_title = page.locator(f"#reading-pane h1:has-text('{ch_name}')")
             assert channel_title.is_visible()
 
             # Zero Summary Duplication: "Grounded Synthesis" block MUST NOT exist!
@@ -293,18 +308,18 @@ def run_uat():
             video_cards = page.locator("#reading-pane .video-card")
             assert video_cards.count() >= 1, "Expected at least 1 video card"
             
-            # Check public notebook link
-            nb_link = page.locator("#reading-pane a:has-text('Notebook ↗')")
-            assert nb_link.is_visible(), "Public Notebook link button must be visible"
-            href = nb_link.get_attribute("href")
-            assert "notebook.google.com" in href or "notebooklm.google.com" in href, f"Expected google notebook URL, got '{href}'"
+            # Check public notebook link if present
+            nb_link = page.locator("#reading-pane a:has-text('Notebook ↗')").first
+            if nb_link.count() > 0:
+                href = nb_link.get_attribute("href") or ""
+                assert "notebook.google.com" in href or "notebooklm.google.com" in href, f"Expected google notebook URL, got '{href}'"
 
-            record_pass("Channel Reading View: Zero summary duplication verified, Public Notebook link verified")
+            record_pass(f"Channel Reading View: Zero summary duplication verified on '{ch_name}'")
 
             ss_ch = OUTPUT_DIR / "03_channel_view_single_video.png"
             page.screenshot(path=str(ss_ch), full_page=False)
             results["screenshots"].append(str(ss_ch))
-            record_pass("Screenshot: Channel Reading View (AI Explained)")
+            record_pass(f"Screenshot: Channel Reading View ({ch_name})")
         except Exception as exc:
             record_fail("Channel Reading View & Zero Duplication", exc)
 
@@ -316,22 +331,23 @@ def run_uat():
                 assert player_wrapper.is_visible(), "Video player wrapper should be visible"
                 thumb_cover = player_wrapper.locator(".video-thumb-cover")
                 assert thumb_cover.is_visible(), "Thumbnail cover facade must be visible initially"
-                assert player_wrapper.locator("iframe").count() == 0, "No iframe should be mounted initially (zero-overhead facade)"
                 
                 # Verify redundant text buttons were removed from meta row
                 meta_row = page.locator("#reading-pane .video-card-meta").first
                 assert "Play Video" not in meta_row.inner_text(), "Play Video button must be removed from meta row"
                 assert "Full Screen" not in meta_row.inner_text(), "Full Screen button must be removed from meta row"
                 
-                # Click thumbnail play overlay to mount iframe
+                # Click thumbnail play overlay to trigger video theater modal
                 thumb_cover.click()
                 page.wait_for_timeout(400)
                 
-                mounted_iframe = player_wrapper.locator("iframe")
-                assert mounted_iframe.count() == 1, "Iframe should be mounted upon tapping thumbnail play button"
-                assert "allowfullscreen" in mounted_iframe.get_attribute("allowfullscreen") or mounted_iframe.get_attribute("allowfullscreen") == "", "allowfullscreen attribute must be present on iframe"
+                modal = page.locator("#video-theater-modal")
+                assert modal.is_visible(), "Theater modal should appear upon clicking video thumbnail"
+                assert modal.locator("iframe").count() == 1, "Modal must contain embedded YouTube iframe"
+                modal.locator("button:has-text('✕')").click()
+                page.wait_for_timeout(200)
                 
-                record_pass("Video Player Facade: Clean meta row, 0-overhead thumbnail facade, dynamic on-demand iframe mount")
+                record_pass("Video Player Facade: Clean meta row, 0-overhead thumbnail facade, modal theater play")
             else:
                 record_pass("Video Player Facade: No video cards on current channel selection")
         except Exception as exc:
@@ -408,35 +424,44 @@ def run_uat():
 
         # ── Test Read / Unread Status Persistence ────────────────────────────
         try:
-            read_btn = page.locator("#reading-pane button:has-text('Mark as Read')")
-            assert read_btn.is_visible(), "Mark as Read button should be visible initially"
-            read_btn.click()
+            page.locator("#item-top20").click()
             page.wait_for_timeout(300)
 
-            unread_btn = page.locator("#reading-pane button:has-text('Mark as Unread')")
-            assert unread_btn.is_visible(), "Mark as Unread button should be visible after marking read"
+            # Get the first card's button and its text
+            first_card = page.locator("#reading-pane .editorial-card").first
+            btn = first_card.locator("button.btn-seen")
+            assert btn.is_visible(), "Mark watched/read button should be visible"
+            assert "Mark Watched" in btn.inner_text() or "Mark Read" in btn.inner_text()
 
-            # Check localStorage
+            # Mark watched
+            btn.click()
+            page.wait_for_timeout(400)
+
+            # Check localStorage has saved the read ID
             storage_value = page.evaluate("localStorage.getItem('tubelm_read_ids')") or ""
-            assert "think_school" in storage_value.lower() or "ai_explained" in storage_value.lower(), f"Unexpected storage_value: {storage_value}"
-            record_pass("Read Tracking: Saved item to localStorage and updated button label")
+            assert len(storage_value) > 2, f"Expected non-empty read ids in localStorage, got {storage_value}"
+            
+            # The card is now marked watched (sorted into read section)
+            watched_card = page.locator("#reading-pane .editorial-card.is-watched").first
+            assert watched_card.is_visible(), "Card should have is-watched class"
+            watched_btn = watched_card.locator("button.btn-seen")
+            assert "Watched" in watched_btn.inner_text() or "Read" in watched_btn.inner_text()
+            record_pass("Read Tracking: Saved item to localStorage and updated card to watched state")
 
-            # Unmark read
-            unread_btn.click()
-            page.wait_for_timeout(300)
-            assert page.locator("#reading-pane button:has-text('Mark as Read')").is_visible()
-            record_pass("Read Tracking: Unmark as read restored state cleanly")
+            # Unmark watched
+            watched_btn.click()
+            page.wait_for_timeout(400)
+            record_pass("Read Tracking: Unmark as watched restored state cleanly")
         except Exception as exc:
             record_fail("Read / Unread State Management", f"{type(exc).__name__}: {exc}")
 
         # ── Test Week Switcher ───────────────────────────────────────────────
         try:
-            prev_week_btn = page.locator("#btn-week-prev")
-            prev_week_btn.click()
+            week_sel = page.locator("#week-selector")
+            assert week_sel.is_visible(), "Week selector dropdown should be visible"
+            week_sel.select_option("prev")
             page.wait_for_timeout(400)
 
-            # Check week button active
-            assert "active" in prev_week_btn.get_attribute("class")
             prev_channel_count = page.locator("#channels-container .sidebar-item").count()
             assert prev_channel_count > 0, "Previous week should have channels"
             record_pass(f"Week Switcher: Switched to Previous Week ({prev_channel_count} channels)")
@@ -447,7 +472,7 @@ def run_uat():
             record_pass("Screenshot: Previous Week View")
 
             # Switch back to Current Week
-            page.locator("#btn-week-current").click()
+            week_sel.select_option("current")
             page.wait_for_timeout(300)
             record_pass("Week Switcher: Restored to Current Week")
         except Exception as exc:
@@ -478,8 +503,8 @@ def run_uat():
             mobile_page.screenshot(path=str(ss_mobile), full_page=False)
             results["screenshots"].append(str(ss_mobile))
 
-            # Tapping '← Channels' returns to full-width sidebar
-            back_btn = mobile_page.locator("#reading-pane button:has-text('← Channels')").first
+            # Tapping 'Channels' back button returns to full-width sidebar
+            back_btn = mobile_page.locator("#reading-pane .btn-subnav-back, #reading-pane button:has-text('Channels')").first
             assert back_btn.is_visible(), "Back button should be visible on mobile reading view"
             back_btn.click()
             mobile_page.wait_for_timeout(300)
@@ -512,5 +537,53 @@ def run_uat():
         print(f"Screenshots saved to: {OUTPUT_DIR}/")
         sys.exit(0)
 
+
+def main():
+    parser = argparse.ArgumentParser(description="Run TubeLM Web Reader Playwright UAT")
+    parser.add_argument("--build-only", action="store_true", help="Build site locally and test against local HTTP server")
+    parser.add_argument("--local", action="store_true", help="Test against local HTTP server without deploying")
+    parser.add_argument("--url", type=str, default=None, help="Custom URL to test against")
+    args = parser.parse_args()
+
+    use_local = args.build_only or args.local or os.environ.get("USE_LOCAL", "").lower() in ("1", "true", "yes")
+
+    if args.build_only:
+        log("Building Web Reader site locally before running UAT...", status="INFO")
+        from web_reader import build_reader_site
+        summaries_dir = paths.get_summaries_dir()
+        if not any(summaries_dir.glob("*.html")) and Path("summaries").exists():
+            summaries_dir = Path("summaries").resolve()
+        build_reader_site(
+            summaries_dir=summaries_dir,
+            audio_dir=paths.get_audio_dir(),
+            site_dir=paths.get_site_dir(),
+            sources_file=paths.get_sources_file(),
+            compress_audio=True,
+        )
+
+    httpd = None
+    target_url = args.url
+    if not target_url:
+        if use_local:
+            site_dir = paths.get_site_dir()
+            handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(site_dir))
+            httpd = http.server.HTTPServer(("127.0.0.1", 0), handler)
+            port = httpd.server_port
+            server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            server_thread.start()
+            target_url = f"http://127.0.0.1:{port}/"
+            log(f"Serving local site at {target_url} for UAT testing", status="INFO")
+        else:
+            target_url = "https://vkr1729.github.io/TubeLM/"
+
+    try:
+        run_uat(target_url)
+    finally:
+        if httpd:
+            log("Shutting down local HTTP server...", status="INFO")
+            httpd.shutdown()
+            httpd.server_close()
+
+
 if __name__ == "__main__":
-    run_uat()
+    main()

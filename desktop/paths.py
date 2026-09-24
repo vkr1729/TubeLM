@@ -205,3 +205,23 @@ def get_agy_bin() -> str | None:
 def safe_channel_name(name: str) -> str:
     """Return a filesystem-safe source name."""
     return re.sub(r"[^a-zA-Z0-9_\-]", "_", name)
+
+
+TOP_DIGEST_FILENAME_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2})_(?:TubeLM_)?Top_(\d+)_digest\.(html|json)$",
+    re.IGNORECASE,
+)
+
+
+def is_top_digest_file(filename: str | Path) -> bool:
+    """Check if a filename or Path corresponds to a Top digest artifact."""
+    name = filename.name if isinstance(filename, Path) else filename
+    return bool(TOP_DIGEST_FILENAME_RE.match(name))
+
+
+def parse_top_digest_count(filename: str | Path) -> int | None:
+    """Extract candidate count N from a Top digest artifact filename."""
+    name = filename.name if isinstance(filename, Path) else filename
+    m = TOP_DIGEST_FILENAME_RE.match(name)
+    return int(m.group(2)) if m else None
+

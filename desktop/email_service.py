@@ -197,17 +197,15 @@ def _render_top10_html(selection: dict) -> str:
 def _render_top10_text(selection: dict) -> str:
     """Render a complete plain-text alternative for the Top digest email."""
     items = selection.get("items", [])
-    edition_label = ""
-    if selection.get("is_interim"):
-        edition_label = " · EARLY EDITION"
-    elif selection.get("is_final_after_interim"):
-        edition_label = " · FINAL EDITION"
+    coverage_note = selection.get("coverage_note", "")
 
     lines = [
-        f"TUBELM — EDITOR'S TOP {len(items)}{edition_label}",
+        f"TUBELM — EDITOR'S TOP {len(items)}",
         f"{selection.get('run_date', '')} · selected from {selection.get('candidate_count', len(items))} new items",
-        "",
     ]
+    if coverage_note:
+        lines.append(f"Note: {coverage_note}")
+    lines.append("")
     for item in items:
         source_type = item.get("source_type", "item")
         action = "WATCH" if source_type == "youtube" else "READ"
@@ -413,14 +411,7 @@ def send_channel_email(channel_data: dict, cfg: Config) -> None:
 def send_top10_email(selection: dict, cfg: Config) -> None:
     """Build and send the optional cross-source Top 10 briefing."""
     item_count = len(selection.get("items", []))
-    if selection.get("is_interim"):
-        edition_tag = " · Early Edition"
-    elif selection.get("is_final_after_interim"):
-        edition_tag = " · Final Edition"
-    else:
-        edition_tag = ""
-
-    subject = f"TubeLM Editor's Top {item_count}{edition_tag} · {selection.get('run_date', '')}"
+    subject = f"TubeLM Editor's Top {item_count} · {selection.get('run_date', '')}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject

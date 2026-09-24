@@ -505,3 +505,258 @@ during Phase 4 polish, not the plan.
 6. Deck reorder primitive: `List`/`EditMode` vs move controls (recommend move controls
    unless List styling is accepted for the section).
 7. Feed-host account check: is `vkr1729.github.io` staying while the worker moves?
+
+---
+
+## Remediation plan review — current IMPLEMENTATION_PLAN.md (code-verified 2026-09-24)
+
+Source: working-tree `.workflow/REQUIREMENTS.md` (§§1–4) + `.workflow/IMPLEMENTATION_PLAN.md`
+(Slices 1–5 + verification + contingency). Code verified against `desktop/paths.py`,
+`desktop/web_reader.py`, `desktop/top10_service.py`, `desktop/main.py`,
+`desktop/email_service.py`, `desktop/templates/reader.html`,
+`desktop/templates/top10_digest.html`, `desktop/scripts/`, `desktop/tests/unit/`,
+`ios/Sources`, `.github/workflows/`.
+Prior sections of this file cover the superseded iOS-build plan; they stand except where
+noted below (schema divergence is resolved — `data.json` export exists at
+`web_reader.py:1209-1258` with `schema_version: 1`; do not re-litigate).
+
+Scale anchor (unchanged): single-person personal use. No new dependencies, no server
+logic changes, no background daemons.
+
+### P0-1 — Slice 1 regex contradicts REQUIREMENTS; one call site is inverted
+
+- REQUIREMENTS §2.A mandates `r".*_TubeLM_Top_(\d+)(?:_interim)?_digest\.(html|json)$"`;
+  §4-Q1 resolves to interim-free `r".*_TubeLM_Top_(\d+)_digest\.(html|json)$"`.
+  Slice 1 proposes `r"^(\d{4}-\d{2}-\d{2})_(?:TubeLM_)?Top_(\d+)_digest\.(html|json)$"`.
+  These disagree on three axes: date-prefix required (plan) vs `.*` (requirements),
+  `TubeLM_` optional (plan) vs mandatory (requirements), interim tolerated (§2.A) vs
+  banned (§4-Q1, plan). The writer (`top10_service.py:570-573`,
+  `f"{run_date}_TubeLM_Top_{item_count}{suffix}_digest.html"`) always emits
+  date + `TubeLM_`, so the plan regex matches current output — but fixtures like
+  `2026-09-04_Top_20_Digest.html` (`test_web_reader.py:149`, no `TubeLM_`) only match
+  because of the optional group + `IGNORECASE`. Lock one canonical regex and fix §2.A
+  wording to match it (recommend the plan's shape minus interim, since the writer
+  guarantees the prefix — but then state that undated legacy files will NOT match).
+- `send_top10_from_digests.py:47-49` uses the Top pattern as an **exclusion**
+  (`if "TubeLM_Top_" in name: continue` — it collects channel digests). Slice 1 says
+  "update file discovery to use `paths.is_top_digest_file`" without stating polarity.
+  A literal replacement inverts the script into collecting only Top digests.
+  Specify: `if paths.is_top_digest_file(p): continue` (exclusion preserved).
+- `download_top10.py:31` globs `*_TubeLM_Top_*_digest.html` (requires `TubeLM_`).
+  Centralizing on the optional-`TubeLM_` helper **widens** what it finds (previously
+  invisible undated/non-`TubeLM_` files now match). Intended, but call it out.
+- `parse_top_digest_filename() -> re.Match | None` leaks regex internals to all
+  callers; nobody needs the match object. Return the count instead:
+  `parse_top_digest_count(filename) -> int | None`. Smaller API, same power.
+- Placement in `paths.py` is correct (all four consumers already import `paths`;
+  no cycles). `str | Path` / `X | None` annotations need Python ≥ 3.10 —
+  fine on 3.14, record the floor so no `from __future__` churn later.
+
+### P0-2 — Slice 2 omits three blast-radius items REQUIREMENTS Q3 names
+
+Verified present but absent from the plan:
+
+1. `desktop/templates/top10_digest.html:44,60` branches on
+   `selection.is_interim` / `is_final_after_interim` ("Early Edition · First Pass").
+   Slice 2 lists `main.py`, `top10_service.py`, `email_service.py` only. Add the
+   template (render single-edition heading unconditionally).
+2. `desktop/tests/unit/test_immediate_checkpointing.py:177-189` asserts
+   `is_interim True→False` sequencing. Slice 5 names only three test files and omits
+   this one. Add it to the update list (or the suite stays red by design).
+3. The one-time stale-artifact sweep (`*_interim_digest.*` purge, REQUIREMENTS §4-Q3
+   recommendation) appears nowhere in Slice 2's actions. Add an explicit step
+   (startup sweep in `main.py` or a documented one-shot script invocation that logs
+   what was swept) — otherwise the interim-free regex never matches stale files and
+   they linger silently.
+- `rotate_downloads=True` always + tolerant-read of old batch keys: correct as
+  specified (`_read_batch` uses `.get`, so old keys parse). No change needed.
+- Partial-publish disclosure ("pass disclosure note if `completion_ratio < 1.0`")
+  has **no integration point**: `_rank_render_and_send` takes no notice param, and
+  neither `top10_digest.html` nor `email_service.py` has a slot for it. Specify:
+  add `coverage_note` to the selection dict, render it in the template + email body.
+  Without this the step is unimplementable as written.
+
+### P0-3 — Verification baseline is already red; the numeric gate is false
+
+- `pytest desktop/tests/unit --collect-only` in this tree: **190 collected, 11
+  collection errors** (incl. `test_weekly_audio_service.py`). The plan's gate
+  "100% tests pass (>= 262 tests)" fails on both halves: collection is broken and no
+  262 tests exist to pass. Fix collection errors first (Slice 0), then gate on
+  **zero failures of the collected suite**, never on an absolute count that rots
+  with every added/removed test.
+
+### P1-1 — Slices 1 and 3 both edit `web_reader.py` in overlapping regions
+
+- Slice 1 touches line ~1061 + mobile export ~1237; Slice 3 touches
+  `channel_audio_map` ~1214-1231 and `_normalize_mobile_*` (~353-419). The hunks at
+  1214-1240 overlap. Do not run these slices in parallel in the same file.
+  Order: lock the filename contract (Slice 1 regex + writer format) → Slice 1 read
+  path → Slice 3 audio join. Slice 2 (main/top10/email/template) is file-disjoint
+  and can run parallel to Slice 1.
+
+### P1-2 — `has_audio` gate makes the Slice 3 condition change insufficient
+
+- `has_audio` is NotebookLM-podcast-only by construction (`web_reader.py:577-593`:
+  manifest hit or multi-video `{date}_{safe}.mp3`; single-video channels are
+  force-`False`, asserted in `test_web_reader.py:183-251`). Summary-TTS-only channels
+  have `summary_audio_url` set (lines 1101-1110) with `has_audio=False`.
+- Slice 3 changes the card condition to `ch.audio_url || ch.summary_audio_url` but
+  four JS gates still require `has_audio`: card render (`reader.html:2823`), badge
+  (`:2600,2614`), directory audio bit (`:3044`), queue filter (`:3163`). Changing
+  only `:2823` leaves summary channels out of the queue and badges. Fix all four
+  gates together (or derive `has_audio ||= summary_audio_url` at build time — one
+  line, fixes every gate — but that invalidates the `test_web_reader` single-video
+  assertions, so update them deliberately, not accidentally).
+- `buildQueue` field-name clash: the filter-stage map uses `isSummary` (plan text)
+  but the queued objects use `summary` (`reader.html:3180-3187`, `summary: false`;
+  `playSummaryAudio` pushes `summary: true` at `:3298`). Do NOT introduce a parallel
+  `isSummary` flag — reuse the existing `summary` boolean or old persisted queues
+  decode with mixed schema.
+
+### P1-3 — SITE_DATA Top items have no audio fallback; the 🎧 button needs a rule
+
+- The channel→item audio join exists **only** on the mobile path (`web_reader.py:1231`,
+  `fallback_audio=channel_audio_map.get(...)`). SITE_DATA Top items (`:1139-1157`)
+  get dedupe + `id` + duration backfill but **no** `audio_url` fallback. The Slice 3
+  Editorial Picks 🎧 button ("if `item.audio_url` or channel audio is present") will
+  therefore resolve nothing for web Top items unless either (a) the same fallback is
+  applied to `top20_data["items"]` at build time (recommend — 3 lines, mirrors 1231),
+  or (b) a JS render-time lookup `source_name → channel summary` with the same
+  normalization as Python (duplicates logic in JS — avoid). Pick (a); also then the
+  button rule is exact: prefer `item.audio_url`, else channel summary, else hidden.
+- Normalization scope: plan populates "raw lowercase and normalized keys." Raw keys
+  are redundant once both sides normalize — keep normalized-only (also cover `ch.id`,
+  which derives from `name.lower().replace(" ", "_")` at `:1161` and retains
+  punctuation). State the canonical rule once
+  (`lower → strip [^\w\s] → collapse whitespace`) and use it for map + lookup.
+
+### P1-4 — Retry-gating placement and precedence are unspecified
+
+- The interim trigger being deleted sits **before** `_finish_background_artifacts`
+  (`main.py:795-826`). An early `break` on `>= 80% / >= 70%` must be placed
+  **after** the per-stage `_finish_background_artifacts` + checkpoint block, or a
+  clean Iteration 1 skips artifact advancement. State the exact insertion point.
+- Dry-run path (`:645-658`) sets `active_handlers = failed_handlers; continue` —
+  gating must not fire in dry-run (no `completed_source_keys` semantics there).
+- Quota-deferral (`:827-828` break; `:830-839` pause path) takes precedence over
+  threshold gating, and the final Top digest at `:852-854` currently runs even when
+  deferred. REQUIREMENTS Q2 says deferral "pauses/exits without phantom retries" —
+  state whether a deferred run still publishes a partial digest (current behavior:
+  yes) or pauses silently. Either is defensible; unspecified is not.
+
+### P1-5 — iOS slice: fuzzy engine duplicates the build-time fix; four stale gates
+
+- After Slice 3's normalized join + mobile `fallback_audio` embedding,
+  `resolveAudioUrl` (`RootTabView.swift:530-544`, exact match only) becomes a rare
+  second-chance path. Adding Swift slug-fuzzy on top (Slice 4 action 1) ships two
+  normalization implementations to keep in sync per launch. Recommend: keep
+  exact-match fallback, **measure** post-Slice-3 miss rate first, add fuzzy only on
+  evidence (prior Q4 review reached the same conclusion; the plan regresses it
+  without justification).
+- `playImmediately(atRate:)` appears in REQUIREMENTS §2.C but correctly appears
+  nowhere in Slice 4 (current `play()` + rate at `AudioPlayerManager.swift:113-114`
+  is the right primitive for cold URL loads). Delete it from REQUIREMENTS instead
+  of leaving a dangling mandate.
+- URL encoding (`Slice 4 action 2`): specify encode-only-if-`URL(string:)`-returns-nil,
+  never re-encode an already-encoded URL (double-encoding `%20`→`%2520` breaks R2
+  links), and apply to relative `audio/...` paths too (they fail with spaces the
+  same way absolute URLs do). `.urlQueryAllowed` vs `.urlPathAllowed` without a
+  path/query split rule will mis-encode one side — name `URLComponents` or a single
+  `addingPercentEncoding` fallback, not two character sets.
+- `AVPlayerItem.status` observation needs the lifetime rule the plan omits: token
+  scoped to the current item, invalidated on `replaceCurrentItem`, `.failed` →
+  surface in UI, `.unknown` → stall state. Also note `@MainActor` isolation for the
+  observer under Swift 6.
+- N=0 consistency: Slice 4 fixes the `loadCachedFeed` quarantine gate
+  (`ContentStore.swift:64-74`) but the **seed** gates (`:84-86, :99-101, :114-118`)
+  still require `!top20.items.isEmpty` — an N=0 week returns `nil` (no feed at all).
+  Relax all four gates together. And the honest empty state is specified only for
+  web (Slice 3); `BriefingView.swift:50` (`prefix(20)` → dynamic) needs the matching
+  iOS empty state, or N=0 renders an empty scroll with no copy.
+- RSS `top20_items[:10]` (`web_reader.py:763`) is unmentioned. Either update to N or
+  record "display all, RSS first 10" as explicit policy (prior review's suggestion) —
+  don't leave the third truncation silent.
+
+### P1-6 — UAT target and deploy ordering overstate current automation
+
+- `run_browser_uat.py:30-32` targets the **live** URL with a `file://` fallback —
+  `file://` breaks `fetch`-based `data.json` loads, live-URL testing conflates
+  deploy lag with regressions. Slice 5's localhost server is the right call but
+  requires rewriting `TARGET_URL`/`LOCAL_FALLBACK` + adding an `http.server`
+  fixture; name the file. Also state whether the 13 existing checks are extended or
+  replaced — the plan's 5 assertions alone drop anti-slop/duplication coverage.
+- Deploy: R2 upload happens **during** build (`web_reader.py:1102,1113`; cleanup
+  `:1263-1267`), not as a fallback after the 5 MB scan refuses (`:1280-1284`).
+  Slice 5's "halt → R2 upload fallback" misdescribes the code: a refused deploy
+  today requires re-running the build with R2 configured. For a user without R2
+  keys, one stray MP3 = built-but-never-deployed with no documented recovery —
+  record the `--compress-audio` / manual-exclusion fallback explicitly.
+- `web_reader.main()` **deploys by default** (`:1353`, `if args.deploy or not
+  args.build_only`). UAT must run `--build-only` first or every test build
+  force-pushes the orphan `gh-pages` branch.
+
+### P2 — Over-engineering cuts (plan is close to lean; hold these lines)
+
+- Dual-key `channel_audio_map` (raw + normalized) → normalized-only (~half the keys,
+  one code path to test).
+- `parse_top_digest_filename → Match` → count-returning helper (P0-1).
+- Absolute test-count gate (`>= 262`) → zero-failure gate (P0-3).
+- Keep the 3-viewport Playwright matrix + `canplay`-not-audible bar — proportionate
+  for a static page; the risk is Slice 5 dropping the existing 13 checks, not the
+  matrix size. Keep `play()` + rate; keep `ContentStore`'s existing atomic-write /
+  LRU patterns (already landed) — do not re-spec them.
+
+### Suggested slice order (dependency-safe)
+
+1. **Slice 0 (baseline):** fix the 11 collection errors; record collected count as
+   the new gate denominator (zero-failure, not 262).
+2. **Contract lock:** canonical interim-free regex (fix §2.A wording) + writer format
+   (`Top_{len}_digest`) agreed; `paths.py` helpers land.
+3. **Slice 1 read path** (`web_reader`, `tts_service`, `download_top10`,
+   `send_top10` with exclusion polarity stated) + **Slice 2 removal** (add
+   `top10_digest.html`, `test_immediate_checkpointing.py`, artifact sweep,
+   `coverage_note` integration point, gating insertion point + deferral precedence)
+   — file-disjoint, may parallelize.
+4. **Slice 3 web audio** (all four `has_audio` gates, `summary` field reuse,
+   SITE_DATA audio backfill, single-start `playIndex` with promise-driven icons,
+   Editorial button resolution rule, web N=0 empty state).
+5. **Slice 4 iOS** (dynamic count + iOS N=0 empty state, four-gate quarantine
+   relaxation, URL-encode-only-on-nil, item-scoped status observation; fuzzy slug
+   only on measured misses).
+6. **Slice 5 UAT/deploy** (`run_browser_uat.py` localhost rewrite, extend — don't
+   replace — the 13 checks, `--build-only` before any push, R2/compress fallback
+   documented, live `run_date` smoke check with empty-`run_date` handling).
+
+### Verification additions (append to plan §4)
+
+- Automated: interim-free regex vector test (Top_14/20/25 + stale `_interim` file
+  asserting skip-or-swept); gating boundary test (18/19 of 23 for 80%, 16/17 for
+  70%); `grep -r "is_interim\|interim_sent_at\|final_after_interim" desktop/`
+  expecting zero hits outside the tolerant-read shim; no-`_interim`-artifact test
+  after a full run; normalization pair test (`Peter Attia, MD`, `Nutrition Made
+  Simple!`); queue test asserting `summary` (not `isSummary`) flags and
+  NotebookLM-first order; N=0 empty-state render test (web + `ContentStore` nil-path).
+- Manual: corrupt-cache drill (garbage `feed.json` → seed/empty, no crash — already
+  in `UAT_PLAN.md`, link don't duplicate); quota-deferral drill (deferred run →
+  stated publish-or-pause behavior); oversize-audio drill (stray >5 MB MP3 without
+  R2 → documented recovery path works).
+- Negative controls already in `UAT_PLAN.md` (corrupt/empty cache, unplayable item)
+  — link them; Slice 5's checklist alone is insufficient exit criteria.
+
+### Decisions needed (blocking, remediation plan)
+
+1. Canonical regex shape (recommend plan's dated interim-free form) + fix §2.A wording.
+2. `send_top10` exclusion polarity + `download_top10` widening acknowledged.
+3. Template (`top10_digest.html`), `test_immediate_checkpointing.py`, and artifact
+   sweep added to Slice 2 scope.
+4. `coverage_note` integration point (selection field + template + email slot).
+5. Gating insertion point (after artifact advancement), dry-run exclusion, and
+   deferral-publishes-partial vs pauses-silent.
+6. `has_audio` strategy (rebuild all four JS gates vs build-time derive) + `summary`
+   vs `isSummary` field lock.
+7. SITE_DATA Top-item audio backfill at build time (recommend) vs JS lookup.
+8. iOS fuzzy slug: drop until measured misses (recommend) or justify the second engine.
+9. RSS `[:10]` policy: dynamic-N vs documented cap.
+10. N=0 iOS empty-state copy + four-gate quarantine relaxation.
+11. UAT harness rewrite scope (extend 13 checks) + `--build-only`-first rule + R2-less
+   oversize recovery path.

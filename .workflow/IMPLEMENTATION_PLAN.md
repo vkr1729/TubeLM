@@ -1,155 +1,231 @@
-# Implementation Plan: TubeLM iOS UAT Remediation (Phase 2 — Final Blueprint)
+# Implementation Plan: TubeLM Web & Mobile Sync Remediation
 
 ## 1. Architectural Strategy & Constraints Anchor
-- **Persona & Scale:** Single-user personal app exclusively. No multi-tenant auth, no cloud database setup, no complex migrations.
-- **Host & Environment:** Sideloaded `.ipa` inside **LiveContainer** on iOS 26 (iPhone 16 baseline), used primarily during Singapore transit commutes with tunnel dead zones.
-- **Design Alignment:** Clean Minimalist Executive Briefing archetype:
-  - **Light Mode Default** with high-contrast Apple typography (SF Pro / New York serif) and a 3-way toggle (Light / Dark / System) stored via `@AppStorage("tubelm.themeMode")`.
-  - **Watched-to-Bottom Feed Partition:** Unread items first, watched/read items at the bottom with original rank badges (`#1..#20`) strictly preserved. Partition logic lives in `TubeLMCore` for 100% Linux testability.
-  - **Apple Podcasts-Inspired Player Deck:** Refined ~180pt artwork tile, custom capsule scrubber with dedicated drag gesture, 56pt transport controls, and polished Up Next queue.
-- **Sync & Audio Engine:**
-  - Event-driven sync to `https://tubelm-sync.kedarvreddy.workers.dev` with alias fan-out (`id`, `video_id`, `url`, normalized URL) and Keychain passphrase storage.
-  - Loop-agnostic neural TTS synthesis in `desktop/tts_service.py` with idempotent backfill for `2026-09-18` and verified `summary_audio_url`.
+- **Persona & Scale:** Single-user personal app exclusively. Strictly reject enterprise complexity, authentication frameworks, microservices, or complex distributed databases.
+- **Host & Environment:**
+  - Web Reader: Hosted on GitHub Pages (`https://vkr1729.github.io/TubeLM/`) with data synced via Cloudflare Worker/R2.
+  - iOS App: Native Swift/SwiftUI application running in LiveContainer on iOS with offline caching and background Cloudflare sync.
+- **Core Principles:**
+  - Build-time normalization over client-side fuzzy heuristics.
+  - Strict atomic deployment order: audio to R2/Worker first, `data.json` last, single `gh-pages` commit.
+  - Always run `--build-only` during UAT to prevent premature deployment pushes.
+  - Pre-deploy guard rails: scan for files $> 5\text{MB}$ before pushing; documented recovery via audio compression or R2 upload.
+  - Single final Top Digest: zero interim files or notifications; deterministic 3-iteration channel retries.
 
 ---
 
-## 2. Component Breakdown & Implementation Slices
+## 2. Pipeline & Data Flow Architecture
 
-### Slice 1: TTS Pipeline Bug Fix & Audio Backfill (`desktop/`)
-- **Files:**
-  - `desktop/tts_service.py`
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Main as Pipeline Runner (main.py)
+    participant Top10 as Top10 Service (top10_service.py)
+    participant Reader as Web Reader Compiler (web_reader.py)
+    participant R2 as Cloudflare R2 / Storage
+    participant GHPages as GitHub Pages
+    participant iOS as iOS App (ContentStore)
+
+    Note over Main: Iteration 1: Process all channels
+    Note over Main: Advance background artifacts & checkpoint
+    alt Cumulative Success >= 80%
+        Main->>Top10: Generate single final Top Digest
+    else Cumulative Success < 80%
+        Note over Main: Iteration 2: Retry failed channels only
+        Note over Main: Advance background artifacts & checkpoint
+        alt Cumulative Success >= 70%
+            Main->>Top10: Generate single final Top Digest
+        else Cumulative Success < 70%
+            Note over Main: Iteration 3: Retry failed channels only
+            Note over Main: Advance background artifacts & checkpoint
+            Main->>Top10: Generate single final Top Digest (unconditional)
+        end
+    end
+
+    Top10->>Reader: HTML & JSON Top digest artifacts (Top_N)
+    Reader->>Reader: Build-time normalize channel_audio_map (normalized keys only)
+    Reader->>Reader: Backfill audio_url to both mobile data.json and web SITE_DATA
+    Reader->>R2: Upload audio files > 5MB
+    Reader->>Reader: Compile site/ with --build-only and data.json (N items)
+    Reader->>GHPages: Atomic push to gh-pages branch
+    GHPages-->>iOS: Sync data.json (accepts dynamic Top N, relaxed seed gates)
+```
+
+---
+
+## 3. Detailed Component Breakdown & Implementation Slices
+
+### Slice 1: Dynamic Top Digest Pattern Matching & Detection
+- **Files Affected:**
+  - `desktop/paths.py`
   - `desktop/web_reader.py`
+  - `desktop/tts_service.py`
+  - `desktop/scripts/download_top10.py`
+  - `desktop/scripts/send_top10_from_digests.py`
+- **Actions:**
+  1. In `desktop/paths.py`, define central regex and helper functions:
+     ```python
+     TOP_DIGEST_FILENAME_RE = re.compile(
+         r"^(\d{4}-\d{2}-\d{2})_(?:TubeLM_)?Top_(\d+)_digest\.(html|json)$",
+         re.IGNORECASE,
+     )
+
+     def is_top_digest_file(filename: str | Path) -> bool:
+         name = filename.name if isinstance(filename, Path) else filename
+         return bool(TOP_DIGEST_FILENAME_RE.match(name))
+
+     def parse_top_digest_count(filename: str | Path) -> int | None:
+         name = filename.name if isinstance(filename, Path) else filename
+         m = TOP_DIGEST_FILENAME_RE.match(name)
+         return int(m.group(2)) if m else None
+     ```
+  2. In `desktop/web_reader.py`:
+     - Replace hardcoded `if "Top_20" in f.name or "Top_10" in f.name:` (line 1061) with `if paths.is_top_digest_file(f):`.
+     - Extract `N = parse_top_digest_count(f) or len(deduped_items)`.
+     - In `_normalize_mobile_item` and mobile export (line 1237), export `candidate_count: len(mobile_items)`.
+  3. In `desktop/tts_service.py`:
+     - Replace `if "Top_20" in digest.name or "Top_10" in digest.name:` (line 255) with `if paths.is_top_digest_file(digest):` so Top digests are never processed as channel digests for TTS.
+  4. In `desktop/scripts/download_top10.py`:
+     - Update `find_latest_top10_digest()` to filter using `paths.is_top_digest_file`.
+  5. In `desktop/scripts/send_top10_from_digests.py`:
+     - Preserve exclusion polarity (line 48): `if paths.is_top_digest_file(digest_path): continue`.
+
+### Slice 2: Elimination of Interim Digest & 3-Stage Retry Threshold Policy
+- **Files Affected:**
+  - `desktop/top10_service.py`
+  - `desktop/main.py`
+  - `desktop/email_service.py`
+  - `desktop/templates/top10_digest.html`
+  - `desktop/tests/unit/test_immediate_checkpointing.py`
+- **Actions:**
+  1. In `desktop/top10_service.py`:
+     - Remove `is_interim` and `is_final_after_interim` parameters from `generate_and_send_top10_digest` and `_rank_render_and_send`.
+     - Remove interim conditional branches, `_interim` suffix logic, and `final_identical_to_interim` skip block.
+     - Always set `rotate_downloads=True` on final send.
+     - Maintain tolerant reading for existing batch JSON files that may have `interim_sent_at` or legacy keys, but never write new interim keys.
+     - Add `coverage_note` field to the selection dict when `completion_ratio < 1.0` (e.g., *"Digest compiled from 19 of 23 channels (4 channels unavailable or deferred)."*).
+  2. In `desktop/email_service.py`:
+     - Remove "EARLY EDITION" and "FINAL EDITION" edition labels. Top digest emails represent the single authoritative edition.
+     - Render `selection.get("coverage_note")` in the email header/footer if present.
+  3. In `desktop/templates/top10_digest.html`:
+     - Lines 44 and 60: remove `is_interim` and `is_final_after_interim` conditional headings. Render single authoritative heading and optional `coverage_note`.
+  4. In `desktop/main.py`:
+     - Startup sweep: purge stale `*_interim_digest.*` files from `downloads/` and `site/`.
+     - Remove `interim_top10_sent = False` flag (line 596) and Stage 0 interim trigger block (lines 795-815).
+     - Placement of threshold gating: insert **after** `_finish_background_artifacts` and checkpointing (around line 826), before advancing to the next stage delay:
+       - Skip gating in `dry_run`.
+       - **Iteration 1 (`stage_idx == 0`):**
+         - Calculate cumulative rate: `completion_ratio = len(completed_source_keys) / total_initial_handlers`.
+         - If `completion_ratio >= 0.80`, log milestone and break from retry loop to digest generation.
+       - **Iteration 2 (`stage_idx == 1`):**
+         - Retry failed handlers only: `failed_handlers = [h for h in initial_handlers if h.source_key not in completed_source_keys]`.
+         - If cumulative `completion_ratio >= 0.70`, log milestone and break from retry loop to digest generation.
+       - **Iteration 3 (`stage_idx == 2`):**
+         - Retry remaining failed handlers once more.
+         - Unconditionally break to digest generation and publish.
+     - Quota deferral takes precedence (pauses run without phantom retries; publishes partial digest if candidates exist).
+  5. In `desktop/tests/unit/test_immediate_checkpointing.py`:
+     - Update lines 177-189 to remove `is_interim True -> False` sequence assertions.
+
+### Slice 3: Web Reader Audio Unification & UI Modernization
+- **Files Affected:**
+  - `desktop/web_reader.py`
+  - `desktop/templates/reader.html`
+- **Actions:**
+  1. In `desktop/web_reader.py`:
+     - Define normalized key helper:
+       ```python
+       def _normalize_channel_key(name: str) -> str:
+           return re.sub(r"[^\w\s]", "", name.lower()).strip()
+       ```
+     - Populate `channel_audio_map` using normalized keys only (`_normalize_channel_key(ch["name"])` and `_normalize_channel_key(ch["id"])`).
+     - Backfill `audio_url` on BOTH mobile items (`_normalize_mobile_item`) AND `top20_data["items"]` in `SITE_DATA` at build time so web Editorial Picks cards have resolved `audio_url`.
+     - In `_normalize_mobile_item` and mobile export, set `candidate_count: len(mobile_items)`.
+  2. In `desktop/templates/reader.html`:
+     - Fix all four `has_audio` gates:
+       1. Audio Overview card (`line 2823`): `ch.audio_url || ch.summary_audio_url`
+       2. Sidebar audio pulse badge (`lines 2600, 2614`): `(ch.has_audio && ch.audio_url) || ch.summary_audio_url`
+       3. Channel directory audio pill (`line 3044`): `(ch.has_audio && ch.audio_url) || ch.summary_audio_url`
+       4. Queue filter (`line 3163`): `ch.audio_url || ch.summary_audio_url`
+     - Dynamic Header & Empty State:
+       - In `renderActiveView()` for `selectedItemId === 'top20'`:
+         - If `items.length === 0`: render `<div class="text-center py-20 text-[var(--text-muted)]">No Top picks this week — 0 candidates found.</div>`.
+         - If `items.length > 0`: dynamically render `Top ${items.length} curated videos` in subtitle.
+     - Dynamic Sidebar Badge:
+       - In `renderSidebar()`: update `document.getElementById('top20-count-label').textContent = `${top20Count} items``.
+     - Editorial Picks Audio Button:
+       - In editorial card footer (lines 2787-2793): add `🎧 Listen` button if `item.audio_url` exists.
+     - `buildQueue()`:
+       - Include channel in queue if `ch.audio_url || ch.summary_audio_url`.
+       - Reuse existing `summary: Boolean` flag (`summary: !ch.audio_url`) to avoid schema clash.
+     - `playIndex()` Lifecycle Fix:
+       - Remove duplicate `begin()` call on `loadedmetadata`.
+       - Await `canplay` / `.play()` promise.
+       - Update `isAudioPlaying` and play/pause icons strictly from playback events.
+       - Surface playback load errors to mini-player banner instead of silently swallowing with `.catch(() => {})`.
+
+### Slice 4: iOS App Audio Reliability & Dynamic Digest Sync
+- **Files Affected:**
+  - `ios/Sources/TubeLMCore/Storage/ContentStore.swift`
+  - `ios/Sources/TubeLMApp/Views/BriefingView.swift`
+  - `ios/Sources/TubeLMApp/Audio/AudioPlayerManager.swift`
+  - `ios/Sources/TubeLMApp/Views/RootTabView.swift`
+- **Actions:**
+  1. In `ContentStore.swift`:
+     - Relax all four gates (`loadCachedFeed` line 68, and seed candidate loaders lines 86, 101, 118) to check:
+       `if let feed = try? JSONDecoder().decode(DigestFeed.self, from: data), (!feed.channels.isEmpty || !feed.top20.items.isEmpty)`.
+       This ensures valid feeds with N=0 top items are never falsely quarantined.
+  2. In `BriefingView.swift`:
+     - Line 50: remove hardcoded `prefix(20)` (`let topItems = Array(items)`).
+     - Render honest empty-state view if `items.isEmpty`: *"No Top picks this week — 0 candidates found."*
+  3. In `AudioPlayerManager.swift`:
+     - In `playTrack`:
+       - If `URL(string: trimmed, relativeTo: Self.feedBaseURL)` returns nil, apply `addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)`.
+       - Retain `player.play()` with `playbackRate`.
+       - Observe `AVPlayerItem.status` using item-scoped KVO on `@MainActor` with cleanup on `replaceCurrentItem`.
+  4. In `RootTabView.swift`:
+     - Keep exact-match `resolveAudioUrl` fallback (build-time normalization now handles punctuation joins upstream).
+
+### Slice 5: Automated Verification, UAT Harness & Release Automation
+- **Files Affected:**
+  - `desktop/scripts/run_browser_uat.py`
+  - `desktop/tests/unit/test_top10_service.py`
+  - `desktop/tests/unit/test_web_reader.py`
   - `desktop/tests/unit/test_tts.py`
 - **Actions:**
-  1. Fix event loop collision in `generate_summary_tts`:
-     - Detect active loop via `asyncio.get_running_loop()`.
-     - If running in an active loop, execute `_generate_audio_async` on a dedicated worker thread with its own event loop using a pooled `ThreadPoolExecutor`.
-     - If no loop is active, call `asyncio.run(_generate_audio_async(...))` directly inline.
-     - Never raise; degrade to `False` on error.
-  2. Refactor `_backfill_week_async`:
-     - Await `_generate_audio_async` directly under the concurrency semaphore (`async with sem:`).
-     - Isolate per-channel exceptions with try/except so one failure does not abort the week.
-     - Keep idempotent check (skip non-empty MP3s unless `force=True`).
-  3. Add unit test in `desktop/tests/unit/test_tts.py`:
-     - Verify `generate_summary_tts` succeeds when called from inside an active asyncio event loop (with mocked `edge_tts.Communicate.save`).
-     - Verify async backfill awaits the async core directly without calling the sync wrapper.
-  4. Run backfill for `2026-09-18` digest:
-     ```bash
-     .venv/bin/python desktop/tts_service.py --backfill --date 2026-09-18
-     ```
-  5. Include optional `video_id` in `web_reader.py`'s `_normalize_mobile_item` and `_normalize_mobile_video`.
-  6. Rebuild reader site and `data.json`:
-     ```bash
-     .venv/bin/python -c "from web_reader import build_reader_site; build_reader_site()"
-     ```
-  7. Verify `summary_audio_url` fields in `site/data.json` are populated with valid URLs.
-
-### Slice 2: Core Identity, Aliases & Feed Partitioning (`TubeLMCore`)
-- **Files:**
-  - `ios/Sources/TubeLMCore/Sync/SyncIdentity.swift` [NEW]
-  - `ios/Sources/TubeLMCore/Models/DigestFeed.swift`
-  - `ios/Sources/TubeLMCore/Storage/ContentStore.swift`
-  - `ios/Sources/TubeLMCore/Queue/FeedPartition.swift` [NEW]
-  - `ios/Sources/TubeLMCore/Sync/CloudflareSyncClient.swift`
-  - `ios/Tests/TubeLMCoreTests/SyncIdentityTests.swift` [NEW]
-  - `ios/Tests/TubeLMCoreTests/FeedPartitionTests.swift` [NEW]
-- **Actions:**
-  1. Add optional `videoId` to `FeedItem` and `VideoItem` models in `DigestFeed.swift` (lenient decoding from JSON).
-  2. Create `SyncIdentity.swift`:
-     - `normalizeVideoUrl(_ url: String?) -> String`: Exact port of `reader.html:normalizeVideoUrl` (extract YouTube `v` parameter or pathname, origin + pathname for articles, raw trimmed fallback).
-     - `aliases(id: String, videoId: String?, url: String?) -> Set<String>`: Generates all valid keys (`id`, `videoId`, `url`, `normalizedUrl`).
-  3. Update `ContentStore.swift`:
-     - Alias-aware `markItemRead(aliases: Set<String>)`: Persists all aliases into `read_ids` (capped at 5,000 LRU) and `item_states` with current timestamp.
-     - Alias-aware `unmarkItemRead(aliases: Set<String>)`: Tombstones all aliases in `item_states` (-timestamp) and removes from `read_ids`.
-     - `isItemRead(aliases: Set<String>) -> Bool`: Checks if *any* alias exists in `readIDs`.
-  4. Create `FeedPartition.swift`:
-     - `unreadFirst<T: Identifiable>(items: [T], isRead: (T) -> Bool) -> [T]`: Stable partition preserving relative order of unread items, followed by read items.
-     - Badge helper ensuring original rank is preserved (`item.rank ?? originalIndex + 1`).
-  5. Update `CloudflareSyncClient.swift`:
-     - Change default `baseURL` to `https://tubelm-sync.kedarvreddy.workers.dev`.
-     - Cap synced bookmarks to most-recent 200 to protect against payload limit (413).
-  6. Add comprehensive Linux-runnable tests in `TubeLMCoreTests`:
-     - `SyncIdentityTests`: Vector tests matching JavaScript `normalizeVideoUrl` across YouTube watch, youtu.be, shorts, and RSS articles.
-     - `FeedPartitionTests`: Order stability, rank preservation, empty/all-read edge cases.
-
-### Slice 3: App Wiring, Keychain & Settings (`TubeLMApp`)
-- **Files:**
-  - `ios/Sources/TubeLMApp/TubeLMApp.swift`
-  - `ios/Sources/TubeLMApp/Views/RootTabView.swift`
-  - `ios/Sources/TubeLMApp/Views/Theme/Typography.swift`
-- **Actions:**
-  1. **Theme Management:**
-     - Add `enum AppThemeMode: String, CaseIterable` (`light`, `dark`, `system`).
-     - Root `@AppStorage("tubelm.themeMode")` in `TubeLMApp.swift` defaulting to `"light"`.
-     - Apply `.preferredColorScheme(themeMode.colorScheme)` at `WindowGroup` root.
-     - Add Theme section to `SyncSettingsSheet` with a 3-way segmented picker.
-     - Contrast audit in `Typography.swift`: verify `AppTheme.accentBadgeText`, `whyBackgroundLight`, and secondary backgrounds under Light Mode.
-  2. **Keychain Passphrase Storage:**
-     - Add simple Keychain helper (~30 lines of `SecItemAdd` / `SecItemCopyMatching` / `SecItemUpdate`) for the sync passphrase, replacing plaintext `UserDefaults`.
-  3. **Sync Status Badge & Debounce:**
-     - Preserve 1.5s push debounce (`RootTabView.scheduleSyncPush`).
-     - Expose 3-state sync connection indicator in `SyncSettingsSheet`: `Synced ✓`, `Connecting…`, `Needs Passphrase / Error`.
-     - Add endpoint migration fallback: test new `kedarvreddy` endpoint; if offline/unreachable on first setup, allow fallback.
-  4. **One-Way Mark & Scope:**
-     - `playItemAudio`: Mark that item as read.
-     - Channel `Listen`: Do NOT mark individual videos read (preserving unwatched commute queue).
-
-### Slice 4: Dynamic Partitioned Views & Tap Fix (`TubeLMApp`)
-- **Files:**
-  - `ios/Sources/TubeLMApp/Views/BriefingView.swift`
-  - `ios/Sources/TubeLMApp/Views/ChannelsView.swift`
-- **Actions:**
-  1. `BriefingView.swift`:
-     - Compute partitioned feed: `FeedPartition.unreadFirst(items: items.prefix(20), isRead: isItemRead)`.
-     - Rank badge displays `item.rank ?? (originalIndex + 1)`.
-     - Wrap mark-watched actions in `withAnimation(.spring(response: 0.35, dampingFraction: 0.8))`.
-     - Auto-mark watched when user taps **Play**, **Watch**, **Read**, or the item title.
-  2. `ChannelsView.swift`:
-     - Keep channel directory order strictly alphabetical/searchable.
-     - Inside expanded channel disclosure: partition videos with `FeedPartition.unreadFirst` (non-animated to prevent scroll yank inside expanded cells).
-     - **Fix bug in `openVideoLink`**: Change from `onToggleRead` to `onMarkRead` (one-way mark on title tap).
-
-### Slice 5: Player Deck Sheet Redesign (`PlayerDeckSheet.swift`)
-- **Files:**
-  - `ios/Sources/TubeLMApp/Views/PlayerDeckSheet.swift`
-- **Actions:**
-  1. **Artwork Tile:**
-     - Replace the 100×100 neon box with an elegant ~180×180pt card (24pt corner radius, gentle shadow, subtle emerald gradient `#064e3b` to `#047857`).
-     - Dynamic monogram / channel initials with crisp typography and clean border.
-  2. **Custom Capsule Scrubber:**
-     - Sleek 4pt capsule progress bar with 24pt touch/drag hit target.
-     - Dedicated `DragGesture` with `minimumDistance: 10` to prevent scroll-view pan conflicts.
-     - Monospace elapsed and duration time labels (`MM:SS` / `MM:SS`).
-     - VoiceOver accessibility traits (`.isAdjustable`).
-  3. **Balanced Transport Controls (56pt touch target floor):**
-     - Center Play/Pause: 64×64pt circular emerald button with tactile depth and shadow.
-     - Skip buttons: 56×56pt circular touch targets (`gobackward.15`, `goforward.15`) with secondary background.
-     - Playback speed: 56×44pt rounded pill cycling `1.0× → 1.25× → 1.5× → 2.0×`.
-  4. **Commute Queue:**
-     - Clean "Up Next" section with swipe-to-delete and drag-reorder affordances.
-     - Clear empty state card when queue is empty.
+  1. In `desktop/scripts/run_browser_uat.py`:
+     - Rewrite target to serve `site/` over a local Python `http.server` on an ephemeral port instead of live/`file://`.
+     - Preserve and extend all 13 existing anti-slop/duplication checks:
+       - Header displays "Top 14 curated videos" (or dynamic N).
+       - Channel list contains zero `TubeLM_Top_*` digest entries.
+       - Audio overview cards present and audio element triggers `canplay`.
+       - Theme toggle between Light and Dark persists in `localStorage`.
+       - Viewports 390px, 768px, and 1280px render cleanly without horizontal overflow.
+  2. Update unit tests in `test_top10_service.py`, `test_web_reader.py`, `test_tts.py` to match the interim-free single digest flow and dynamic Top N matching.
+  3. Build & Deploy Safety:
+     - Always test with `--build-only` first.
+     - Scan `site/` for files $> 5\text{MB}$ before push; deploy audio to R2/Worker, write `data.json` last, push `gh-pages`.
+     - Verify live `data.json` on GitHub Pages matches local `run_date`.
 
 ---
 
-## 3. Verification & Acceptance Plan
+## 4. Verification Plan
 
-### Automated Verification Suite
-1. **TTS Service Unit Tests (Python):**
-   ```bash
-   .venv/bin/pytest desktop/tests/unit/test_tts.py -v
-   ```
-2. **Swift Core Package Tests (Linux SPM):**
-   ```bash
-   cd ios && swift test --enable-code-coverage
-   ```
-3. **Automated Simulator Acceptance Suite:**
-   ```bash
-   cd ios && swift test --filter AutomatedSimulatorUATTests
-   ```
+### Automated Test Matrix
+| Layer | Harness | Target | Success Criteria |
+|---|---|---|---|
+| Python Unit | `.venv/bin/pytest desktop/tests/unit` | All pipeline modules | Zero failures across collected suite (100% pass) |
+| Web Reader UAT | Playwright Headless (`run_browser_uat.py`) | Localhost `site/` (390/768/1280px) | Dynamic N verified, 13 anti-slop checks pass, audio `canplay`, theme persists |
+| iOS Core Unit | `cd ios && swift test` | `TubeLMCoreTests` | All tests pass, models and relaxed seed gates intact |
+| iOS App CI | GitHub Actions | `build-ios.yml` (macOS runner) | iOS build & test suite passes, `.ipa` artifact generated |
+| Live Smoke Check | `curl -s https://vkr1729.github.io/TubeLM/data.json` | Remote GitHub Pages | HTTP 200, valid JSON, `run_date` matches local build |
 
-### Manual Acceptance Verification (Checklist)
-1. **Light Mode Default:** Launch app fresh; verify crisp Light Mode is active; open Settings, toggle to Dark Mode and System; verify seamless transitions.
-2. **Watched Items to Bottom:** In Briefing tab, tap Play or Watch on item #1; verify item #1 animates to the bottom, marked as watched, while item #2 moves to the top; verify rank badges (`#1`, `#2`) remain intact.
-3. **Cloudflare Sync:** Mark 2 items watched; verify sync push to `https://tubelm-sync.kedarvreddy.workers.dev` returns HTTP 200 with synced status; check web reader to verify items show as watched.
-4. **Audio Playback:** Tap "Play" on a channel audio summary; verify audio streams smoothly and lockscreen controls respond.
-5. **Player Deck Sheet:** Tap mini-player; verify refined ~180pt artwork card, sleek scrubber, 56pt buttons, and smooth commute queue interactions.
+---
+
+## 5. Contingency & Fallback Strategy
+- **If Playwright encounters local audio playback autoplay blocks:**
+  - Verify `src` attribute resolves HTTP 200 and listen for `canplay` / `loadedmetadata` event instead of requiring audible sound.
+- **If GitHub Pages 5MB limit is triggered:**
+  - Pre-deploy scan halts deployment before git push; run with `--compress-audio` or upload to Cloudflare R2.
+- **If iOS CI fails on macOS runner:**
+  - Inspect GitHub Actions run logs immediately, isolate compiler / Swift syntax issues, apply targeted fixes, and re-push.

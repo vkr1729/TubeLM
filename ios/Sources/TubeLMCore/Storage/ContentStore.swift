@@ -65,7 +65,7 @@ public actor ContentStore {
         if FileManager.default.fileExists(atPath: feedCacheFile.path) {
             if let data = try? Data(contentsOf: feedCacheFile) {
                 if let feed = try? JSONDecoder().decode(DigestFeed.self, from: data),
-                   !feed.top20.items.isEmpty {
+                   (!feed.channels.isEmpty || !feed.top20.items.isEmpty) {
                     return feed
                 } else {
                     // Corrupt or empty cache file detected: quarantine to preserve diagnostics and heal
@@ -83,7 +83,7 @@ public actor ContentStore {
         for url in mainCandidates.compactMap({ $0 }) {
             if let data = try? Data(contentsOf: url),
                let feed = try? JSONDecoder().decode(DigestFeed.self, from: data),
-               !feed.top20.items.isEmpty {
+               (!feed.channels.isEmpty || !feed.top20.items.isEmpty) {
                 try? saveFeed(feed)
                 return feed
             }
@@ -98,7 +98,7 @@ public actor ContentStore {
             let url = URL(fileURLWithPath: envPath)
             if let data = try? Data(contentsOf: url),
                let feed = try? JSONDecoder().decode(DigestFeed.self, from: data),
-               !feed.top20.items.isEmpty {
+               (!feed.channels.isEmpty || !feed.top20.items.isEmpty) {
                 try? saveFeed(feed)
                 return feed
             }
@@ -115,7 +115,7 @@ public actor ContentStore {
             if FileManager.default.fileExists(atPath: url.path),
                let data = try? Data(contentsOf: url),
                let feed = try? JSONDecoder().decode(DigestFeed.self, from: data),
-               !feed.top20.items.isEmpty {
+               (!feed.channels.isEmpty || !feed.top20.items.isEmpty) {
                 try? saveFeed(feed)
                 return feed
             }

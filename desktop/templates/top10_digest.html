@@ -41,7 +41,7 @@
               </table>
               <div style="margin-top:46px;">
                 <span style="display:inline-block;padding:7px 10px;background:#d9ff63;color:#171815;font-size:10px;line-height:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;border-radius:3px;">
-                  {% if selection.is_interim %}Early Edition · First Pass{% elif selection.is_final_after_interim %}Final Edition · All Sources{% else %}Cross-source edit{% endif %}
+                  Cross-source edit
                 </span>
               </div>
               <h1 class="hero-title" style="margin:18px 0 0;color:#f8f8f4;font-size:48px;line-height:49px;letter-spacing:-.05em;font-weight:780;">The Editor's<br>Top {{ selection['items'] | length }}</h1>
@@ -57,16 +57,19 @@
                 <tr>
                   <td style="color:#f8f8f4;font-size:13px;line-height:19px;font-weight:750;">{{ selection['items'] | length }} essential picks · Tiered Ranking</td>
                   <td align="right" style="color:#8d8f86;font-size:12px;line-height:19px;">
-                    {% if selection.is_interim %}
-                      from {{ selection.candidate_count }} items (Early Edition)
-                    {% else %}
-                      from {{ selection.candidate_count }} new items
-                    {% endif %}
+                    from {{ selection.candidate_count }} new items
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
+          {% if selection.coverage_note %}
+          <tr>
+            <td style="padding:10px 44px;background:#1c1d19;color:#a8aaa1;font-size:12px;border-bottom:1px solid #32332e;">
+              {{ selection.coverage_note }}
+            </td>
+          </tr>
+          {% endif %}
 
           <tr>
             <td class="content-pad" style="padding:36px 34px 42px;">

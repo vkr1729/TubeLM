@@ -45,7 +45,7 @@ def main() -> None:
 
     digest_paths = []
     for digest_path in paths.get_summaries_dir().glob("*_digest.html"):
-        if "TubeLM_Top_" in digest_path.name:
+        if paths.is_top_digest_file(digest_path):
             continue
         try:
             digest_date = date.fromisoformat(digest_path.name[:10])

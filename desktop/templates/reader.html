@@ -2587,6 +2587,11 @@
       const container = document.getElementById('channels-container');
       container.innerHTML = '';
 
+      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [], top20: { items: [] } };
+      const topCount = (weekData.top20 && weekData.top20.items) ? weekData.top20.items.length : 0;
+      const topLabel = document.getElementById('top20-count-label');
+      if (topLabel) topLabel.textContent = `${topCount} items`;
+
       const filtered = filteredChannels();
       const unreadChannels = filtered.filter(ch => !isChannelRead(ch.id));
       const readChannels = filtered.filter(ch => isChannelRead(ch.id));
@@ -2597,8 +2602,9 @@
       let unreadPodcastCount = 0;
       unreadChannels.forEach(ch => {
         unreadReadMin += (ch.read_minutes || 0);
-        if (ch.has_audio && ch.audio_url && !isHeard(ch.audio_url)) {
-          unreadPodcastSec += (ch.audio_seconds || 0);
+        const aUrl = ch.audio_url || ch.summary_audio_url;
+        if (aUrl && !isHeard(aUrl)) {
+          unreadPodcastSec += (ch.audio_seconds || ch.summary_audio_seconds || 180);
           unreadPodcastCount++;
         }
       });
@@ -2612,16 +2618,18 @@
         btn.onclick = () => selectChannel(ch.id);
 
         const isPodcast = !!(ch.has_audio && ch.audio_url);
+        const isSummary = !isPodcast && !!ch.summary_audio_url;
+        const trackSrc = ch.audio_url || ch.summary_audio_url || '';
         const audioBadge = isPodcast
           ? `<span class="badge-podcast">▶ Podcast</span>`
-          : '';
-        const trackSrc = isPodcast ? ch.audio_url : '';
+          : (isSummary ? `<span class="badge-podcast" style="background:var(--accent-subtle);color:var(--accent-ink);">▶ Summary</span>` : '');
         const heardBadge = (trackSrc && isHeard(trackSrc)) ? `<span class="heard-badge">♪ heard</span>` : '';
         const readIndicator = isRead
           ? `<span class="text-[10px] text-[var(--success)]">✓</span>`
           : `<span class="unread-dot"></span>`;
         const readMin = ch.read_minutes ? `~${ch.read_minutes} min` : '';
-        const audioMin = (isPodcast && ch.audio_seconds) ? `${Math.max(1, Math.round(ch.audio_seconds / 60))}m audio` : '';
+        const audioSeconds = ch.audio_seconds || ch.summary_audio_seconds || 0;
+        const audioMin = ((isPodcast || isSummary) && audioSeconds) ? `${Math.max(1, Math.round(audioSeconds / 60))}m audio` : '';
 
         const metaParts = [
           `${ch.video_count || 1} video${(ch.video_count || 1) > 1 ? 's' : ''}`,
@@ -2714,6 +2722,23 @@
             items.push(it);
           }
         }
+        if (items.length === 0) {
+          pane.innerHTML = `
+            <article class="max-w-4xl mx-auto space-y-4">
+              <div class="view-top-nav">
+                <button onclick="showSidebarMobile()" class="btn-subnav-back" title="Back to Channels">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+                  <span>Channels</span>
+                </button>
+              </div>
+              <div class="view-heading-block">
+                <h1 class="view-heading-title">Editorial Picks</h1>
+              </div>
+              <div class="text-center py-20 text-[var(--text-muted)]">No Top picks this week — 0 candidates found.</div>
+            </article>`;
+          return;
+        }
+
         const unreadPicks = items.filter(it => !isTopItemRead(it.video_id, it.url));
         const readPicks = items.filter(it => isTopItemRead(it.video_id, it.url));
         const normalUnread = unreadPicks.filter(it => !isDeferred(it.video_id, it.url));
@@ -2741,7 +2766,7 @@
               <div class="flex items-center justify-between gap-2">
                 <div>
                   <h1 class="view-heading-title">Editorial Picks</h1>
-                  <div class="view-heading-meta">Top 20 curated videos · ~${weekData.total_read_minutes || 50} min read</div>
+                  <div class="view-heading-meta">Top ${items.length} curated videos · ~${weekData.total_read_minutes || 50} min read</div>
                 </div>
                 <div class="hidden sm:block">
                   ${seenCount > 0 ? `<button onclick="toggleHideSeen()" class="btn-subnav-pill">${hideSeen ? `Show Seen (${seenCount})` : `Hide Seen (${seenCount})`}</button>` : ''}
@@ -2790,6 +2815,11 @@
                         Play ▶
                       </button>
                     ` : ''}
+                    ${item.audio_url ? `
+                      <button onclick="playAudioDirect('${escapeQuotes(item.audio_url)}', '${safeTitle}', '${escapeQuotes(item.source_name || '')}')" class="btn-subnav-pill" style="padding: 4px 10px; font-size: 11px;" type="button" title="Listen to spoken audio">
+                        🎧 Listen
+                      </button>
+                    ` : ''}
                   </div>
                   <div class="flex items-center gap-2">
                     <button onclick="toggleTopItemRead('${key}', this)" data-is-video="${isVideo}" class="btn-seen ${seen ? 'is-seen' : ''}" type="button">${isVideo ? (seen ? 'Watched ✓' : '✓ Mark Watched') : (seen ? 'Read ✓' : '✓ Mark Read')}</button>
@@ -2820,37 +2850,43 @@
         const isRead = isChannelRead(ch.id);
 
         let audioSection = '';
-        if (ch.has_audio && ch.audio_url) {
+        const chAudioUrl = ch.audio_url || ch.summary_audio_url;
+        if (chAudioUrl) {
+          const isPodcast = !!(ch.has_audio && ch.audio_url);
+          const audioSecs = ch.audio_seconds || ch.summary_audio_seconds || 0;
+          const badgeText = isPodcast
+            ? `NotebookLM · ${audioSecs ? Math.round(audioSecs / 60) + 'm' : ''}`
+            : `Spoken Summary · ${audioSecs ? Math.round(audioSecs / 60) + 'm' : ''}`;
           audioSection = `
             <div class="audio-player-card">
               <div class="audio-player-header">
                 <div class="flex items-center gap-2">
                   <span class="audio-pulse-dot"></span>
                   <span class="audio-title">Audio Overview</span>
-                  <span class="audio-badge">NotebookLM · ${ch.audio_seconds ? Math.round(ch.audio_seconds / 60) + 'm' : ''}</span>
+                  <span class="audio-badge">${badgeText}</span>
                 </div>
                 <div>
-                  ${(typeof player !== 'undefined' && player.queue.some(t => t.src === ch.audio_url)) ? '<span class="text-xs text-[var(--success)] font-medium">In Queue ✓</span>' : `<button onclick="enqueueChannel('${ch.id}')" class="btn-subnav-pill" style="padding: 2px 9px; font-size: 11px;" title="Add to queue">＋ Queue</button>`}
+                  ${(typeof player !== 'undefined' && player.queue.some(t => t.src === chAudioUrl)) ? '<span class="text-xs text-[var(--success)] font-medium">In Queue ✓</span>' : `<button onclick="enqueueChannel('${ch.id}')" class="btn-subnav-pill" style="padding: 2px 9px; font-size: 11px;" title="Add to queue">＋ Queue</button>`}
                 </div>
               </div>
 
               <div class="audio-controls">
-                <button onclick="playChannelAudio('${ch.id}')" class="audio-play-btn" title="Play NotebookLM Podcast">
-                  <svg id="play-icon" viewBox="0 0 24 24"><path d="${(typeof isAudioPlaying !== 'undefined' && isAudioPlaying && typeof currentAudioSrc !== 'undefined' && currentAudioSrc === ch.audio_url) ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z'}"/></svg>
+                <button onclick="playChannelAudio('${ch.id}')" class="audio-play-btn" title="Play ${isPodcast ? 'NotebookLM Podcast' : 'Spoken Summary'}">
+                  <svg id="play-icon" viewBox="0 0 24 24"><path d="${(typeof isAudioPlaying !== 'undefined' && isAudioPlaying && typeof currentAudioSrc !== 'undefined' && currentAudioSrc === chAudioUrl) ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z'}"/></svg>
                 </button>
                 <div class="audio-progress-container">
                   <div class="audio-time-row">
                     <span id="audio-time-current">00:00</span>
                     <span class="audio-track-title">${esc(ch.name)}</span>
-                    <span id="audio-time-duration">${ch.audio_seconds ? formatTime(ch.audio_seconds) : '--:--'}</span>
+                    <span id="audio-time-duration">${audioSecs ? formatTime(audioSecs) : '--:--'}</span>
                   </div>
-                  <div class="audio-progress-bar-bg" onclick="seekAudio(event)" data-audio-src="${ch.audio_url}">
+                  <div class="audio-progress-bar-bg" onclick="seekAudio(event)" data-audio-src="${chAudioUrl}">
                     <div id="audio-progress-bar" class="audio-progress-bar-fill"></div>
                   </div>
                 </div>
                 <div class="audio-actions">
                   <button onclick="cycleAudioSpeed(this)" class="audio-speed-btn">1x</button>
-                  <a href="${safeExternalUrl(ch.audio_url)}" download class="audio-download-btn" title="Download MP3">
+                  <a href="${safeExternalUrl(chAudioUrl)}" download class="audio-download-btn" title="Download MP3">
                     <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                   </a>
                 </div>
@@ -3041,7 +3077,8 @@
               <div id="brief-full-${ch.id}-${bi}" class="brief-full hidden"></div>
             </div>`;
         });
-        const audioBit = (ch.has_audio && ch.audio_seconds) ? ` · ${Math.max(1, Math.round(ch.audio_seconds / 60))}m audio` : '';
+        const aSecs = ch.audio_seconds || ch.summary_audio_seconds || 0;
+        const audioBit = ((ch.has_audio || ch.summary_audio_url) && aSecs) ? ` · ${Math.max(1, Math.round(aSecs / 60))}m audio` : '';
         sections += `
           <section class="brief-section">
             <button onclick="selectChannel('${ch.id}')" style="background:none;border:none;cursor:pointer;font-size:15px;font-weight:700;text-align:left;color:var(--text-primary);padding:0">${esc(ch.name)}</button>
@@ -3159,12 +3196,14 @@
     function buildQueue(weekKey, opts) {
       const unheardOnly = !opts || opts.unheardOnly !== false;
       const weekData = SITE_DATA.weeks[weekKey || currentWeekKey] || { channels: [] };
-      // ONLY NotebookLM podcasts! Keep TTS completely separate.
-      const list = (weekData.channels || []).filter(ch => ch.has_audio && ch.audio_url).map(ch => ({
-        ch,
-        src: ch.audio_url,
-        isSummary: false,
-      })).filter(item =>
+      const list = (weekData.channels || []).filter(ch => (ch.has_audio && ch.audio_url) || ch.summary_audio_url).map(ch => {
+        const isFull = Boolean(ch.has_audio && ch.audio_url);
+        return {
+          ch,
+          src: isFull ? ch.audio_url : ch.summary_audio_url,
+          summary: !isFull,
+        };
+      }).filter(item =>
         item.src &&
         (currentCategoryId === 'all' || item.ch.category === currentCategoryId) &&
         (!unheardOnly || !isHeard(item.src))
@@ -3181,9 +3220,9 @@
         chId: item.ch.id,
         weekKey: weekKey || currentWeekKey,
         src: item.src,
-        title: item.ch.name,
+        title: item.summary ? `${item.ch.name} (Summary)` : item.ch.name,
         category: item.ch.category,
-        summary: false,
+        summary: item.summary,
       }));
       player.index = -1;
       savePlayer();
@@ -3196,10 +3235,7 @@
       currentAudioSrc = t.src;
       savePlayer();
       try { globalAudio.playbackRate = player.speed || 1.0; } catch (_) {}
-      let started = false;
-      const begin = () => {
-        globalAudio.play().then(() => { started = true; setMediaSessionMeta(); }).catch(() => {});
-      };
+      
       globalAudio.addEventListener('loadedmetadata', function once() {
         globalAudio.removeEventListener('loadedmetadata', once);
         try {
@@ -3207,13 +3243,29 @@
           if (saved > 0 && saved < (globalAudio.duration || Infinity)) globalAudio.currentTime = saved;
         } catch (_) {}
         updatePositionState();
-        if (!started) begin();
       });
+
       globalAudio.src = t.src;
-      begin();
-      isAudioPlaying = true;
-      updatePlayIcon();
-      updateMiniPlayer();
+      const playPromise = globalAudio.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          isAudioPlaying = true;
+          setMediaSessionMeta();
+          updatePlayIcon();
+          updateMiniPlayer();
+        }).catch(err => {
+          console.warn('Audio playback failed for', t.src, err);
+          isAudioPlaying = false;
+          updatePlayIcon();
+          updateMiniPlayer();
+          const titleEl = document.getElementById('mini-title');
+          if (titleEl) titleEl.textContent = 'Playback error: ' + (t.title || 'Audio');
+        });
+      } else {
+        isAudioPlaying = true;
+        updatePlayIcon();
+        updateMiniPlayer();
+      }
     }
     function queueNext() {
       let i = player.index + 1;
@@ -3241,40 +3293,81 @@
     function playChannelAudio(chId) {
       const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
       const ch = (weekData.channels || []).find(c => c.id === chId);
-      if (!ch || !ch.audio_url) return;
-      const idx = player.queue.findIndex(t => t.src === ch.audio_url);
+      if (!ch) return;
+      const src = (ch.has_audio && ch.audio_url) ? ch.audio_url : ch.summary_audio_url;
+      if (!src) return;
+      const isSummary = !ch.audio_url;
+      const trackTitle = isSummary ? `${ch.name} (Summary)` : ch.name;
+      const idx = player.queue.findIndex(t => t.src === src);
       if (idx >= 0 && idx === player.index) {
         if (globalAudio.paused) {
-          globalAudio.play().catch(() => {});
-          isAudioPlaying = true;
+          globalAudio.play().then(() => {
+            isAudioPlaying = true;
+            updatePlayIcon();
+            updateMiniPlayer();
+          }).catch(() => {});
         } else {
           globalAudio.pause();
           isAudioPlaying = false;
+          updatePlayIcon();
+          updateMiniPlayer();
         }
-        updatePlayIcon();
-        updateMiniPlayer();
         return;
       }
       if (idx >= 0) { playIndex(idx); return; }
       player.queue.splice(player.index + 1, 0,
-        { chId: ch.id, weekKey: currentWeekKey, src: ch.audio_url, title: ch.name, category: ch.category });
+        { chId: ch.id, weekKey: currentWeekKey, src: src, title: trackTitle, category: ch.category, summary: isSummary });
       playIndex(player.index + 1);
     }
     function enqueueChannel(chId) {
       const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
       const ch = (weekData.channels || []).find(c => c.id === chId);
-      if (!ch || !ch.audio_url) return;
-      if (!player.queue.some(t => t.src === ch.audio_url)) {
-        player.queue.push({ chId: ch.id, weekKey: currentWeekKey, src: ch.audio_url, title: ch.name, category: ch.category });
+      if (!ch) return;
+      const src = (ch.has_audio && ch.audio_url) ? ch.audio_url : ch.summary_audio_url;
+      if (!src) return;
+      const isSummary = !ch.audio_url;
+      const trackTitle = isSummary ? `${ch.name} (Summary)` : ch.name;
+      if (!player.queue.some(t => t.src === src)) {
+        player.queue.push({ chId: ch.id, weekKey: currentWeekKey, src: src, title: trackTitle, category: ch.category, summary: isSummary });
         savePlayer();
       }
       updateMiniPlayer();
+    }
+    function playAudioDirect(src, title, channelName) {
+      if (!src) return;
+      const displayTitle = channelName ? `${channelName} · ${title || 'Audio'}` : (title || 'TubeLM Audio');
+      const idx = player.queue.findIndex(t => t.src === src);
+      if (idx >= 0 && idx === player.index) {
+        if (globalAudio.paused) {
+          globalAudio.play().then(() => {
+            isAudioPlaying = true;
+            updatePlayIcon();
+            updateMiniPlayer();
+          }).catch(() => {});
+        } else {
+          globalAudio.pause();
+          isAudioPlaying = false;
+          updatePlayIcon();
+          updateMiniPlayer();
+        }
+        return;
+      }
+      if (idx >= 0) { playIndex(idx); return; }
+      player.queue.splice(player.index + 1, 0, {
+        chId: null,
+        weekKey: currentWeekKey,
+        src: src,
+        title: displayTitle,
+        category: null,
+        summary: true
+      });
+      playIndex(player.index + 1);
     }
     function openMiniTrack() {
       const t = player.queue[player.index];
       if (!t) return;
       if (t.weekKey && t.weekKey !== currentWeekKey && SITE_DATA.weeks[t.weekKey]) switchWeek(t.weekKey);
-      selectChannel(t.chId);
+      if (t.chId) selectChannel(t.chId);
     }
     function playSummaryAudio(chId) {
       const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
@@ -3283,14 +3376,17 @@
       const idx = player.queue.findIndex(t => t.src === ch.summary_audio_url);
       if (idx >= 0 && idx === player.index) {
         if (globalAudio.paused) {
-          globalAudio.play().catch(() => {});
-          isAudioPlaying = true;
+          globalAudio.play().then(() => {
+            isAudioPlaying = true;
+            updatePlayIcon();
+            updateMiniPlayer();
+          }).catch(() => {});
         } else {
           globalAudio.pause();
           isAudioPlaying = false;
+          updatePlayIcon();
+          updateMiniPlayer();
         }
-        updatePlayIcon();
-        updateMiniPlayer();
         return;
       }
       if (idx >= 0) { playIndex(idx); return; }
@@ -3304,14 +3400,29 @@
       const t = player.queue[player.index];
       if (globalAudio.paused) {
         if (currentAudioSrc !== t.src) { playIndex(player.index); return; }
-        globalAudio.play().catch(() => {});
-        isAudioPlaying = true;
+        const p = globalAudio.play();
+        if (p !== undefined) {
+          p.then(() => {
+            isAudioPlaying = true;
+            updatePlayIcon();
+            updateMiniPlayer();
+          }).catch(err => {
+            console.warn('Play failed', err);
+            isAudioPlaying = false;
+            updatePlayIcon();
+            updateMiniPlayer();
+          });
+        } else {
+          isAudioPlaying = true;
+          updatePlayIcon();
+          updateMiniPlayer();
+        }
       } else {
         globalAudio.pause();
         isAudioPlaying = false;
+        updatePlayIcon();
+        updateMiniPlayer();
       }
-      updatePlayIcon();
-      updateMiniPlayer();
     }
     function cyclePlayerSpeed() {
       const cur = player.speed || 1.0;
@@ -3338,7 +3449,8 @@
       const playEl = document.getElementById('mini-play');
       const speedEl = document.getElementById('mini-speed');
       const progEl = document.getElementById('mini-progress');
-      if (titleEl) titleEl.textContent = ch.name || t.title || 'TubeLM';
+      if (titleEl) titleEl.textContent = t.title || ch.name || 'TubeLM';
+      if (subEl) subEl.textContent = t.summary ? 'Spoken Summary' : (ch.category ? ((CATEGORY_CONFIG[ch.category] && CATEGORY_CONFIG[ch.category].label) || ch.category) : 'NotebookLM Podcast');
       const sameSrc = currentAudioSrc === t.src;
       let cur = 0;
       let dur = 0;
@@ -3456,7 +3568,7 @@
       const icon = document.getElementById('play-icon');
       if (!icon) return;
       const activeCh = (SITE_DATA.weeks[currentWeekKey]?.channels || []).find(c => c.id === selectedItemId);
-      const matchesCurrent = activeCh && activeCh.audio_url && activeCh.audio_url === currentAudioSrc;
+      const matchesCurrent = activeCh && ((activeCh.audio_url && activeCh.audio_url === currentAudioSrc) || (activeCh.summary_audio_url && activeCh.summary_audio_url === currentAudioSrc));
       if (isAudioPlaying && matchesCurrent) {
         icon.innerHTML = `<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>`;
       } else {

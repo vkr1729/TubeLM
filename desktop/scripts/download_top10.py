@@ -28,7 +28,7 @@ logger = logging.getLogger("download_top10")
 def find_latest_top10_digest() -> Path | None:
     """Find the most recent Top digest HTML file."""
     summaries_dir = paths.get_summaries_dir()
-    digests = sorted(summaries_dir.glob("*_TubeLM_Top_*_digest.html"))
+    digests = sorted([f for f in summaries_dir.glob("*.html") if paths.is_top_digest_file(f)])
     return digests[-1] if digests else None
 
 

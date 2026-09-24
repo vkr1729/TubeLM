@@ -20,6 +20,7 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
     private var timeObserverToken: Any?
     private var endOfPlaybackObserver: NSObjectProtocol?
     private var playbackFailedObserver: NSObjectProtocol?
+    private var statusObserverToken: NSKeyValueObservation?
 
     public override init() {
         super.init()
@@ -50,6 +51,19 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
                 self.isPlaying = false
                 self.updateNowPlayingInfo()
             }
+        }
+    }
+
+    deinit {
+        statusObserverToken?.invalidate()
+        if let token = timeObserverToken {
+            player?.removeTimeObserver(token)
+        }
+        if let observer = endOfPlaybackObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = playbackFailedObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 
@@ -99,11 +113,37 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         currentSource = source
 
         let trimmed = urlString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !trimmed.isEmpty,
-           let url = URL(string: trimmed, relativeTo: Self.feedBaseURL)?.absoluteURL,
-           url.scheme == "http" || url.scheme == "https" {
+        var resolvedURL: URL? = URL(string: trimmed, relativeTo: Self.feedBaseURL)?.absoluteURL
+        if resolvedURL == nil, let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            resolvedURL = URL(string: encoded, relativeTo: Self.feedBaseURL)?.absoluteURL
+        }
+
+        if let url = resolvedURL, url.scheme == "http" || url.scheme == "https" {
             ensureAudioSession()
+            statusObserverToken?.invalidate()
+            statusObserverToken = nil
             let item = AVPlayerItem(url: url)
+            statusObserverToken = item.observe(\.status, options: [.initial, .new]) { [weak self] observedItem, _ in
+                Task { @MainActor in
+                    guard let self = self, observedItem == self.player?.currentItem else { return }
+                    switch observedItem.status {
+                    case .failed:
+                        print("[AudioPlayerManager] Playback failed: \(String(describing: observedItem.error))")
+                        self.isPlaying = false
+                        self.updateNowPlayingInfo()
+                    case .readyToPlay:
+                        let total = observedItem.duration.seconds
+                        if total.isFinite && total > 0 {
+                            self.duration = total
+                        }
+                        self.updateNowPlayingInfo()
+                    case .unknown:
+                        break
+                    @unknown default:
+                        break
+                    }
+                }
+            }
             if player == nil {
                 player = AVPlayer(playerItem: item)
                 setupTimeObserver()
@@ -116,6 +156,8 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         } else {
             // No playable audio for this item: surface the state instead of
             // faking playback (a stuck "playing" indicator with no sound).
+            statusObserverToken?.invalidate()
+            statusObserverToken = nil
             isPlaying = false
             currentTime = 0
         }

@@ -593,9 +593,16 @@ async def async_main(
     total_initial_handlers = len(handlers)
     completed_source_keys: set[str] = set()
     successful_keys: list[str] = []
-    interim_top10_sent = False
     active_handlers = list(handlers)
     quota_deferred_until = None
+
+    # Stale-artifact sweep: Purge legacy interim digest artifacts if present
+    try:
+        for p in paths.get_summaries_dir().glob("*_interim_digest.*"):
+            p.unlink(missing_ok=True)
+            logger.info("Purged stale interim digest: %s", p.name)
+    except Exception:
+        logger.debug("Failed checking/purging stale interim digests.")
 
     for stage_idx, stage in enumerate(retry_stages):
         if not active_handlers:
@@ -792,28 +799,6 @@ async def async_main(
             len(active_handlers),
         )
 
-        # Check if Stage 0 qualified for Interim Top 20 Digest (>= 70% completed)
-        if stage_idx == 0 and top10_enabled and not interim_top10_sent and active_handlers:
-            completion_ratio = (
-                len(completed_source_keys) / total_initial_handlers
-                if total_initial_handlers > 0
-                else 1.0
-            )
-            if completion_ratio >= 0.70:
-                logger.info(
-                    "Pass 1 reached %.1f%% completion (%d/%d sources). Triggering Interim Top 20 Digest...",
-                    completion_ratio * 100,
-                    len(completed_source_keys),
-                    total_initial_handlers,
-                )
-                try:
-                    generate_and_send_top10_digest(cfg, top10_run_date, is_interim=True)
-                    interim_top10_sent = True
-                except Exception:
-                    logger.exception(
-                        "The interim Top 10 digest encountered an error; continuing with retries."
-                    )
-
         if not dry_run and completed_source_keys:
             try:
                 await _finish_background_artifacts(
@@ -826,6 +811,34 @@ async def async_main(
 
         if quota_deferred_until:
             break
+
+        # Dynamic retry threshold gating (evaluated cumulatively after background artifact advancement)
+        if not dry_run and total_initial_handlers > 0:
+            cumulative_rate = len(completed_source_keys) / total_initial_handlers
+            if stage_idx == 0 and cumulative_rate >= 0.80:
+                logger.info(
+                    "Iteration 1 reached %.1f%% success (%d/%d sources >= 80%% threshold). Proceeding to digest generation.",
+                    cumulative_rate * 100,
+                    len(completed_source_keys),
+                    total_initial_handlers,
+                )
+                break
+            elif stage_idx == 1 and cumulative_rate >= 0.70:
+                logger.info(
+                    "Iteration 2 reached %.1f%% success (%d/%d sources >= 70%% threshold). Proceeding to digest generation.",
+                    cumulative_rate * 100,
+                    len(completed_source_keys),
+                    total_initial_handlers,
+                )
+                break
+            elif stage_idx == 2:
+                logger.info(
+                    "Iteration 3 completed at %.1f%% success (%d/%d sources). Proceeding to digest generation unconditionally.",
+                    cumulative_rate * 100,
+                    len(completed_source_keys),
+                    total_initial_handlers,
+                )
+                break
 
     if quota_deferred_until:
         save_compute_deferral(
@@ -850,8 +863,19 @@ async def async_main(
         )
 
     if top10_enabled:
+        coverage_note = ""
+        if total_initial_handlers > 0 and len(completed_source_keys) < total_initial_handlers:
+            deferred_count = total_initial_handlers - len(completed_source_keys)
+            coverage_note = (
+                f"Digest compiled from {len(completed_source_keys)} of {total_initial_handlers} channels "
+                f"({deferred_count} channel{'s' if deferred_count != 1 else ''} unavailable or deferred)."
+            )
         try:
-            generate_and_send_top10_digest(cfg, top10_run_date, is_interim=False)
+            generate_and_send_top10_digest(
+                cfg,
+                top10_run_date,
+                coverage_note=coverage_note,
+            )
         except Exception:
             logger.exception(
                 "The optional Top 10 digest failed; its durable batch is preserved for retry."

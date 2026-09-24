@@ -174,8 +174,8 @@ async def test_interim_top10_triggered_at_seventy_percent_and_final_after_fast_r
     monkeypatch.setattr(main.asyncio, "sleep", _record_sleep)
 
     top10_calls = []
-    def _mock_top10(cfg, run_date, *, is_interim=False):
-        top10_calls.append({"run_date": run_date, "is_interim": is_interim})
+    def _mock_top10(cfg, run_date, *, coverage_note=""):
+        top10_calls.append({"run_date": run_date, "coverage_note": coverage_note})
         return True
     monkeypatch.setattr(main, "generate_and_send_top10_digest", _mock_top10)
     monkeypatch.setattr(main, "prepare_top10_batch", lambda d: d)
@@ -183,10 +183,8 @@ async def test_interim_top10_triggered_at_seventy_percent_and_final_after_fast_r
     completed = await main.async_main(dry_run=False, skip_email=False)
 
     assert completed is True
-    # Verify interim top10 was triggered after pass 1 (7/10 = 70%)
-    assert len(top10_calls) == 2
-    assert top10_calls[0]["is_interim"] is True
-    assert top10_calls[1]["is_interim"] is False
+    # Verify interim top10 was eliminated; exactly one final Top digest sent
+    assert len(top10_calls) == 1
 
     # Verify retry sleep delay was fast (30s), NOT 3600s!
     assert 30 in sleep_delays

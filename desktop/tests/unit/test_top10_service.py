@@ -202,24 +202,19 @@ def test_generate_and_send_top10_digest_two_pass_flow(monkeypatch, tmp_path):
 
     cfg = SimpleNamespace(top_digest_count=20, download_top10_videos=False)
 
-    # 1. First Pass: Interim edition
-    res_interim = top10_service.generate_and_send_top10_digest(cfg, "2026-09-04", is_interim=True)
-    assert res_interim is True
+    # Single Pass: Final edition with coverage_note
+    res = top10_service.generate_and_send_top10_digest(
+        cfg, "2026-09-04", coverage_note="Built from 1 of 2 channels"
+    )
+    assert res is True
     assert len(sent_emails) == 1
-    assert sent_emails[0]["is_interim"] is True
+    assert sent_emails[0].get("coverage_note") == "Built from 1 of 2 channels"
 
-    batch = json.loads(batch_path.read_text())
-    assert batch.get("interim_sent_at") is not None
-    assert batch.get("sent_at") is None
-    assert (summaries_dir / "2026-09-04_TubeLM_Top_1_interim_digest.html").exists()
-
-    # 2. Final Pass without new candidates -> skips duplicate
-    res_final = top10_service.generate_and_send_top10_digest(cfg, "2026-09-04", is_interim=False)
-    assert res_final is True
-    assert len(sent_emails) == 1  # Not sent again!
     batch = json.loads(batch_path.read_text())
     assert batch.get("sent_at") is not None
-    assert batch.get("status") == "final_identical_to_interim"
+    assert batch.get("status") == "sent"
+    assert (summaries_dir / "2026-09-04_TubeLM_Top_1_digest.html").exists()
+    assert not (summaries_dir / "2026-09-04_TubeLM_Top_1_interim_digest.html").exists()
 
 
 def test_generate_and_send_top10_digest_final_with_new_candidates(monkeypatch, tmp_path):
@@ -235,7 +230,14 @@ def test_generate_and_send_top10_digest_final_with_new_candidates(monkeypatch, t
         "summary_text": "## Video 1\n\nSummary 1.",
         "videos": [{"title": "Video 1", "url": "https://www.youtube.com/watch?v=11111111111", "published": "2026-09-04"}],
     }
+    channel2 = {
+        "channel_name": "Channel 2",
+        "source_type": "youtube",
+        "summary_text": "## Video 2\n\nSummary 2.",
+        "videos": [{"title": "Video 2", "url": "https://www.youtube.com/watch?v=22222222222", "published": "2026-09-04"}],
+    }
     top10_service.record_top10_source("youtube:1", channel1, "2026-09-04")
+    top10_service.record_top10_source("youtube:2", channel2, "2026-09-04")
 
     sent_emails = []
     monkeypatch.setattr(top10_service, "send_top10_email", lambda sel, cfg: sent_emails.append(sel))
@@ -253,28 +255,12 @@ def test_generate_and_send_top10_digest_final_with_new_candidates(monkeypatch, t
 
     cfg = SimpleNamespace(top_digest_count=20, download_top10_videos=False)
 
-    # Interim pass
-    top10_service.generate_and_send_top10_digest(cfg, "2026-09-04", is_interim=True)
+    res = top10_service.generate_and_send_top10_digest(cfg, "2026-09-04")
+    assert res is True
     assert len(sent_emails) == 1
-    assert sent_emails[0]["is_interim"] is True
-
-    # Now a retried channel succeeds and adds a new candidate!
-    channel2 = {
-        "channel_name": "Channel 2",
-        "source_type": "youtube",
-        "summary_text": "## Video 2\n\nSummary 2.",
-        "videos": [{"title": "Video 2", "url": "https://www.youtube.com/watch?v=22222222222", "published": "2026-09-04"}],
-    }
-    top10_service.record_top10_source("youtube:2", channel2, "2026-09-04")
-
-    # Final pass -> sends Final Edition with both channels!
-    res_final = top10_service.generate_and_send_top10_digest(cfg, "2026-09-04", is_interim=False)
-    assert res_final is True
-    assert len(sent_emails) == 2
-    assert sent_emails[1]["is_interim"] is False
-    assert sent_emails[1]["is_final_after_interim"] is True
-    assert sent_emails[1]["candidate_count"] == 2
+    assert sent_emails[0]["candidate_count"] == 2
     assert (summaries_dir / "2026-09-04_TubeLM_Top_2_digest.html").exists()
+    assert not any("_interim" in p.name for p in summaries_dir.iterdir())
 
 
 def test_get_agy_bin_fallbacks(monkeypatch, tmp_path):
