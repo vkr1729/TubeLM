@@ -2768,8 +2768,11 @@
                   <h1 class="view-heading-title">Editorial Picks</h1>
                   <div class="view-heading-meta">Top ${items.length} curated videos · ~${weekData.total_read_minutes || 50} min read</div>
                 </div>
-                <div class="hidden sm:block">
-                  ${seenCount > 0 ? `<button onclick="toggleHideSeen()" class="btn-subnav-pill">${hideSeen ? `Show Seen (${seenCount})` : `Hide Seen (${seenCount})`}</button>` : ''}
+                <div class="flex items-center gap-2">
+                  ${top20.playlist_url ? `<a href="${escapeQuotes(top20.playlist_url)}" target="_blank" rel="noopener noreferrer" class="btn-subnav-pill inline-flex items-center gap-1.5 text-red-500 font-semibold" title="Watch Playlist on YouTube"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span>Watch on YouTube</span></a>` : ''}
+                  <div class="hidden sm:block">
+                    ${seenCount > 0 ? `<button onclick="toggleHideSeen()" class="btn-subnav-pill">${hideSeen ? `Show Seen (${seenCount})` : `Hide Seen (${seenCount})`}</button>` : ''}
+                  </div>
                 </div>
               </div>
             </div>

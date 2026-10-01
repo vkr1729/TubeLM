@@ -531,6 +531,22 @@ def _rank_render_and_send(
     selection["run_date"] = run_date
     if coverage_note:
         selection["coverage_note"] = coverage_note
+
+    if getattr(cfg, "publish_youtube_playlist", False):
+        try:
+            from youtube_playlist_service import create_weekly_playlist
+            privacy = getattr(cfg, "youtube_playlist_privacy", "public")
+            playlist_record = create_weekly_playlist(
+                run_date,
+                selection.get("items", []),
+                privacy_status=privacy,
+                cfg=cfg,
+            )
+            selection["playlist_url"] = playlist_record.get("playlist_url", "")
+            selection["playlist_id"] = playlist_record.get("playlist_id", "")
+        except Exception as exc:
+            logger.warning("YouTube playlist publishing failed; continuing with digest delivery: %s", exc)
+
     item_count = len(selection.get("items", []))
     output_path = (
         paths.get_summaries_dir() / f"{run_date}_TubeLM_Top_{item_count}_digest.html"

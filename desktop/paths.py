@@ -160,9 +160,29 @@ def get_top_article_videos_file() -> Path:
     return get_data_dir() / "top_article_videos.json"
 
 
+def get_youtube_token_file() -> Path:
+    return get_data_dir() / "youtube_token.json"
+
+
+def get_youtube_client_secret_file() -> Path:
+    data_dir_file = get_data_dir() / "client_secret.json"
+    if data_dir_file.exists():
+        return data_dir_file
+    return PROJECT_DIR / "client_secret.json"
+
+
+def get_youtube_playlists_file() -> Path:
+    return get_data_dir() / "youtube_playlists.json"
+
+
 def ensure_data_dir() -> None:
     """Create runtime directories and seed missing personal configuration."""
-    get_data_dir().mkdir(parents=True, exist_ok=True)
+    data_dir = get_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(data_dir, 0o700)
+    except OSError:
+        pass
     get_summaries_dir().mkdir(exist_ok=True)
     get_audio_dir().mkdir(exist_ok=True)
     get_site_dir().mkdir(exist_ok=True)

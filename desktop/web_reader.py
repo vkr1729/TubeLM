@@ -327,9 +327,18 @@ def parse_top20_digest(top20_file: Path) -> dict[str, Any]:
             })
 
     items.sort(key=lambda x: x["rank"])
+    playlist_elem = soup.find("a", href=lambda h: h and "youtube.com/playlist?list=" in h)
+    playlist_url = playlist_elem["href"] if playlist_elem else ""
+    playlist_id = ""
+    if playlist_url:
+        m = re.search(r"[?&]list=([A-Za-z0-9_-]+)", playlist_url)
+        if m:
+            playlist_id = m.group(1)
     return {
         "items": items,
         "candidate_count": len(items),
+        "playlist_url": playlist_url,
+        "playlist_id": playlist_id,
     }
 
 
@@ -1078,7 +1087,12 @@ def build_reader_site(
                                         if k and k not in seen_sidecar_keys:
                                             seen_sidecar_keys.add(k)
                                             deduped_sidecar.append(it)
-                                    top20_data = {"items": deduped_sidecar, "candidate_count": tdata.get("candidate_count", len(deduped_sidecar))}
+                                    top20_data = {
+                                        "items": deduped_sidecar,
+                                        "candidate_count": tdata.get("candidate_count", len(deduped_sidecar)),
+                                        "playlist_url": tdata.get("playlist_url", ""),
+                                        "playlist_id": tdata.get("playlist_id", ""),
+                                    }
                                     continue
                             except (OSError, json.JSONDecodeError):
                                 pass
@@ -1150,7 +1164,7 @@ def build_reader_site(
                     seen_final_keys.add(k)
                     deduped_final.append(it)
             top20_data["items"] = deduped_final
-            top20_data["candidate_count"] = len(deduped_final)
+            top20_data["candidate_count"] = top20_data.get("candidate_count") or len(deduped_final)
 
         week_audio_map = {}
         for ch in channels:
@@ -1252,7 +1266,12 @@ def build_reader_site(
         "schema_version": 1,
         "built_at": site_data["built_at"],
         "run_date": "",
-        "top20": {"items": mobile_items, "candidate_count": len(mobile_items)},
+        "top20": {
+            "items": mobile_items,
+            "candidate_count": len(mobile_items),
+            "playlist_url": raw_top20.get("playlist_url", ""),
+            "playlist_id": raw_top20.get("playlist_id", ""),
+        },
         "channels": [_normalize_mobile_channel(ch) for ch in channels_list
                      if isinstance(ch, dict)],
     }

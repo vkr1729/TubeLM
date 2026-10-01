@@ -196,6 +196,12 @@ class Config:
     tts_voice: str = "en-US-AndrewMultilingualNeural"
     tts_rate: str = "+0%"
 
+    # YouTube weekly playlist publishing
+    publish_youtube_playlist: bool = False
+    youtube_playlist_privacy: str = "public"
+    youtube_client_id: str = ""
+    youtube_client_secret: str = ""
+
     # Derived: use SSL (port 465) or STARTTLS (port 587)
     use_ssl: bool = field(init=False)
 
@@ -250,6 +256,12 @@ def load_config() -> Config:
         else paths.get_top10_previous_video_download_dir()
     )
 
+    raw_privacy = (_get_optional("YOUTUBE_PLAYLIST_PRIVACY") or "public").strip().lower()
+    if raw_privacy not in {"public", "unlisted", "private"}:
+        raise ConfigurationError(
+            f"YOUTUBE_PLAYLIST_PRIVACY must be one of 'public', 'unlisted', 'private', got: {raw_privacy!r}"
+        )
+
     return Config(
         smtp_server=_get_optional("SMTP_SERVER"),
         smtp_port=smtp_port,
@@ -274,4 +286,8 @@ def load_config() -> Config:
         notebooklm_browser=_get_optional("NOTEBOOKLM_BROWSER", "chrome"),
         tts_voice=_get_optional("TTS_VOICE", "en-US-AndrewMultilingualNeural"),
         tts_rate=_get_optional("TTS_RATE", "+0%"),
+        publish_youtube_playlist=_get_bool("PUBLISH_YOUTUBE_PLAYLIST", False),
+        youtube_playlist_privacy=raw_privacy,
+        youtube_client_id=_get_optional("YOUTUBE_CLIENT_ID", ""),
+        youtube_client_secret=_get_optional("YOUTUBE_CLIENT_SECRET", ""),
     )

@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -978,7 +979,93 @@ def main() -> None:
         type=str,
         help="Comma-separated list of source state keys or names to run selectively.",
     )
+    parser.add_argument(
+        "--youtube-auth",
+        action="store_true",
+        help="Run the interactive one-time Google OAuth authorization for YouTube playlist publishing.",
+    )
+    parser.add_argument(
+        "--publish-playlist",
+        nargs="*",
+        metavar="RUN_DATE",
+        help="Publish or backfill YouTube playlist(s) for specified date(s) (e.g. 2026-09-18 2026-09-25 or 'last-2-weeks').",
+    )
     args = parser.parse_args()
+
+    if args.youtube_auth:
+        from youtube_playlist_service import run_interactive_oauth_login
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = None
+        try:
+            run_interactive_oauth_login(cfg)
+        except Exception as exc:
+            print(f"Error during YouTube authorization: {exc}")
+            sys.exit(1)
+        sys.exit(0)
+
+    if args.publish_playlist is not None:
+        from youtube_playlist_service import backfill_playlists
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = None
+        raw_dates = list(args.publish_playlist)
+        run_dates = []
+        if not raw_dates or "last-2-weeks" in raw_dates:
+            summaries_dir = paths.get_summaries_dir()
+            top_files = sorted(summaries_dir.glob("*_TubeLM_Top_*_digest.json"), reverse=True)
+            detected_dates = []
+            for tf in top_files:
+                m = re.match(r"^(\d{4}-\d{2}-\d{2})_", tf.name)
+                if m and m.group(1) not in detected_dates:
+                    detected_dates.append(m.group(1))
+                if len(detected_dates) >= 2:
+                    break
+            run_dates.extend(detected_dates)
+            raw_dates = [d for d in raw_dates if d != "last-2-weeks"]
+
+        run_dates.extend(raw_dates)
+        run_dates = sorted(set(run_dates))
+
+        valid_dates = [d for d in run_dates if re.match(r"^\d{4}-\d{2}-\d{2}$", d)]
+        invalid_dates = [d for d in run_dates if not re.match(r"^\d{4}-\d{2}-\d{2}$", d)]
+        if invalid_dates:
+            print(f"Warning: Skipping invalid date formats: {', '.join(invalid_dates)}")
+
+        if not valid_dates:
+            print("No valid run dates found to backfill.")
+            sys.exit(1)
+
+        print(f"Publishing YouTube playlist(s) for run dates: {', '.join(valid_dates)}")
+        try:
+            results = backfill_playlists(valid_dates, cfg=cfg)
+            published_dates = {res.get("run_date") for res in results}
+            skipped_dates = [d for d in valid_dates if d not in published_dates]
+
+            print(f"Done! Published/verified {len(results)} playlist(s):")
+            for res in results:
+                print(f"  - {res.get('title')}: {res.get('playlist_url')}")
+            if skipped_dates:
+                print(f"  - Skipped (no items or error): {', '.join(skipped_dates)}")
+
+            try:
+                from web_reader import build_reader_site
+                build_reader_site(
+                    paths.get_summaries_dir(),
+                    paths.get_audio_dir(),
+                    paths.get_site_dir(),
+                    paths.get_sources_file(),
+                    compress_audio=getattr(cfg, "compress_audio", False) if cfg else False,
+                )
+                print("Rebuilt static Web Reader with updated playlist links.")
+            except Exception as e:
+                logger.warning("Could not rebuild web reader: %s", e)
+        except Exception as exc:
+            print(f"Error publishing playlists: {exc}")
+            sys.exit(1)
+        sys.exit(0)
 
     if args.gui:
         try:

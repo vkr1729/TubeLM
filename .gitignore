@@ -4,6 +4,8 @@
 !.env.example
 sources.json
 channels.json
+client_secret.json
+**/client_secret.json
 
 # Local runtime output
 state.json
@@ -46,4 +48,5 @@ HANDOFF_REVIEW_PROMPT.md
 .commandcode/
 .kimchi/
 .playwright-mcp/
+.workflow/
 

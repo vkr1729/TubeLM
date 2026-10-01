@@ -203,6 +203,8 @@ def _render_top10_text(selection: dict) -> str:
         f"TUBELM — EDITOR'S TOP {len(items)}",
         f"{selection.get('run_date', '')} · selected from {selection.get('candidate_count', len(items))} new items",
     ]
+    if selection.get("playlist_url"):
+        lines.append(f"YouTube Playlist: {selection['playlist_url']}")
     if coverage_note:
         lines.append(f"Note: {coverage_note}")
     lines.append("")

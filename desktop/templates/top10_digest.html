@@ -47,6 +47,9 @@
               <h1 class="hero-title" style="margin:18px 0 0;color:#f8f8f4;font-size:48px;line-height:49px;letter-spacing:-.05em;font-weight:780;">The Editor's<br>Top {{ selection['items'] | length }}</h1>
               <div style="margin-top:24px;">
                 <a class="cta" href="https://vkr1729.github.io/TubeLM/" target="_blank" style="display:inline-block;padding:13px 22px;background:#6366f1;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;line-height:18px;font-weight:800;letter-spacing:.02em;">Open Full Web Reader &amp; Audio Overviews &nbsp;→</a>
+                {% if selection.playlist_url %}
+                <a class="cta" href="{{ selection.playlist_url }}" target="_blank" style="display:inline-block;margin-left:10px;padding:13px 22px;background:#cc0000;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;line-height:18px;font-weight:800;letter-spacing:.02em;">&#9654; Watch Playlist on YouTube &nbsp;→</a>
+                {% endif %}
               </div>
             </td>
           </tr>
