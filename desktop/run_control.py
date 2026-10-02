@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+DEFAULT_RESUME_MAX_AGE_HOURS = 3.0
 
 
 class PipelineAlreadyRunningError(RuntimeError):
@@ -127,12 +131,39 @@ def save_resume_request(path: Path, request: dict) -> None:
     _atomic_write_json(Path(path), payload)
 
 
-def load_resume_request(path: Path) -> dict | None:
+def load_resume_request(
+    path: Path,
+    max_age_hours: float = DEFAULT_RESUME_MAX_AGE_HOURS,
+) -> dict | None:
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+
+    saved_at_str = data.get("saved_at")
+    if saved_at_str and max_age_hours > 0:
+        try:
+            saved_dt = datetime.fromisoformat(str(saved_at_str).replace("Z", "+00:00"))
+            if saved_dt.tzinfo is None:
+                saved_dt = saved_dt.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            age_seconds = (now - saved_dt).total_seconds()
+            if age_seconds > max_age_hours * 3600:
+                logger.warning(
+                    "Resume request in %s is stale (saved at %s, age %.1f hours > %.1f max hours). Discarding.",
+                    path,
+                    saved_at_str,
+                    age_seconds / 3600,
+                    max_age_hours,
+                )
+                clear_resume_request(path)
+                return None
+        except Exception:
+            pass
+
+    return data
 
 
 def clear_resume_request(path: Path) -> None:
@@ -155,7 +186,7 @@ def save_compute_deferral(path: Path, not_before: datetime, reason: str) -> None
 
 def load_compute_deferral(path: Path) -> dict | None:
     """Load a valid future compute deferral, deleting stale or invalid markers."""
-    marker = load_resume_request(path)
+    marker = load_resume_request(path, max_age_hours=0)
     if not marker:
         return None
     try:

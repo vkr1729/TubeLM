@@ -921,6 +921,54 @@ async def async_main(
     return True
 
 
+def is_scheduled_run_completed_recently(
+    run_date: str | None = None,
+    max_age_hours: float = 36.0,
+) -> bool:
+    """Return True if a scheduled run has completed for run_date or within max_age_hours."""
+    now = datetime.now(timezone.utc)
+
+    # Check 1: Top 10/20 batch marked sent_at
+    batch_file = paths.get_data_dir() / "top10_digest_batch.json"
+    if batch_file.exists():
+        try:
+            batch = json.loads(batch_file.read_text(encoding="utf-8"))
+            if isinstance(batch, dict) and batch.get("sent_at"):
+                # Exact date match
+                if run_date and batch.get("run_date") == run_date:
+                    return True
+                # Sliding window match across midnight
+                sent_at_str = batch.get("sent_at")
+                if sent_at_str and max_age_hours > 0:
+                    sent_dt = datetime.fromisoformat(str(sent_at_str).replace("Z", "+00:00"))
+                    if sent_dt.tzinfo is None:
+                        sent_dt = sent_dt.replace(tzinfo=timezone.utc)
+                    if (now - sent_dt).total_seconds() < max_age_hours * 3600:
+                        return True
+        except Exception:
+            pass
+
+    # Check 2: HTML Top digest in summaries dir
+    summaries_dir = paths.get_summaries_dir()
+    if summaries_dir.exists():
+        if run_date and list(summaries_dir.glob(f"{run_date}_TubeLM_Top_*_digest.html")):
+            return True
+        if max_age_hours > 0:
+            for f in summaries_dir.glob("*_TubeLM_Top_*_digest.html"):
+                try:
+                    mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
+                    if (now - mtime).total_seconds() < max_age_hours * 3600:
+                        return True
+                except Exception:
+                    pass
+
+    return False
+
+
+# Backward-compatible alias
+is_scheduled_run_completed_for_date = is_scheduled_run_completed_recently
+
+
 def main() -> None:
     paths.ensure_data_dir()
     parser = argparse.ArgumentParser(
@@ -1114,6 +1162,12 @@ def main() -> None:
         wait_for_lock = True
         logger.info("Resuming the durable TubeLM request from %s.", request_file)
     elif args.scheduled:
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if is_scheduled_run_completed_recently(today_str):
+            logger.info(
+                "TubeLM weekly scheduled run was already completed recently. Skipping duplicate run.",
+            )
+            return
         request_file = scheduled_file
         resume_request = load_resume_request(scheduled_file)
         if not resume_request:
@@ -1248,6 +1302,10 @@ def main() -> None:
                     if completed:
                         clear_resume_request(scheduled_file)
                         shutdown_after_run = shutdown_after_run or scheduled_shutdown
+        except KeyboardInterrupt:
+            logger.info("Run cancelled by user (KeyboardInterrupt). Clearing resume marker.")
+            clear_resume_request(request_file)
+            sys.exit(130)
         finally:
             lock.release()
     except PipelineAlreadyRunningError as exc:

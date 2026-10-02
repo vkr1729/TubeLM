@@ -61,6 +61,27 @@ def test_resume_request_round_trip(tmp_path):
     assert load_resume_request(request_path) is None
 
 
+def test_resume_request_expires_stale_marker(tmp_path):
+    request_path = tmp_path / "resume_stale.json"
+    save_resume_request(
+        request_path,
+        {"sources_filter": "Aevy TV", "skip_email": False},
+    )
+    # Marker fresh (< 3h) should load
+    assert load_resume_request(request_path, max_age_hours=3.0) is not None
+
+    # Artificially age the saved_at timestamp to 4 hours ago
+    import json
+    data = json.loads(request_path.read_text(encoding="utf-8"))
+    stale_time = datetime.now(timezone.utc) - timedelta(hours=4)
+    data["saved_at"] = stale_time.isoformat()
+    request_path.write_text(json.dumps(data), encoding="utf-8")
+
+    # Now load_resume_request should detect stale marker, clear it, and return None
+    assert load_resume_request(request_path, max_age_hours=3.0) is None
+    assert request_path.exists() is False
+
+
 def test_compute_deferral_expires_cleanly(tmp_path):
     marker_path = tmp_path / "compute_deferral.json"
     future = datetime.now(timezone.utc) + timedelta(hours=5)

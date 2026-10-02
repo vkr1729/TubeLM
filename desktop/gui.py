@@ -1673,6 +1673,15 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 echo "=== TubeLM Weekly Sync: $(date) ==="
 echo "Log file: $LOG_FILE"
 
+# Check if a weekly digest has already completed recently (within 36h, safe across midnight)
+TODAY=$(date +%Y-%m-%d)
+SUMMARIES_DIR="{paths.get_data_dir()}/summaries"
+RECENT_DIGEST=$(find "$SUMMARIES_DIR" -maxdepth 1 -name "*_TubeLM_Top_*_digest.html" -mmin -2160 -print -quit 2>/dev/null)
+if [ -n "$RECENT_DIGEST" ] || compgen -G "$SUMMARIES_DIR/${TODAY}_TubeLM_Top_*_digest.html" > /dev/null; then
+    echo "TubeLM weekly digest was already completed recently (${{RECENT_DIGEST:-$TODAY}}). Skipping run to preserve existing digest."
+    exit 0
+fi
+
 # Wait for network (max 60s)
 echo "Checking network connectivity..."
 for i in $(seq 1 12); do
@@ -1733,9 +1742,6 @@ Restart=on-failure
 RestartSec=15min
 StandardOutput=journal
 StandardError=journal
-
-[Install]
-WantedBy=default.target
 """
             
             service_path.write_text(service_content, encoding="utf-8")
@@ -1755,7 +1761,6 @@ WantedBy=default.target
             except Exception as linger_err:
                 logger.warning("Could not enable loginctl user lingering: %s", linger_err)
             subprocess.run(["systemctl", "--user", "enable", "--now", "tubelm-sync.timer"], capture_output=True, check=True)
-            subprocess.run(["systemctl", "--user", "enable", "tubelm-resume.service"], capture_output=True, check=True)
             
             return jsonify({"success": True})
     except Exception as e:

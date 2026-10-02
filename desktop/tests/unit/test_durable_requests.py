@@ -10,7 +10,13 @@ import main
 def _configure_request_paths(tmp_path, monkeypatch):
     resume_file = tmp_path / "resume_request.json"
     scheduled_file = tmp_path / "scheduled_request.json"
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    summaries_dir = data_dir / "summaries"
+    summaries_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(main.paths, "ensure_data_dir", lambda: None)
+    monkeypatch.setattr(main.paths, "get_data_dir", lambda: data_dir)
+    monkeypatch.setattr(main.paths, "get_summaries_dir", lambda: summaries_dir)
     monkeypatch.setattr(main.paths, "get_pipeline_lock_file", lambda: tmp_path / "pipeline.lock")
     monkeypatch.setattr(main.paths, "get_resume_request_file", lambda: resume_file)
     monkeypatch.setattr(main.paths, "get_scheduled_request_file", lambda: scheduled_file)
@@ -120,3 +126,81 @@ def test_resume_waits_for_compute_refresh_without_running_pipeline(tmp_path, mon
 
     assert exc_info.value.code == 75
     assert resume_file.exists() is True
+
+
+def test_scheduled_request_skips_if_already_completed_today(tmp_path, monkeypatch):
+    _, scheduled_file = _configure_request_paths(tmp_path, monkeypatch)
+    data_dir = tmp_path / "data"
+    batch_file = data_dir / "top10_digest_batch.json"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    import json
+    batch_file.write_text(
+        json.dumps({
+            "run_date": today,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "sources": {},
+        }),
+        encoding="utf-8",
+    )
+
+    calls = []
+
+    async def complete_run(**_kwargs):
+        calls.append(True)
+        return True
+
+    monkeypatch.setattr(main, "async_main", complete_run)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--scheduled"])
+
+    # main() should detect today's digest completed and exit cleanly without calling async_main
+    main.main()
+
+    assert calls == []
+    assert scheduled_file.exists() is False
+
+
+def test_scheduled_request_skips_across_midnight_if_completed_within_36_hours(tmp_path, monkeypatch):
+    _, scheduled_file = _configure_request_paths(tmp_path, monkeypatch)
+    data_dir = tmp_path / "data"
+    batch_file = data_dir / "top10_digest_batch.json"
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    import json
+    # Run was completed 10 hours ago (e.g. Friday evening, now it is Saturday early morning)
+    batch_file.write_text(
+        json.dumps({
+            "run_date": yesterday,
+            "sent_at": (datetime.now(timezone.utc) - timedelta(hours=10)).isoformat(),
+            "sources": {},
+        }),
+        encoding="utf-8",
+    )
+
+    calls = []
+
+    async def complete_run(**_kwargs):
+        calls.append(True)
+        return True
+
+    monkeypatch.setattr(main, "async_main", complete_run)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--scheduled"])
+
+    main.main()
+
+    assert calls == []
+    assert scheduled_file.exists() is False
+
+
+def test_keyboard_interrupt_clears_resume_marker(tmp_path, monkeypatch):
+    resume_file, _ = _configure_request_paths(tmp_path, monkeypatch)
+
+    async def interrupt_run(**_kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(main, "async_main", interrupt_run)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--sources", "Aevy TV"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main.main()
+
+    assert exc_info.value.code == 130
+    assert resume_file.exists() is False

@@ -123,3 +123,11 @@ the Hardening patch section below; no pipeline behavior or config schema changed
 ## Run and limitations
 - **Run:** Triggered automatically at the end of every weekly TubeLM sync, or manually via `python desktop/web_reader.py`.
 - **Limitations:** Automated GitHub Pages push requires git push permissions for the repository. Works offline locally via the desktop dashboard at all times.
+
+## Testing Best Practices & Operational Rules (for Agents & Developers)
+See [AGENTS.md](AGENTS.md) for full details.
+1. **Never run bare `python desktop/main.py`**: Always use `--dry-run` or `--sources "Channel Name" --skip-email` to avoid kicking off full production runs, consuming quotas, or writing persistent resume markers.
+2. **Never leave `~/.tubelm/resume_request.json` after cancelling**: Interrupted test runs must be cleaned up (`rm -f ~/.tubelm/resume_request.json`). A 3-hour TTL safeguard is now enforced in `run_control.py`.
+3. **Pipeline Orchestration Precedence**: The weekly chain runs on Saturday evenings at 18:00 via `friday-overnight.service` (Instagram Digest first, then TubeLM). `tubelm-resume.service` must remain disabled in user systemd.
+4. **Recent Completion Guard (36h Midnight-Safe Window)**: `--scheduled` automatically exits cleanly if a Top 20 digest has already been completed within the last 36 hours, preventing duplicate runs even if Instagram Digest runs past midnight into Saturday morning.
+5. **Secret Protection**: Never view, print, or expose `.env`. Always reference `.env.example`.

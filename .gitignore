@@ -40,7 +40,6 @@ worker/.wrangler/
 .idea/
 
 # Local agent instructions and tooling
-AGENTS.md
 CLAUDE.md
 GEMINI.md
 HANDOFF_REVIEW_PROMPT.md
