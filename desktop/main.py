@@ -1194,6 +1194,9 @@ def main() -> None:
         shutdown_after_run = args.shutdown_after_run
         artifacts_only = False
 
+    if dry_run or skip_email:
+        os.environ["SKIP_EMAIL"] = "1"
+
     if dry_run:
         completed = asyncio.run(
             async_main(dry_run=True, skip_email=skip_email, channels_filter=sources_filter)

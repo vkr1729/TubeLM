@@ -10,6 +10,22 @@ def prevent_gh_pages_deploy_in_tests(monkeypatch):
     monkeypatch.setattr(web_reader, "deploy_to_gh_pages", lambda *args, **kwargs: True)
 
 
+@pytest.fixture(autouse=True)
+def prevent_email_sending_in_tests(monkeypatch, request):
+    """Safety guard: prevent any automated test from sending live emails."""
+    mod_name = request.module.__name__ if hasattr(request, "module") and request.module else ""
+    if "test_email_service" not in mod_name:
+        try:
+            import email_service
+            monkeypatch.setattr(email_service, "send_channel_email", lambda *args, **kwargs: None)
+            monkeypatch.setattr(email_service, "send_top10_email", lambda *args, **kwargs: None)
+            monkeypatch.setattr(email_service, "send_artifact_completion_email", lambda *args, **kwargs: None)
+            monkeypatch.setattr(email_service, "verify_smtp_connection", lambda *args, **kwargs: None)
+        except Exception:
+            pass
+        monkeypatch.setenv("SKIP_EMAIL", "1")
+
+
 @pytest.fixture
 def fixtures_dir():
     return Path(__file__).parent / "fixtures"

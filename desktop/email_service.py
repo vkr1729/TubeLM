@@ -294,6 +294,10 @@ SMTP_TIMEOUT_SECONDS = 15
 
 
 def _send_message(msg: MIMEMultipart, cfg: Config) -> None:
+    import os
+    if os.getenv("SKIP_EMAIL", "").strip().lower() in ("1", "true", "yes"):
+        logger.info("Email delivery skipped (SKIP_EMAIL active).")
+        return
     if cfg.use_ssl:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(cfg.smtp_server, cfg.smtp_port, context=context, timeout=SMTP_TIMEOUT_SECONDS) as server:
@@ -441,6 +445,10 @@ def verify_smtp_connection(cfg: Config) -> None:
         smtplib.SMTPException: On SMTP or authentication failure.
         OSError: On network-level connection failures.
     """
+    import os
+    if os.getenv("SKIP_EMAIL", "").strip().lower() in ("1", "true", "yes"):
+        logger.info("SMTP verification skipped (SKIP_EMAIL active).")
+        return
     logger.info(
         "Verifying SMTP connection to %s:%d (%s)…",
         cfg.smtp_server,
