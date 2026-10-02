@@ -1677,7 +1677,7 @@ echo "Log file: $LOG_FILE"
 TODAY=$(date +%Y-%m-%d)
 SUMMARIES_DIR="{paths.get_data_dir()}/summaries"
 RECENT_DIGEST=$(find "$SUMMARIES_DIR" -maxdepth 1 -name "*_TubeLM_Top_*_digest.html" -mmin -2160 -print -quit 2>/dev/null)
-if [ -n "$RECENT_DIGEST" ] || compgen -G "$SUMMARIES_DIR/${TODAY}_TubeLM_Top_*_digest.html" > /dev/null; then
+if [ -n "$RECENT_DIGEST" ] || compgen -G "$SUMMARIES_DIR/${{TODAY}}_TubeLM_Top_*_digest.html" > /dev/null; then
     echo "TubeLM weekly digest was already completed recently (${{RECENT_DIGEST:-$TODAY}}). Skipping run to preserve existing digest."
     exit 0
 fi

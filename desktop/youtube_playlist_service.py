@@ -17,7 +17,6 @@ import logging
 import os
 import re
 import secrets
-import socket
 import threading
 import time
 import urllib.parse
@@ -404,7 +403,7 @@ def run_interactive_oauth_login(cfg: Any = None) -> bool:
         token_record["channel_title"] = ch_info.get("title", "")
         token_record["channel_custom_url"] = ch_info.get("custom_url", "")
         save_token(token_record)
-        print(f"\n✅ YouTube authorization successful!")
+        print("\n✅ YouTube authorization successful!")
         print(f"   Connected Channel: {ch_info.get('title')} ({ch_info.get('custom_url') or ch_info.get('id')})")
         print(f"   Tokens saved to {paths.get_youtube_token_file()}.\n")
     else:

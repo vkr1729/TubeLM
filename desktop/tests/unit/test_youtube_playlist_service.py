@@ -2,7 +2,6 @@
 
 import json
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,7 +17,6 @@ from youtube_playlist_service import (
     load_playlist_history,
     load_token,
     refresh_access_token,
-    save_playlist_history,
     save_token,
 )
 
