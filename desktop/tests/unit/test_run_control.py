@@ -82,6 +82,28 @@ def test_resume_request_expires_stale_marker(tmp_path):
     assert request_path.exists() is False
 
 
+def test_resume_request_corrupt_saved_at_clears_and_returns_none(tmp_path):
+    request_path = tmp_path / "resume.json"
+    request_path.write_text('{"sources_filter": "Chan", "saved_at": "NOT-A-DATE"}', encoding="utf-8")
+    assert load_resume_request(request_path, max_age_hours=3.0) is None
+    assert request_path.exists() is False
+
+
+def test_resume_request_missing_saved_at_falls_back_to_mtime(tmp_path):
+    import os
+    request_path = tmp_path / "resume.json"
+    request_path.write_text('{"sources_filter": "Chan"}', encoding="utf-8")
+    # Fresh file mtime -> should load
+    assert load_resume_request(request_path, max_age_hours=3.0) is not None
+    assert request_path.exists() is True
+
+    # Set mtime to 4 hours ago -> should expire and clear
+    stale_mtime = time.time() - (4 * 3600)
+    os.utime(str(request_path), (stale_mtime, stale_mtime))
+    assert load_resume_request(request_path, max_age_hours=3.0) is None
+    assert request_path.exists() is False
+
+
 def test_compute_deferral_expires_cleanly(tmp_path):
     marker_path = tmp_path / "compute_deferral.json"
     future = datetime.now(timezone.utc) + timedelta(hours=5)

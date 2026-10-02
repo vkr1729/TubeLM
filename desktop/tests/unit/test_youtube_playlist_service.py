@@ -310,3 +310,52 @@ def test_create_weekly_playlist_deduplicates_and_skips_non_videos(mock_paths):
         assert res["added_videos_count"] == 1
         assert res["skipped_non_videos_count"] == 1
         assert mock_post.call_count == 2
+
+
+def test_create_weekly_playlist_zero_videos_added_raises_and_cleans_up(mock_paths):
+    token_data = {"access_token": "ya29.token", "refresh_token": "ref", "expires_at": time.time() + 3600}
+    save_token(token_data)
+    items = [{"title": "Video 1", "video_id": "abc12345678"}]
+    create_resp = MagicMock(status_code=200)
+    create_resp.json.return_value = {"id": "PL_failed"}
+    failed_item_resp = MagicMock(status_code=400, text="Invalid video")
+    delete_resp = MagicMock(status_code=204)
+
+    with patch("requests.post") as mock_post, patch("requests.delete") as mock_delete:
+        mock_post.side_effect = [create_resp, failed_item_resp]
+        mock_delete.return_value = delete_resp
+
+        with pytest.raises(YouTubePlaylistError, match="0 of 1 added"):
+            create_weekly_playlist("2026-09-25", items)
+
+        # Confirm playlist was cleaned up
+        mock_delete.assert_called_once()
+        assert "PL_failed" in mock_delete.call_args[0][0]
+
+    # Confirm history was NOT saved with empty record
+    history = load_playlist_history()
+    assert "2026-09-25" not in history
+
+
+def test_extract_video_id_embed_live_formats():
+    from youtube_playlist_service import _extract_video_id
+    assert _extract_video_id({"url": "https://www.youtube.com/embed/dQw4w9WgXcQ"}) == "dQw4w9WgXcQ"
+    assert _extract_video_id({"url": "https://www.youtube.com/live/dQw4w9WgXcQ?feature=share"}) == "dQw4w9WgXcQ"
+    assert _extract_video_id({"url": "https://www.youtube.com/v/dQw4w9WgXcQ"}) == "dQw4w9WgXcQ"
+
+
+def test_refresh_access_token_invalid_grant_unlinks_token(mock_paths):
+    mock_paths["token_file"].write_text(json.dumps({"refresh_token": "bad_token"}), encoding="utf-8")
+    resp = MagicMock(status_code=400, text='{"error": "invalid_grant"}')
+    with patch("requests.post", return_value=resp):
+        with pytest.raises(YouTubeAuthError, match="invalid_grant"):
+            refresh_access_token({"refresh_token": "bad_token"}, {"client_id": "c", "client_secret": "s"})
+    assert not mock_paths["token_file"].exists()
+
+
+def test_get_valid_access_token_does_not_load_client_secret_if_unexpired(mock_paths):
+    token_data = {"access_token": "ya29.valid", "refresh_token": "ref", "expires_at": time.time() + 3600}
+    save_token(token_data)
+    # Notice: client_secret.json does NOT exist in mock_paths!
+    token = get_valid_access_token()
+    assert token == "ya29.valid"

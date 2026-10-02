@@ -142,26 +142,50 @@ def load_resume_request(
     if not isinstance(data, dict):
         return None
 
-    saved_at_str = data.get("saved_at")
-    if saved_at_str and max_age_hours > 0:
-        try:
-            saved_dt = datetime.fromisoformat(str(saved_at_str).replace("Z", "+00:00"))
-            if saved_dt.tzinfo is None:
-                saved_dt = saved_dt.replace(tzinfo=timezone.utc)
-            now = datetime.now(timezone.utc)
-            age_seconds = (now - saved_dt).total_seconds()
-            if age_seconds > max_age_hours * 3600:
+    if max_age_hours > 0:
+        saved_at_str = data.get("saved_at")
+        if saved_at_str:
+            try:
+                saved_dt = datetime.fromisoformat(str(saved_at_str).replace("Z", "+00:00"))
+                if saved_dt.tzinfo is None:
+                    saved_dt = saved_dt.replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                age_seconds = (now - saved_dt).total_seconds()
+                if age_seconds > max_age_hours * 3600:
+                    logger.warning(
+                        "Resume request in %s is stale (saved at %s, age %.1f hours > %.1f max hours). Discarding.",
+                        path,
+                        saved_at_str,
+                        age_seconds / 3600,
+                        max_age_hours,
+                    )
+                    clear_resume_request(path)
+                    return None
+            except Exception as exc:
                 logger.warning(
-                    "Resume request in %s is stale (saved at %s, age %.1f hours > %.1f max hours). Discarding.",
+                    "Resume request in %s has unparseable saved_at timestamp (%r: %s). Discarding.",
                     path,
                     saved_at_str,
-                    age_seconds / 3600,
-                    max_age_hours,
+                    exc,
                 )
                 clear_resume_request(path)
                 return None
-        except Exception:
-            pass
+        else:
+            # Fall back to file modification time if saved_at is absent
+            try:
+                mtime = path.stat().st_mtime
+                age_seconds = time.time() - mtime
+                if age_seconds > max_age_hours * 3600:
+                    logger.warning(
+                        "Resume request in %s lacks saved_at and file mtime is stale (%.1f hours > %.1f max hours). Discarding.",
+                        path,
+                        age_seconds / 3600,
+                        max_age_hours,
+                    )
+                    clear_resume_request(path)
+                    return None
+            except OSError:
+                pass
 
     return data
 

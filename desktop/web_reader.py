@@ -328,12 +328,14 @@ def parse_top20_digest(top20_file: Path) -> dict[str, Any]:
 
     items.sort(key=lambda x: x["rank"])
     playlist_elem = soup.find("a", href=lambda h: h and "youtube.com/playlist?list=" in h)
-    playlist_url = playlist_elem["href"] if playlist_elem else ""
+    raw_playlist_url = playlist_elem["href"] if playlist_elem else ""
     playlist_id = ""
-    if playlist_url:
-        m = re.search(r"[?&]list=([A-Za-z0-9_-]+)", playlist_url)
+    playlist_url = ""
+    if raw_playlist_url:
+        m = re.search(r"[?&]list=([A-Za-z0-9_-]+)", raw_playlist_url)
         if m:
             playlist_id = m.group(1)
+            playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
     return {
         "items": items,
         "candidate_count": len(items),

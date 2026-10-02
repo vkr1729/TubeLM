@@ -23,6 +23,11 @@ def prevent_email_sending_in_tests(monkeypatch, request):
             monkeypatch.setattr(email_service, "verify_smtp_connection", lambda *args, **kwargs: None)
         except Exception:
             pass
+        try:
+            import main
+            monkeypatch.setattr(main, "send_channel_email", lambda *args, **kwargs: None, raising=False)
+        except Exception:
+            pass
         monkeypatch.setenv("SKIP_EMAIL", "1")
 
 

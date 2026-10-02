@@ -1057,6 +1057,9 @@ def main() -> None:
         from youtube_playlist_service import backfill_playlists
         try:
             cfg = load_config()
+        except ConfigurationError as exc:
+            logger.critical("Configuration error: %s", exc)
+            sys.exit(1)
         except Exception:
             cfg = None
         raw_dates = list(args.publish_playlist)

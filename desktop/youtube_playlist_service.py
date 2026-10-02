@@ -48,13 +48,23 @@ class YouTubePlaylistError(RuntimeError):
 
 
 def _atomic_write_json(file_path: Path, data: Any, mode: int | None = None) -> None:
-    """Safely write JSON data using an atomic replace."""
+    """Safely write JSON data using an atomic replace with secure permissions."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = file_path.with_name(f".{file_path.name}.{os.getpid()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    target_mode = mode if mode is not None else 0o644
+    content = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
     try:
-        temp_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        fd = os.open(str(temp_path), flags, target_mode)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise
         if mode is not None:
             try:
                 os.chmod(temp_path, mode)
@@ -155,6 +165,15 @@ def refresh_access_token(
     }
     response = requests.post(TOKEN_ENDPOINT, data=payload, timeout=20)
     if response.status_code != 200:
+        if response.status_code == 400 and "invalid_grant" in response.text:
+            try:
+                paths.get_youtube_token_file().unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise YouTubeAuthError(
+                "YouTube refresh token has been revoked or expired (invalid_grant). "
+                "Please run: .venv/bin/python desktop/main.py --youtube-auth"
+            )
         raise YouTubeAuthError(
             f"Failed to refresh YouTube access token ({response.status_code}): {response.text}"
         )
@@ -166,7 +185,10 @@ def refresh_access_token(
 
     new_token = dict(token_data)
     new_token["access_token"] = new_access_token
-    expires_in = int(res_data.get("expires_in", 3600))
+    try:
+        expires_in = int(res_data.get("expires_in", 3600))
+    except (ValueError, TypeError):
+        expires_in = 3600
     new_token["expires_at"] = time.time() + expires_in
     if res_data.get("refresh_token"):
         new_token["refresh_token"] = res_data["refresh_token"]
@@ -178,7 +200,6 @@ def refresh_access_token(
 
 def get_valid_access_token(cfg: Any = None) -> str:
     """Return a valid access token, refreshing if needed."""
-    client_info = get_oauth_client_info(cfg)
     token_data = load_token()
     if not token_data:
         raise YouTubeAuthError(
@@ -192,6 +213,7 @@ def get_valid_access_token(cfg: Any = None) -> str:
 
     # Refresh if expired or expiring within 90 seconds
     if time.time() >= (expires_at - 90):
+        client_info = get_oauth_client_info(cfg)
         token_data = refresh_access_token(token_data, client_info)
 
     access_token = str(token_data.get("access_token") or "")
@@ -228,13 +250,61 @@ def run_interactive_oauth_login(cfg: Any = None) -> bool:
     client_id = client_info["client_id"]
     client_secret = client_info["client_secret"]
 
-    # Pick a local port
+    # Pick a local port by attempting direct bind
+    server = None
     port = 8080
     for test_port in (8080, 8085, 8088, 8090, 8999):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", test_port)) != 0:
-                port = test_port
-                break
+        try:
+            class OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    parsed = urllib.parse.urlparse(self.path)
+                    if parsed.path == "/callback":
+                        query = urllib.parse.parse_qs(parsed.query)
+                        query_state = query.get("state", [""])[0]
+                        if query_state != oauth_state:
+                            error_msg = "OAuth state mismatch (potential CSRF request)"
+                            auth_code_holder["error"] = error_msg
+                            self.send_response(400)
+                            self.send_header("Content-Type", "text/html; charset=utf-8")
+                            self.end_headers()
+                            self.wfile.write(f"<h2>&#10060; Authorization failed: {html.escape(error_msg)}</h2>".encode("utf-8"))
+                            auth_event.set()
+                            return
+
+                        if "code" in query:
+                            auth_code_holder["code"] = query["code"][0]
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/html; charset=utf-8")
+                            self.end_headers()
+                            self.wfile.write(
+                                b"<html><body style='font-family:sans-serif;text-align:center;padding-top:50px;'>"
+                                b"<h2>&#9989; TubeLM Authorization Successful!</h2>"
+                                b"<p>You can close this tab and return to the terminal.</p>"
+                                b"</body></html>"
+                            )
+                        else:
+                            error_msg = query.get("error", ["Unknown error"])[0]
+                            auth_code_holder["error"] = error_msg
+                            self.send_response(400)
+                            self.send_header("Content-Type", "text/html; charset=utf-8")
+                            self.end_headers()
+                            self.wfile.write(f"<h2>&#10060; Authorization failed: {html.escape(error_msg)}</h2>".encode("utf-8"))
+                        auth_event.set()
+                    else:
+                        self.send_response(404)
+                        self.end_headers()
+
+                def log_message(self, format, *args):
+                    pass
+
+            server = http.server.HTTPServer(("127.0.0.1", test_port), OAuthCallbackHandler)
+            port = test_port
+            break
+        except OSError:
+            continue
+
+    if server is None:
+        raise YouTubeAuthError("Unable to bind local OAuth callback server on candidate ports.")
 
     redirect_uri = f"http://localhost:{port}/callback"
 
@@ -253,49 +323,6 @@ def run_interactive_oauth_login(cfg: Any = None) -> bool:
     auth_code_holder: dict[str, str] = {}
     auth_event = threading.Event()
 
-    class OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            parsed = urllib.parse.urlparse(self.path)
-            if parsed.path == "/callback":
-                query = urllib.parse.parse_qs(parsed.query)
-                query_state = query.get("state", [""])[0]
-                if query_state != oauth_state:
-                    error_msg = "OAuth state mismatch (potential CSRF request)"
-                    auth_code_holder["error"] = error_msg
-                    self.send_response(400)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(f"<h2>&#10060; Authorization failed: {html.escape(error_msg)}</h2>".encode("utf-8"))
-                    auth_event.set()
-                    return
-
-                if "code" in query:
-                    auth_code_holder["code"] = query["code"][0]
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(
-                        b"<html><body style='font-family:sans-serif;text-align:center;padding-top:50px;'>"
-                        b"<h2>&#9989; TubeLM Authorization Successful!</h2>"
-                        b"<p>You can close this tab and return to the terminal.</p>"
-                        b"</body></html>"
-                    )
-                else:
-                    error_msg = query.get("error", ["Unknown error"])[0]
-                    auth_code_holder["error"] = error_msg
-                    self.send_response(400)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(f"<h2>&#10060; Authorization failed: {html.escape(error_msg)}</h2>".encode("utf-8"))
-                auth_event.set()
-            else:
-                self.send_response(404)
-                self.end_headers()
-
-        def log_message(self, format, *args):
-            pass
-
-    server = http.server.HTTPServer(("127.0.0.1", port), OAuthCallbackHandler)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
 
@@ -321,6 +348,9 @@ def run_interactive_oauth_login(cfg: Any = None) -> bool:
             server.server_close()
         except Exception:
             pass
+
+    if "error" in auth_code_holder:
+        raise YouTubeAuthError(f"OAuth authorization failed: {auth_code_holder['error']}")
 
     code = auth_code_holder.get("code")
     if not code:
@@ -348,13 +378,22 @@ def run_interactive_oauth_login(cfg: Any = None) -> bool:
         )
 
     res_data = response.json()
+    new_access_token = str(res_data.get("access_token") or "")
+    if not new_access_token:
+        raise YouTubeAuthError(f"OAuth token response missing access_token: {res_data}")
+
+    try:
+        expires_in = int(res_data.get("expires_in", 3600))
+    except (ValueError, TypeError):
+        expires_in = 3600
+
     existing_token = load_token() or {}
     refresh_token = res_data.get("refresh_token") or existing_token.get("refresh_token", "")
     token_record = {
-        "access_token": res_data["access_token"],
+        "access_token": new_access_token,
         "refresh_token": refresh_token,
         "token_type": res_data.get("token_type", "Bearer"),
-        "expires_at": time.time() + int(res_data.get("expires_in", 3600)),
+        "expires_at": time.time() + expires_in,
         "scope": res_data.get("scope", YOUTUBE_SCOPE),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "client_id": client_id,
@@ -392,13 +431,32 @@ def save_playlist_history(history: dict[str, Any]) -> None:
     _atomic_write_json(paths.get_youtube_playlists_file(), history)
 
 
+def delete_playlist(playlist_id: str, access_token: str) -> bool:
+    """Best-effort deletion of an empty or failed playlist."""
+    if not playlist_id:
+        return False
+    try:
+        resp = requests.delete(
+            f"{PLAYLISTS_API}?id={playlist_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
+        )
+        if resp.status_code in (200, 204):
+            logger.info("Successfully cleaned up empty playlist %s.", playlist_id)
+            return True
+        logger.warning("Failed to delete empty playlist %s (%d): %s", playlist_id, resp.status_code, resp.text)
+    except Exception as exc:
+        logger.warning("Error deleting empty playlist %s: %s", playlist_id, exc)
+    return False
+
+
 def _extract_video_id(item: dict[str, Any]) -> str:
     """Extract 11-char YouTube video ID from item dict."""
     vid = str(item.get("video_id") or "").strip()
     if len(vid) == 11 and re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
         return vid
     url = str(item.get("url") or "").strip()
-    match = re.search(r"(?:v=|/vi/|/shorts/|youtu\.be/)([A-Za-z0-9_-]{11})", url)
+    match = re.search(r"(?:v=|/vi/|/shorts/|/embed/|/live/|/v/|youtu\.be/)([A-Za-z0-9_-]{11})", url)
     if match:
         return match.group(1)
     return ""
@@ -429,12 +487,17 @@ def create_weekly_playlist(
     history = load_playlist_history()
     if run_date in history:
         existing = history[run_date]
-        logger.info(
-            "Reusing existing YouTube playlist for %s: %s",
+        if existing.get("playlist_url") and existing.get("added_videos_count", 0) > 0:
+            logger.info(
+                "Reusing existing YouTube playlist for %s: %s",
+                run_date,
+                existing.get("playlist_url"),
+            )
+            return existing
+        logger.warning(
+            "Existing history entry for %s has 0 videos added. Re-creating.",
             run_date,
-            existing.get("playlist_url"),
         )
-        return existing
 
     # Deduplicate video IDs and track non-video candidates
     seen_video_ids: set[str] = set()
@@ -530,6 +593,17 @@ def create_weekly_playlist(
                 json=item_payload,
                 timeout=15,
             )
+            if item_resp.status_code == 401:
+                # Refresh token and retry once
+                access_token = get_valid_access_token(cfg)
+                headers["Authorization"] = f"Bearer {access_token}"
+                item_resp = requests.post(
+                    f"{PLAYLIST_ITEMS_API}?part=snippet",
+                    headers=headers,
+                    json=item_payload,
+                    timeout=15,
+                )
+
             if item_resp.status_code in (200, 201):
                 added_videos.append(video_id)
             else:
@@ -543,6 +617,18 @@ def create_weekly_playlist(
         except Exception as exc:
             logger.warning("Error adding video %s to playlist: %s", video_id, exc)
             failed_videos.append(video_id)
+
+    if items and len(added_videos) == 0:
+        logger.error(
+            "Failed to add any videos to playlist %s for %s (%d candidate items failed). Deleting empty playlist.",
+            playlist_id,
+            run_date,
+            len(items),
+        )
+        delete_playlist(playlist_id, access_token)
+        raise YouTubePlaylistError(
+            f"Failed to add any videos to playlist for {run_date} (0 of {len(items)} added). Empty playlist was cleaned up."
+        )
 
     record = {
         "playlist_id": playlist_id,

@@ -155,7 +155,7 @@ class Config:
     smtp_server: str
     smtp_port: int
     smtp_username: str
-    smtp_password: str
+    smtp_password: str = field(repr=False)
     sender_email: str
     recipient_email: str
 
@@ -200,7 +200,7 @@ class Config:
     publish_youtube_playlist: bool = False
     youtube_playlist_privacy: str = "public"
     youtube_client_id: str = ""
-    youtube_client_secret: str = ""
+    youtube_client_secret: str = field(default="", repr=False)
 
     # Derived: use SSL (port 465) or STARTTLS (port 587)
     use_ssl: bool = field(init=False)
