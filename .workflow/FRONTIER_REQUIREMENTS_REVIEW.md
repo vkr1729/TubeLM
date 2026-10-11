@@ -1,275 +1,361 @@
-# Frontier Requirements Review — TubeLM Web & Mobile Sync
+# Frontier Requirements Review — TubeLM Video-Level Audio Summaries & Playlist Queues
 
-Source: `.workflow/REQUIREMENTS.md` (working-tree rewrite, uncommitted diff vs `main`: +62/−109)
-Date: 2026-09-24
+Source: `.workflow/REQUIREMENTS.md` (§1–§5, video-level audio + playlist queues rewrite)
+Date: 2026-10-11
 Reviewer: Muse Spark (verified against `desktop/web_reader.py`, `desktop/tts_service.py`,
-`desktop/main.py`, `desktop/top10_service.py`, `desktop/email_service.py`,
-`desktop/scripts/`, `desktop/templates/reader.html`, `ios/Sources`, `.github/workflows/`)
+`desktop/audio_storage.py`, `desktop/paths.py`, `desktop/templates/reader.html`,
+`ios/Sources/TubeLMApp/Views/RootTabView.swift`, `ios/Sources/TubeLMApp/Audio/AudioPlayerManager.swift`,
+`sources.json`)
 
-> Note: the prior review in this file (2026-09-20, old REQUIREMENTS §5: theme default,
-> watched-to-bottom, sync identity, TTS asyncio, player deck) is superseded by the
-> REQUIREMENTS rewrite and preserved in git history. This review covers only the new
-> scope (§2 A–D). The later plan-level findings in `.workflow/FRONTIER_PLAN_REVIEW.md`
-> (schema divergence resolved, worker sync contract, LiveContainer audio spike) still stand
-> where they do not conflict with the new requirements.
+> Note: the prior review in this file (2026-09-24, Top-N canonical count / interim
+> removal / audio-join / UAT gates) is superseded by the REQUIREMENTS rewrite and
+> preserved in git history. This review covers only the new scope (§2 A–D + §5).
+> The plan-level findings in `.workflow/FRONTIER_PLAN_REVIEW.md` still stand where
+> they do not conflict.
 
 ## Target User Scale Anchor
 
 **Single-Person Personal Use Exclusively** (§1) — hard constraint carried through every
 recommendation:
 
-- Reject enterprise complexity: no auth frameworks, no microservices, no distributed DBs,
-  no maintained backend logic, no new dependencies for a one-user weekly job.
-- Hosts: GitHub Pages static site + Cloudflare Worker/R2 (already deployed) + sideloaded
-  `.ipa` in LiveContainer on iOS.
+- Reject enterprise complexity: no auth frameworks, no microservices, no distributed
+  DBs, no maintained backend logic, no new dependencies for a one-user weekly job.
+- Hosts: GitHub Pages static site + Cloudflare Worker/R2 (already deployed) +
+  sideloaded `.ipa` in LiveContainer on iOS. ~37 sources (`sources.json`), 2-week
+  rolling retention, weekly overnight pipeline.
 - Every Q below is answered with the cheapest pipeline-local or client-local fix;
-  anything requiring per-user ops, server state changes, or background daemons is flagged
-  as anchor-violating.
+  anything requiring per-user ops, server state changes, or background daemons is
+  flagged as anchor-violating.
 
 ---
 
-## Q1 — §2.A: Which N is canonical, and does the regex contradict §2.B?
+## Q1 — §2.A: What is the per-video synthesis unit, and what happens when synthesis yields nothing?
 
-**Ambiguity:** §2.A mandates matching `r".*_TubeLM_Top_(\d+)(?:_interim)?_digest\.(html|json)$"`
-while §2.B bans interim files from ever being created. The digest count N has at least
-four competing definitions (filename digits, `len(items)`, `candidate_count`,
-`cfg.top_digest_count`), and "everywhere file matching occurs" is not enumerated. The
-empty-digest case (N=0) is unspecified despite the iOS gate on non-empty items.
-
-**Code-verified edge cases / failure modes:**
-- Hardcoded match sites beyond the two named files: `web_reader.py:1061`
-  (`"Top_20" in f.name or "Top_10" in ...`), `tts_service.py:255` (same check),
-  `desktop/scripts/download_top10.py:31` (glob `*_TubeLM_Top_*_digest.html`),
-  `desktop/scripts/send_top10_from_digests.py:48` (`"TubeLM_Top_" in name`).
-- Filename N is informational only: `rank_top10_candidates` silently shrinks the target
-  via `effective_target_count = min(requested_count, len(candidates))`
-  (`top10_service.py:390`), so a "Top 20" request yields a `Top_14` file — the Top 14
-  breakdown in the primary objective is this line working as coded, not a separate bug.
-- `candidate_count` is always overwritten with `len()` after dedupe (`web_reader.py:1148`;
-  mobile export `web_reader.py:1237`), so `top20.candidate_count: N` can never disagree
-  with `len(items)` — the contract as written is untestable.
-- Display caps contradict dynamic-N: iOS `BriefingView.swift:50` does `prefix(20)`
-  (a Top 25 silently loses 5 items), `reader.html:2744` hardcodes "Top 20 curated videos",
-  and RSS truncates to `top20_items[:10]` (`web_reader.py:763`).
-- N=0: `ContentStore.swift` requires `!feed.top20.items.isEmpty` (4 sites), so a
-  zero-candidate week renders as blank/seed state with no specified fallback.
-
-**Recommended approach:**
-- Canonical N = `len(final items after dedupe)`; filename digits are a hint, never parsed
-  for display. Drop `(?:_interim)?` from the canonical regex (interim is banned — matching
-  it re-admits the removed concept); instead do a one-time sweep deleting stale
-  `*_interim_digest.*` files (see Q3).
-- Enumerate and convert all five match sites above to the single regex helper; add a test
-  with Top_14/Top_20/Top_25 filenames plus a stale-interim file asserting skip-or-sweep.
-- Replace `prefix(20)` / hardcoded "Top 20" / `[:10]` with the dynamic count (or record an
-  explicit cap policy, e.g. "display all, RSS first 10" — state it, don't leave it).
-- Define N=0 explicitly: render an honest empty state ("No Top picks this week — N
-  candidates") rather than the corrupt-cache path.
-- Anchor-fit: pure pipeline + template string changes, no infra.
-
-**Alternatives:**
-- Keep `(?:_interim)?` in the regex as stale-file tolerance — defensible, but it silently
-  preserves the removed feature's surface; rejected unless Q3 decides stale files linger.
-- Pad/truncate selection to exactly `top_digest_count` — predictable UI, but fabricates
-  rankings (pad) or discards signal (truncate) for one reader; rejected.
-- Treat filename N as canonical — breaks the day `min()` shrinks the set; rejected.
-
-**Decision needed:** Confirm len-after-dedupe as canonical N, interim-free regex, the five
-match sites as the complete list, and the N=0 empty-state wording.
-
-## Q2 — §2.B: What exactly is "success rate," and what does partial publish disclose?
-
-**Ambiguity:** The 80%/70%/unconditional thresholds name a "success rate" with no
-numerator, denominator, or cumulative-vs-per-stage semantics. "Proceed to digest
-generation and publish" after Iteration 3 at <70% does not say what a partial digest
-contains or discloses. The mapping onto the existing fixed 3-stage loop is undefined.
+**Ambiguity:** §2.A mandates "audio summaries for each individual video across all
+channels" with script `"<Title>, by <Channel>. <Summary>"`, but never defines the
+text source per video, the RSS-article inclusion rule, or the missing-audio UI.
+"Every Top 20 video will reference its corresponding video-level audio without
+duplicate synthesis" assumes a join that does not yet exist.
 
 **Code-verified edge cases / failure modes:**
-- No gating exists today: `main.py:587-591` runs Initial/Fast-Retry-1/Fast-Retry-2
-  unconditionally with fixed 30s/60s delays; the only threshold is the interim trigger
-  (`completion_ratio >= 0.70` at `main.py:795-815`) — which §2.B deletes along with the
-  interim itself.
-- Counting is non-obvious: sources with no new content count as success
-  (`main.py:634-637`), transient discovery failures (`items is None`, `:629-632`) count as
-  failed, and a quota-deferral (`quota_deferred_until`, `:691-697`) breaks the stage loop
-  — none of these are assigned to the rate.
-- `completed_source_keys` (`main.py:594`) is already a cumulative set across stages, so
-  the machinery for a cumulative rate exists; but "retry failed sources" vs "reprocess
-  all" matters because the Top-10 batch accumulates via `record_top10_source`
-  (`main.py:729-732`) — reprocessing successes would double-record candidates.
-- With ~23 sources, 80% = 19 and 70% = 17 (rounding unspecified); one flaky source can
-  force a full extra iteration for zero gain.
+- Text source is undefined at video granularity. Today's TTS input is channel-level
+  only: `web_reader.py:1118` synthesizes from `summary_text / full_summary_html /
+  summary_preview`, and `tts_service.py:220-275` (`_backfill_week_async`,
+  concurrency 3) walks channel digests to `summary_{run_date}_{safe}.mp3`. No
+  per-video text extraction, chunking, or timeout scaling exists yet.
+- Silent-skip guard: `_generate_audio_async` returns `False` when cleaned text is
+  `< 20 chars` (`tts_service.py:121-123`). Shorts / title-only videos will
+  produce no file with no error — currently indistinguishable from "not yet run".
+- RSS inclusion unclear: `sources.json` has 1 RSS source (MIT Technology Review)
+  with no `video_id`. "Every individual video" either silently excludes RSS (then
+  §2.C site-wide "remaining channel videos" double-counts them) or includes
+  articles (then the `"<Title>, by <Channel>"` script and `safe_id = video_id or
+  sanitized URL slug` naming need an article rule).
+- `safe_id` collision risk: `paths.safe_channel_name` (`paths.py:225`) maps
+  `[^a-zA-Z0-9_\-]` → `_`, so distinct URLs can slug to the same `safe_id`
+  (`Foo?x=1` vs `Foo-x-1`); YouTube `video_id` is 11-char allowlisted
+  (`web_reader.py:40,81-89`, garbage → `""`), so any LLM/feed-malformed id falls
+  back to slug and may collide or orphan.
+- Scale: ~37 channels × ~5 videos ≈ 150–200 TTS calls/week. At edge-tts
+  ~20–40s each with concurrency 3, that is ~20–40 min of pipeline time, all
+  inside the Friday-overnight window. Failure degrades to `False` (TTS never
+  breaks the run by design, `tts_service.py:1-6`), so partial-audio weeks are the
+  normal case, not the exception — yet §2.B demands the old channel-audio
+  fallback be "eliminated", leaving missing-audio rendering unspecified.
 
 **Recommended approach:**
-- Rate = `|completed_source_keys| / total_initial_handlers`, evaluated cumulatively after
-  each stage; keep no-new-content as success; quota-deferral pauses the run (neither
-  success nor retry-trigger — it exits to the existing deferral path).
-- Map Iteration 1/2/3 onto the existing three stages with gate checks between; retries
-  process only `failed_handlers`, never successes (protects batch accumulation).
-- Partial publish carries a one-line disclosure in the digest ("Built from X of Y
-  sources; Z deferred") so the single reader knows coverage without any new system.
-- Anchor-fit: ~20 lines of gating around the existing loop, no new scheduling.
+- Define the unit pipeline-local: per-video TTS input = `"<Title>, by <Channel>. "`
+  `+ clean_text_for_speech(video summary_html → text)`, synthesized only when
+  cleaned body ≥ 20 chars; otherwise emit no file and set `audio_url = ""`
+  (renders no `🎧 Listen` button — never a dead button, never channel-audio
+  fallback).
+- Include RSS articles as TTS units with `safe_id = sha256(url)[:12]` (not raw
+  slug) and script `"by <Feed Name>"`; YouTube units use raw `video_id` when it
+  passes `_VIDEO_ID_RE`, else the same hashed-slug rule. One function, tested
+  with a `youtu.be` vs `youtube.com/watch?v=` pair plus an RSS URL pair.
+- Keep `force=False` idempotency (skip-if-exists) and concurrency 3; log a
+  per-run `{scanned, generated, skipped, failed}` count so a partial week is
+  visible without new infra.
+- Anchor-fit: pure pipeline + template conditional, no new services or deps.
 
 **Alternatives:**
-- Always run all 3 stages (status quo minus interim) — most predictable runtime for a
-  weekly cron, but wastes up to 90s + API calls when Iteration 1 is already clean;
-  acceptable fallback if thresholds prove flaky.
-- Time-box retries instead of percentage gates — simpler to reason about, but restarts
-  the tuning debate (how long?) the percentages already settled; rejected.
+- Synthesize Top-20-only first, channels later — halves week-one cost but
+  contradicts the decision log (Q1: "Generate per video across all channels");
+  rejected unless pipeline runtime proves unacceptable.
+- Fall back to channel audio when per-video is missing — preserves listenability
+  on partial weeks but reinstates exactly the fallback §2.B bans and mislabels
+  channel audio as video audio; rejected.
+- Concatenate-then-split channel TTS to fabricate per-video files — zero extra
+  synthesis cost but wrong timestamps and no per-video scrubbing; rejected.
 
-**Decision needed:** Confirm cumulative-rate definition, retry-only-failures, rounding
-(ceil vs floor at 80%/70%), and the partial-publish disclosure line.
+**Decision needed:** Confirm per-video text source (summary_html → text), the
+≥20-char skip rule with hidden-button rendering, RSS inclusion with hashed
+`safe_id`, and `video_id`-first / hash-second naming.
 
-## Q3 — §2.B: What is the full blast radius of "completely remove interim"?
+## Q2 — §2.A + §2.D: How do naming, retention, R2, and Pages deploy interact at ~200 files/week?
 
-**Ambiguity:** §2.B names `desktop/main.py` and `desktop/top10_service.py`, but interim
-logic leaks into at least four more surfaces, plus on-disk and in-state leftovers. No
-disposition is given for stale interim files or old batch state.
+**Ambiguity:** §2.A fixes naming `summary_video_{run_date}_{safe_id}.mp3` in
+`~/.tubelm/audio/` → `site/audio/` → R2 `tubelm/audio/{run_date}/…`, while §2.D
+leaves historical weeks as-is with no backfill. Nothing reconciles the new
+prefix with retention, the 5 MB deploy gate, or per-file R2 latency.
 
 **Code-verified edge cases / failure modes:**
-- `top10_service.py`: `is_interim` parameter + branch (`:501-516`), batch fields
-  `interim_sent_at`/`interim_candidate_count`/`interim_selected_candidate_ids`
-  (`:510-514`), the final-identical-to-interim skip path (`:518-529`), `_interim` filename
-  suffix (`:570`), `rotate_downloads=(not had_interim)` coupling (`:538`).
-- `email_service.py`: `is_interim` → "EARLY EDITION" and `is_final_after_interim` →
-  "FINAL EDITION" labels (`:201-204`, `:416-421`) — dead labels after removal unless cut.
-- `main.py`: `interim_top10_sent` flag + Stage-0 trigger block (`:596`, `:795-815`).
-- Leftovers: prior runs' `*_interim_digest.html/.json` files on disk still match the §2.A
-  regex if `(?:_interim)?` survives (see Q1); old batch JSON with `interim_sent_at` set
-  must still parse; tests referencing interim behavior will fail.
+- Retention regex misses the new prefix: `_AUDIO_DATE_RE =
+  r"^(?:summary_)?(\d{4}-\d{2}-\d{2})_"` (`web_reader.py:38`) matches `summary_…`
+  and bare `…` but **not** `summary_video_…`. `purge_old_digests_and_audio`
+  (`web_reader.py:121`) will therefore never purge per-video local files —
+  unbounded growth in `~/.tubelm/audio/` and `site/audio/`. R2 purge is safe
+  (it matches `/YYYY-MM-DD/` in the key, `audio_storage.py:75`), but local/site
+  are not.
+- Deploy gate is per-file, not total: `deploy_to_gh_pages` refuses any file
+  > 5 MB (`web_reader.py:1319-1323`), and the R2-active path deletes large
+  `site/audio` files post-build (`:1302-1306`). Per-video TTS files are small
+  (~50–300 KB), so the gate passes — but only if R2 upload actually happened.
+  With R2 unconfigured, `site/audio/` holds ~200 files/week × 2 weeks ≈ 400
+  files (~50–100 MB total); one stray NotebookLM `.m4a` > 5 MB still fails the
+  whole deploy with no specified recovery order.
+- R2 N+1 latency: `upload_audio` is idempotent via `head_object`
+  (`audio_storage.py:50-54`) — correct, but 200 `head_object` + conditional
+  `upload_file` calls per build in a tight loop adds minutes with no
+  concurrency and no per-run summary.
+- Deprecation gap: channel TTS generation lives in two places — standalone
+  `backfill_week` (`tts_service.py:278`) and build-time backfill
+  (`web_reader.py:1111-1131`, writing `summary_{date}_{ch}.mp3` +
+  `summary_audio_url`). §2.A "deprecate monolithic channel TTS" names no files;
+  leaving either path live silently re-creates the deprecated artifacts.
+- Historical weeks (§2.D) will have channel `summary_audio_url` / NotebookLM
+  `audio_url` but zero per-video files. The new `🎧 Play Summaries` channel
+  button and per-card `🎧 Listen` buttons have no specified historical behavior
+  — empty queue, hidden buttons, or legacy-monolithic fallback are all plausible
+  readings.
 
 **Recommended approach:**
-- Single removal checklist: `main.py` trigger block + flag; `top10_service.py` param,
-  both branches, suffix, batch fields (tolerant-read old keys, never write them),
-  `rotate_downloads` constant; `email_service.py` edition labels; scripts + tests updated;
-  one-time startup sweep deleting `*_interim_digest.*` (log what was swept).
-- Verify by grep: zero hits for `is_interim|interim_sent_at|final_after_interim` outside
-  the tolerant-read shim, plus a test asserting no interim artifacts after a full run.
-- Anchor-fit: deletion-only change, zero new runtime behavior.
+- Extend `_AUDIO_DATE_RE` to `^(?:summary_(?:video_)?)?(\d{4}-\d{2}-\d{2})_`
+  (one-line fix) so retention covers the new prefix; no migration, no new job.
+- Keep R2-first ordering (audio → R2, `data.json` last, single push) with a
+  pre-deploy 5 MB scan as an explicit gate message, not a surprise refusal.
+- Deprecation checklist (deletion-only): disable channel-TTS synthesis in both
+  `backfill_week` and the `web_reader.py:1111-1131` block; keep reading existing
+  `summary_{date}_{ch}.mp3` / `summary_audio_url` for historical weeks only
+  (tolerant-read, never write). NotebookLM `audio_url` deep-dives untouched.
+- Historical-week UI rule: when a week has zero per-video tracks, hide the new
+  queue buttons and keep the legacy channel audio button (week-scoped
+  conditional, no backfill).
+- Anchor-fit: regex + checklist + template conditional; no new storage or CI.
 
 **Alternatives:**
-- Keep interim behind a config flag — directly contradicts the decision log (Q4:
-  "Completely remove"); rejected.
-- Leave dead code paths in place — zero behavior risk today, but the next reader (or
-  model) will re-trigger the interim path by accident; rejected.
+- Mass-backfill current week during `--build-only` — fills the gap fastest but
+  contradicts the decision log (Q6: "No mass backfill") and burns edge-tts time
+  inside a build command; rejected.
+- Delete all channel `summary_*.mp3` artifacts now — cleanest steady state but
+  breaks historical-week listening the decision log preserves; rejected.
+- Vendor per-video audio into the git repo / Pages without R2 — works for one
+  user with R2 down but balloons the orphan `gh-pages` force-push; keep as
+  degraded fallback, not primary.
 
-**Decision needed:** Confirm delete-vs-ignore for stale on-disk interim files, and that
-tolerant-read of old batch fields (without migrating them) is sufficient.
+**Decision needed:** Confirm the retention-regex extension, the two-site
+deprecation checklist with historical tolerant-read, R2-first deploy ordering,
+and the hide-buttons-on-audioless-weeks rule.
 
-## Q4 — §2.C: Where does each audio fix actually live? (Build-time vs client)
+## Q3 — §2.B: What is the canonical Top-20 ↔ channel-video join key when ids are missing or URL forms differ?
 
-**Ambiguity:** §2.C prescribes fixes at specific layers, but the data flow already
-resolves audio upstream of two of the three prescribed fixes — so the symptom locations
-named may not be the defect locations. Each sub-item has an unspecified exact semantic.
+**Ambiguity:** §2.B maps each Top-20 `audio_url` "from video ID / URL match" and
+requires `_normalize_mobile_item()` / `_normalize_mobile_video()` to attach
+video-level `audio_url`. Neither the key priority nor normalization is defined,
+and the current code joins on channel name — not video identity.
 
 **Code-verified edge cases / failure modes:**
-- Pipeline already embeds fallback audio: `_normalize_mobile_item` and
-  `_normalize_mobile_video` take `fallback_audio`, and the `data.json` exporter passes
-  `channel_audio_map` (`web_reader.py:1231-1232`), so `item.audio_url` is pre-resolved.
-  `RootTabView.resolveAudioUrl` (`:530-544`) is therefore a second-chance path hit only
-  when build-time resolution missed — and the miss happens at build time:
-  `channel_audio_map` keys are exact lowercased names (`web_reader.py:1220`), so
-  `Peter Attia, MD` (item `source_name`) vs `Peter Attia MD` (channel name) never joins.
-  Fuzzy matching in Swift patches over a build-time key bug per item per launch.
-- `buildQueue` is NotebookLM-only *by design comment* (`reader.html:3163` "ONLY
-  NotebookLM podcasts! Keep TTS completely separate"): mixing summaries in changes queue
-  identity (`isSummary` flag, `isHeard(src)` keys, title/category sort). "Include
-  summaries when podcasts are absent" needs the per-channel vs whole-queue trigger
-  defined, or one missing podcast flips the entire queue to TTS.
-- `playIndex` (`reader.html:3192-3217`) double-starts playback (`begin()` immediately at
-  `:3213` AND on `loadedmetadata` at `:3210`); errors are swallowed (`.catch(() => {})`
-  at `:3201`). The fix order matters: set `src` → await `canplay` → `play()` →
-  update icons from the promise outcome, not optimistically at `:3214-3215`.
-- `AudioPlayerManager.playTrack` (`:101-104`) resolves via `URL(string:relativeTo:)`
-  against the Pages base — pre-encoding the string first (as prescribed) breaks relative
-  resolution of `audio/...` paths; only the absolute-URL branch (R2 `https://...`) needs
-  sanitizing. `player.playImmediately(atRate:)` is for pre-rolled items and skips the
-  stall-recovery the same bullet asks to observe; `play()` + rate (already at `:113-114`)
-  is the correct primitive. No `AVPlayerItem.status` observation exists — adding KVO
-  needs a lifetime rule (observer tied to current item, torn down on replace) or it
-  leaks/over-fires across track changes.
-- Channel Audio Overview card renders only when `ch.has_audio && ch.audio_url`
-  (`reader.html:2823`); summary-listen buttons already exist in channel views (`:2929`,
-  `:3049`) — whether Editorial Picks cards have them is unverified and is the actual gap
-  to check, not the channel views.
+- Today's join is channel-level: `week_audio_map` keyed by normalized channel
+  name/id (`web_reader.py:1171-1178`) fills Top-20 `audio_url` by `source_name`
+  (`:1188-1191`), and the mobile export repeats it (`:1248-1266`). The
+  normalization (`_normalize_channel_key`, `:364-366`, lowercase + strip
+  punctuation) papers over `Peter Attia, MD` vs `Peter Attia MD` but cannot
+  address video identity at all — every Top-20 card currently points at channel
+  audio by construction.
+- Video identity is lossy at three boundaries: `_clean_video_id` allowlists
+  11-char ids (else `""`, `:81-89`); `extract_youtube_video_id` (`:200`) must
+  handle `watch?v=`, `youtu.be/`, `shorts/`, `embed/`, and bare ids or the same
+  video yields two keys; `_make_item_id` (`:92-113`) falls back from
+  `video_id` → URL (≤200 chars) → title-hash, so a Top-20 item with `video_id`
+  and a channel video with only URL get *different* synthetic ids and never
+  join.
+- Dedup scope: Top-20 items are deduped by `video_id or url or title-lower`
+  (`:1161-1168`) but channel videos are not cross-deduped against Top-20, so a
+  "no duplicate synthesis" claim needs a shared synthesis map keyed the same
+  way or Top-20 re-synthesis happens under a different key.
+- iOS has its own second-chance join: `resolveAudioUrl` falls back to channel
+  audio by case-insensitive name/id (`RootTabView.swift:530-544`), and
+  `mergeFeedAudio` re-applies channel audio to audioless videos (`:563-594`).
+  If the pipeline stops emitting channel fallback but iOS keeps applying it,
+  the banned fallback survives on-device.
 
 **Recommended approach:**
-- Fix the join at build time: normalize `channel_audio_map` keys (lowercase, strip
-  punctuation/extra spaces) and apply the same normalization to `source_name` lookup —
-  one function, tested with the `Peter Attia` / `Nutrition Made Simple!` pairs; keep the
-  iOS exact-match fallback as-is (no fuzzy engine).
-- `buildQueue`: per-channel fallback (a channel contributes its `summary_audio_url`
-  only when it has no `audio_url`), preserving the NotebookLM-first ordering; explicit
-  `isSummary` flags so `isHeard` keys never collide.
-- `playIndex`: single-start (await `canplay`, then one `play()`), icon state driven by
-  the promise + `playing`/`pause` events, errors surfaced to the mini-player, never
-  swallowed.
-- iOS: sanitize-and-encode only absolute URLs before `URL(string:)`; keep relative
-  resolution untouched; keep `play()` + rate; add item-scoped `status` observation with
-  teardown on `replaceCurrentItem`.
-- Anchor-fit: no new deps, no server change, no audio re-encoding.
+- Canonical video key (pipeline-local, one helper): normalized YouTube id when
+  `extract_youtube_video_id(url) or video_id` yields an 11-char id (lowercased?
+  No — YouTube ids are case-sensitive; compare exact), else normalized URL
+  (strip tracking params, `youtu.be` → `youtube.com/watch?v=` canonical form),
+  else `sha256(title-lower)[:16]`. Synthesis map, Top-20 wiring, and both
+  `_normalize_*` callers all use this helper; channel-name fallback deleted
+  from both the `weeks` wiring (`:1188-1191`) and the mobile export
+  (`:1265-1266`).
+- `audio_url = ""` when unjoined (no channel fallback); template/iOS hide the
+  per-card button on empty. iOS `resolveAudioUrl` keeps direct-hit only; delete
+  the channel-fallback branch and the `mergeFeedAudio` video backfill (keep
+  channel objects' own `summaryAudioUrl` for historical weeks).
+- Anchor-fit: one helper + call-site swaps + template/iOS conditionals; no new
+  identity service.
 
 **Alternatives:**
-- Full fuzzy/slug engine in Swift — fixes display-time misses but re-runs per launch
-  and diverges from the pipeline's keys; rejected in favor of the build-time join.
-- Unified queue always mixing podcasts + summaries — simplest code, but destroys the
-  deliberate separation the comment documents and doubles queue length; rejected.
-- `playImmediately(atRate:)` everywhere — lower latency on pre-rolled items, but wrong
-  primitive for cold URL loads and fights stall handling; rejected.
+- Keep channel-audio fallback until per-video coverage is complete — kindest to
+  partial weeks but directly violates the "eliminates the old fallback"
+  requirement; rejected except as a week-scoped historical rule (see Q2).
+- Fuzzy title matching for join misses — rescues LLM-mangled ids but
+  reintroduces false-positive audio (wrong video's summary plays); rejected in
+  favor of honest empty state.
+- Treat Top-20 sidecar audio as authoritative and copy it onto channel videos
+  (reverse join) — fixes Top-20 display but leaves channel cards silent;
+  rejected; the synthesis map is the single source.
 
-**Decision needed:** Confirm build-time normalized join (and the normalization rule),
-per-channel vs whole-queue TTS fallback trigger, promise-driven icon semantics, and the
-item-scoped KVO lifetime for `AVPlayerItem.status`.
+**Decision needed:** Confirm the id → canonical-URL → title-hash key priority,
+URL canonicalization rule, deletion of both pipeline and iOS channel fallbacks,
+and empty-`audio_url` = hidden-button semantics.
 
-## Q5 — §2.D: What are the runnable exit criteria for UAT, CI, and deploy?
+## Q4 — §2.C: Where does heard ↔ watched coupling live, and what are its trigger semantics?
 
-**Ambiguity:** §2.D names activities (Playwright UAT, CI build, deploy) without targets,
-assertions, or actors. "Push changes to GitHub" is process, not product. Headless audio
-verification, theme assertions, viewport breakpoints, the `verify.yml` role, and the
-deploy safety gates are all unspecified — and deploy has a hard refusal path that can
-fail the whole stage.
+**Ambiguity:** §2.C stores heard tracks in `localStorage` under
+`tubelm_heard:{src}`, skips heard tracks "during forward progression", and
+auto-marks the card `Watched ✓` / `Read ✓` at "90%+ playback (or ends)". The
+key scheme, the src→card mapping, and the exact trigger are all unspecified —
+and the two halves live in different subsystems today.
 
 **Code-verified edge cases / failure modes:**
-- Playwright harnesses already exist (`desktop/scripts/run_browser_uat.py`,
-  `desktop/scripts/test_gui_e2e.py`) but §2.D does not say whether the target is
-  `file://`, a localhost server, or the live Pages URL — `file://` breaks `fetch`-based
-  `data.json` loads; live-URL testing conflates deploy lag with regressions.
-- Headless Chromium autoplay policy blocks audible `.play()`; "verify audio playback
-  controls and audio element loading" cannot mean audible playback without a headed
-  browser + fake audio device. What *is* assertable: controls present, `src` resolves
-  HTTP 200, `canplay` fires.
-- Theme contract exists (`localStorage 'tubelm-theme'`, `data-theme`, `reader.html:31-33`)
-  but no assertion pins it; responsive breakpoints are undefined.
-- CI already does the named work (`build-ios.yml`: Core tests → simulator UAT +
-  screenshot → release build → `package_ipa.sh` → IPA commit). `verify.yml`'s role in
-  this stage is unstated — duplicate gate or separate lint/unit lane?
-- Deploy can hard-fail: `deploy_to_gh_pages` refuses any file > 5 MB (`web_reader.py:1280`)
-  and force-pushes an orphan branch (`:1272`); the R2-active path deletes large
-  `site/audio` files post-build (`:1263-1267`). A successful build with one stray MP3 =
-  built-but-never-deployed with no specified recovery or ordering (audio → R2 first,
-  `data.json` last, single atomic push).
+- Key is URL, not content: `heardKey(src) = 'tubelm_heard:' + src`
+  (`reader.html:3038`), `isHeard`/`markHeard` (`:3039-3047`). The same audio
+  served as `audio/…mp3` vs `https://…r2…/…mp3` yields two keys; a re-synthesized
+  week yields a third. Keys accumulate unbounded in `localStorage` (no purge,
+  unlike `read_ids` capped at 5000 in `web_reader.py:117-118`), and heard state
+  never enters cross-device sync (sync payload is `read_ids`; heard is
+  local-only).
+- Trigger exists but coupling does not: `timeupdate` marks heard at
+  `currentTime / duration >= 0.9` (`reader.html:3582-3591`) and `onended`
+  advances the queue (`:3604-3609`), but `markHeard` only sets the flag and
+  re-renders the sidebar — it never calls `markVideoWatchedState`
+  (`:2270-2284`) or `recordItemState`. The §2.C "automatically marked as
+  Watched" path is unwritten.
+- Gaming / misfire modes: seeking to 95% then pausing marks heard without
+  listening; saved-position restore (`tubelm_pos:` + `loadedmetadata`,
+  `:3242-3249`, `:3548-3555`) jumping past 90% marks heard on load; sub-10s
+  TTS clips hit 90% in seconds; `duration = NaN/Infinity` (metadata not yet
+  loaded, live edge) guards correctly today (`d && isFinite(d) && d > 0`) but
+  any rewrite must preserve the guard. `queueNext` (`:3273-3284`) skips heard
+  forward but `queuePrev` (`:3285-3287`) does not skip back — correct but
+  unstated, and "during forward progression" needs exactly this закрепление.
+- iOS divergence: `playItemAudio` calls `markItemRead` on play *start*
+  (`RootTabView.swift:546-550`), not at 90%. Web-at-90% vs iOS-at-start will
+  permanently disagree on watched state across devices for the same video.
 
 **Recommended approach:**
-- Playwright target: localhost server over the built `site/` dir (not `file://`, not
-  live). Assertions: Editorial Picks header/count for Top-14 and Top-20 fixtures; no
-  `TubeLM_Top_*` in channel list; audio = controls present + `src` 200 + `canplay`
-  (never audible); theme = `data-theme` flip persists via localStorage; viewports
-  390 / 768 / 1280.
-- CI: keep `build-ios.yml` as the single gate; document `verify.yml` as pre-build
-  unit/lint (or merge the lanes — pick one, don't run two authorities).
-- Deploy: local actor after UAT green; order audio→R2, `data.json` last, single push;
-  pre-deploy 5 MB scan as an explicit gate (not a surprise refusal); live check =
-  fetch `https://vkr1729.github.io/TubeLM/data.json`, assert `run_date` equals local.
-- Anchor-fit: uses existing harnesses and CI; no new services, no headed-browser farm.
+- Key heard by canonical video key (Q3), not `src`: `tubelm_heard:{week}:{key}`,
+  with `src` retained as a secondary alias written at mark time (covers the
+  R2-vs-relative duality without double entries). Cap stored keys (e.g. prune
+  to latest 1000 on write, mirroring `MAX_READ_IDS`).
+- Trigger (client-local, web): keep `timeupdate ≥ 0.9 AND isFinite(duration)`
+  OR `ended` as the single mark path; on mark, call both `markHeard(key)` and
+  `markVideoWatchedState(videoId, url, true)` via a src→`{videoId, url}`
+  lookup carried on the queue track (new track shape, see Q5). Seek-gaming
+  accepted for a one-user player (no fraud model); saved-pos restore past 90%
+  explicitly counts as heard (document it, don't special-case it).
+- Forward-skip = `queueNext` only; `queuePrev` never skips; `playAllUnheard`
+  builds `unheardOnly` with fallback to full queue when empty (existing
+  `:3288-3295` behavior, preserved).
+- iOS: keep mark-on-start (LiveContainer background-audio reality) but record
+  the same canonical key into synced `readIDs` so web 90% and iOS start converge
+  on the shared watched bit even though heard bits stay device-local.
+- Anchor-fit: localStorage-only + existing `readIDs` sync; no server, no auth.
 
 **Alternatives:**
-- Test against the live site only — zero local server setup, but every run depends on
-  deploy freshness and network; rejected as the primary gate (keep as a post-deploy
-  smoke check).
-- Full audible-playback verification — highest fidelity, but needs headed Chromium with
-  `--autoplay-policy=no-user-gesture-required` + fake audio on a runner for a static
-  page's `<audio>` tag; disproportionate for one user; rejected.
+- Sync heard state across devices via the worker — true parity but elevates a
+  playback-progress hint to synced CRDT state for one user; rejected.
+- Require `ended` only (drop 90%) — precise but punishes podcast-style early
+  exits and breaks the decision log (Q3: "90%+"); rejected.
+- Separate heard from watched (revert coupling) — simplest code but contradicts
+  the decision log (Q3: "Auto-mark"); rejected.
 
-**Decision needed:** Confirm localhost (not live) as the UAT target, the `canplay`-not-
-  audible audio bar, the three viewports, `verify.yml`'s lane, and the deploy
-  ordering + live `run_date` check as §2.D exit criteria.
+**Decision needed:** Confirm canonical-key (not src) heard keys with alias +
+  prune cap, the 90%-or-ended single mark path with src→card lookup, forward-
+  only skip semantics, and iOS-converges-via-`readIDs` parity rule.
+
+## Q5 — §2.C + §5: What is the queue construction contract for Top-20-first site-wide ordering with dedupe?
+
+**Ambiguity:** §2.C orders the site-wide queue "Top 20 first (#1–#20), followed
+by remaining channel videos by category" with per-scope Play buttons, and §5
+pins the mini-player title to `"${Channel} · ${Video Title}"`. The track shape,
+dedupe rule, within-category sort, and empty-queue behavior are undefined — and
+the current player is channel-level only.
+
+**Code-verified edge cases / failure modes:**
+- Today's queue is channel-tracks: `buildQueue` filters channels with
+  `has_audio/audio_url or summary_audio_url` (`reader.html:3199-3202`), sorts by
+  `CATEGORY_ORDER = ['tech','deep_explainer','health','news_feed']` then channel
+  name (`:3214-3221`), and stores `{chId, weekKey, src, title, category,
+  summary}` (`:3222-3229`). There is no per-video track, no Top-20 segment, no
+  rank, no `videoId`. `playChannelAudio` (`:3296-3324`) and `playAudioDirect`
+  (`:3339+`) splice monolithic tracks; `toggleAudio` (`:3544-3568`) bypasses the
+  queue entirely. All four paths need consolidation or the new buttons will
+  fight the old ones.
+- Top-20/channel overlap: Top-20 items are drawn from channel videos (§2.A), so
+  "Top 20 first, followed by remaining" without dedupe plays ~20 videos twice
+  in the site-wide queue. "Remaining" must mean set-minus on the Q3 canonical
+  key, but no requirement states it.
+- Within-category sort unspecified: channel-name sort (today) vs published-date
+  vs Top-20-rank (for the first segment) produce audibly different commutes.
+  RSS items have no `duration`/`video_id`; unknown categories sort as `99`
+  (today) — silent bucketing.
+- Persistence + scale: `savePlayer`/`loadPlayer` persist the full queue
+  (`tubelm_player`, `:3177-3194`). A 150-track site-wide queue of `{src, title}`
+  pairs is fine (~50 KB), but stale `src` URLs from a purged week (see Q2) will
+  404 on restore with only a console warning (`playIndex` catch, `:3259-3266`).
+- Scope gaps: Brief mode (`renderBriefView`, `:3063-3104`) has its own `🔊
+  Listen` (channel summary, `:3089`) outside the queue; RSS `feed.xml` encloses
+  no per-video audio; email digest links to text only. None is in §2.C scope,
+  but each will look broken next to per-card `🎧 Listen` buttons if left
+  untouched.
+
+**Recommended approach:**
+- New track shape (client-local): `{key (Q3 canonical), videoId, url, src,
+  title, channelName, channelId, category, rank?, weekKey}`; display title
+  always `` `${channelName} · ${title}` `` (§5). Three constructors share one
+  `buildVideoQueue(tracks)` primitive: Top-20 scope (rank order 1→20, skip
+  `audio_url == ""` with a count note "N of 20 have audio"), channel scope
+  (channel's videos in digest order), site-wide (Top-20 segment + set-minus
+  remainder sorted by `CATEGORY_ORDER` then channel name then digest order).
+- Route all new buttons (`🎧 Play All Top 20`, `🎧 Play Summaries`,
+  `► Play Summaries`, per-card `🎧 Listen` via `playAudioDirect`-replacement)
+  through `playIndex`/`queueNext`; leave `toggleAudio` for historical-week
+  monolithic playback only (week-scoped branch, deleted when retention ages
+  those weeks out).
+- Restore hardening: on `loadPlayer`, drop tracks whose `weekKey` is not
+  `current/prev` and whose `src` fails a `HEAD`-less `canplay` timeout —
+  surface "Queued track unavailable (week purged)" in the mini-player instead
+  of a console-only warning.
+- Out-of-scope freeze: Brief mode, RSS enclosures, and email keep current
+  behavior; note as non-goals so they are not filed as regressions.
+- Anchor-fit: template-local queue rewrite, no new player library, no service
+  worker, no background sync.
+
+**Alternatives:**
+- Unified always-mixed queue (podcasts + summaries + per-video) — simplest
+  `buildQueue` but destroys the deliberate NotebookLM-vs-TTS separation
+  (`reader.html:3163` comment, prior review Q4) and doubles commute length;
+  rejected; keep per-scope queues with per-channel NotebookLM-first rule where
+  a deep-dive exists.
+- Server-side (build-time) playlist files (`.m3u` per scope) — shareable and
+  testable but adds three artifacts per week for one listener's ephemeral
+  heard-skipping queue; rejected.
+- Cap site-wide queue at Top-20 only — sidesteps the 150-track restore and
+  sort debates but abandons the "followed by remaining" decision (Q5:
+  "Confirmed: Top 20 first, followed by remaining"); rejected.
+
+**Decision needed:** Confirm the track shape with canonical `key`, Top-20-rank
+then category/channel/digest ordering, set-minus dedupe for the remainder
+segment, `loadPlayer` purge rule, and Brief/RSS/email as explicit non-goals.

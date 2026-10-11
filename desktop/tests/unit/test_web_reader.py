@@ -672,3 +672,79 @@ class TestMobileExportContract:
     def test_optimize_audio_missing_input_returns_false(self, tmp_path):
         assert optimize_audio_for_web(
             tmp_path / "missing.mp3", tmp_path / "out.mp3") is False
+
+
+class TestVideoAudioWiringAndCanonicalKey:
+    def test_canonical_video_key_priorities(self):
+        from web_reader import canonical_video_key
+        # 1. Genuine 11-char YouTube ID
+        assert canonical_video_key({"video_id": "dQw4w9WgXcQ"}) == "dQw4w9WgXcQ"
+        # 2. YouTube shorts URL normalization
+        assert canonical_video_key({"url": "https://www.youtube.com/shorts/dQw4w9WgXcQ?feature=share"}) == "dQw4w9WgXcQ"
+        # 3. Regular watch URL
+        assert canonical_video_key({"url": "https://youtube.com/watch?v=dQw4w9WgXcQ"}) == "dQw4w9WgXcQ"
+        # 4. Canonical web URL (query stripped)
+        assert canonical_video_key({"url": "https://techcrunch.com/article-123?utm_source=twitter#heading"}) == "https://techcrunch.com/article-123"
+        # 5. Title fallback (hash)
+        assert len(canonical_video_key({"title": "A Great Video Title"})) == 16
+
+    def test_audio_date_regex_matches_video_summary_prefix(self):
+        from web_reader import _AUDIO_DATE_RE
+        m1 = _AUDIO_DATE_RE.match("summary_video_2026-10-11_dQw4w9WgXcQ.mp3")
+        assert m1 and m1.group(1) == "2026-10-11"
+        m2 = _AUDIO_DATE_RE.match("summary_2026-10-11_aevy_tv.mp3")
+        assert m2 and m2.group(1) == "2026-10-11"
+        m3 = _AUDIO_DATE_RE.match("2026-10-11_aevy_tv.mp3")
+        assert m3 and m3.group(1) == "2026-10-11"
+
+    def test_top20_wires_video_audio_without_channel_fallback(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "1")
+        summaries_dir = tmp_path / "summaries"
+        audio_dir = tmp_path / "audio"
+        site_dir = tmp_path / "site"
+        summaries_dir.mkdir()
+        audio_dir.mkdir()
+        site_dir.mkdir()
+        sources_file = tmp_path / "sources.json"
+        sources_file.write_text("[]")
+
+        run_date = "2026-10-09"
+        # Channel HTML and sidecar with 2 videos: vid1 has video audio, vid2 has no video audio
+        channel_html = summaries_dir / f"{run_date}_MyChannel_digest.html"
+        channel_html.write_text("<html><body><h1>MyChannel</h1></body></html>")
+        channel_sidecar = summaries_dir / f"{run_date}_MyChannel_digest.json"
+        channel_sidecar.write_text(json.dumps({
+            "run_date": run_date,
+            "channel_name": "MyChannel",
+            "category": "tech",
+            "summary_text": "Overview summary",
+            "items": [
+                {"title": "Video One", "url": "https://youtube.com/watch?v=11111111111", "video_id": "11111111111", "audio_url": "audio/summary_video_2026-10-09_11111111111.mp3"},
+                {"title": "Video Two", "url": "https://youtube.com/watch?v=22222222222", "video_id": "22222222222"}
+            ]
+        }))
+
+        # Top 20 HTML and sidecar with both items
+        top20_html = summaries_dir / f"{run_date}_Top_20_digest.html"
+        top20_html.write_text("<html><body><table></table></body></html>")
+        top20_sidecar = summaries_dir / f"{run_date}_Top_20_digest.json"
+        top20_sidecar.write_text(json.dumps({
+            "candidate_count": 2,
+            "items": [
+                {"rank": 1, "title": "Video One", "url": "https://youtube.com/watch?v=11111111111", "video_id": "11111111111", "source_name": "MyChannel"},
+                {"rank": 2, "title": "Video Two", "url": "https://youtube.com/watch?v=22222222222", "video_id": "22222222222", "source_name": "MyChannel"}
+            ]
+        }))
+
+        # Channel audio overview exists
+        (audio_dir / f"summary_{run_date}_mychannel.mp3").write_bytes(b"channel_audio")
+
+        build_reader_site(summaries_dir, audio_dir, site_dir, sources_file)
+        payload = json.loads((site_dir / "data.json").read_text(encoding="utf-8"))
+        top_items = payload["top20"]["items"]
+        assert len(top_items) == 2
+        # Video One must have the video-level audio
+        assert top_items[0]["audio_url"] == "audio/summary_video_2026-10-09_11111111111.mp3"
+        # Video Two must NEVER fall back to channel audio!
+        assert top_items[1]["audio_url"] == ""
+

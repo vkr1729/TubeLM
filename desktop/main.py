@@ -714,9 +714,28 @@ async def async_main(
                     html_path.write_text(html_body, encoding="utf-8")
                     logger.info("Local HTML digest saved to %s", html_path)
                     try:
+                        from tts_service import clean_video_safe_id, video_summary_filename, generate_video_summary_tts
+                        from email_service import _split_markdown_summary_by_videos, _strip_citations
+                        summary_text = result.get("summary_text", "")
+                        items = result.get("items", [])
+                        per_item = _split_markdown_summary_by_videos(_strip_citations(summary_text), items, handler.name)
+                        audio_dir = paths.get_audio_dir()
+                        for v in items:
+                            if isinstance(v, dict):
+                                safe_id = clean_video_safe_id(v)
+                                if safe_id:
+                                    v_file = video_summary_filename(run_date, safe_id)
+                                    v_path = audio_dir / v_file
+                                    v_url = v.get("url", "")
+                                    v_sum = per_item.get(v_url, "")
+                                    if not v_path.exists() or v_path.stat().st_size == 0:
+                                        generate_video_summary_tts(v, handler.name, v_path, summary_text=v_sum)
+                                    if v_path.exists() and v_path.stat().st_size > 0:
+                                        v["audio_file"] = v_file
+                                        v["audio_url"] = f"audio/{v_file}"
                         sidecar = {
                             "run_date": run_date,
-                            "channel_name": result.get("channel_name", ""),
+                            "channel_name": result.get("channel_name", "") or handler.name,
                             "source_type": result.get("source_type"),
                             "category": handler.category,
                             "notebook_url": result.get("notebook_url", ""),
@@ -727,12 +746,6 @@ async def async_main(
                         html_path.with_suffix(".json").write_text(json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8")
                     except Exception:
                         logger.exception("Failed to write channel digest sidecar for %s.", handler.name)
-                    try:
-                        from tts_service import generate_summary_tts
-                        tts_path = paths.get_audio_dir() / f"summary_{run_date}_{safe_name}.mp3"
-                        generate_summary_tts(result.get("summary_text", ""), tts_path)
-                    except Exception:
-                        logger.exception("Failed to generate summary TTS for %s.", handler.name)
 
                     if top10_enabled:
                         record_top10_source(

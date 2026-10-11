@@ -2748,6 +2748,13 @@
           : [...normalUnread, ...deferredUnread, ...readPicks];
         const seenCount = readPicks.length;
 
+        const hasTop20Audio = (items || []).some(it => Boolean(it.audio_url));
+        const playTop20Btn = hasTop20Audio ? `
+          <button onclick="queueTop20('${currentWeekKey}')" class="btn-subnav-pill inline-flex items-center gap-1.5" title="Play All Top 20 Summaries">
+            <span>🎧 Play All Top 20 Summaries</span>
+          </button>
+        ` : '';
+
         let html = `
           <article class="max-w-4xl mx-auto space-y-4">
             <!-- Mobile Top Bar: Back & Actions -->
@@ -2756,19 +2763,21 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
                 <span>Channels</span>
               </button>
-              <div>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                ${playTop20Btn}
                 ${seenCount > 0 ? `<button onclick="toggleHideSeen()" class="btn-subnav-pill">${hideSeen ? `Show Seen (${seenCount})` : `Hide Seen (${seenCount})`}</button>` : ''}
               </div>
             </div>
 
             <!-- Title & Meta Header Block -->
             <div class="view-heading-block">
-              <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
                 <div>
                   <h1 class="view-heading-title">Editorial Picks</h1>
                   <div class="view-heading-meta">Top ${items.length} curated videos · ~${weekData.total_read_minutes || 50} min read</div>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                  ${playTop20Btn}
                   ${top20.playlist_url ? `<a href="${escapeQuotes(top20.playlist_url)}" target="_blank" rel="noopener noreferrer" class="btn-subnav-pill inline-flex items-center gap-1.5 text-red-500 font-semibold" title="Watch Playlist on YouTube"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span>Watch on YouTube</span></a>` : ''}
                   <div class="hidden sm:block">
                     ${seenCount > 0 ? `<button onclick="toggleHideSeen()" class="btn-subnav-pill">${hideSeen ? `Show Seen (${seenCount})` : `Hide Seen (${seenCount})`}</button>` : ''}
@@ -2819,7 +2828,7 @@
                       </button>
                     ` : ''}
                     ${item.audio_url ? `
-                      <button onclick="playAudioDirect('${escapeQuotes(item.audio_url)}', '${safeTitle}', '${escapeQuotes(item.source_name || '')}')" class="btn-subnav-pill" style="padding: 4px 10px; font-size: 11px;" type="button" title="Listen to spoken audio">
+                      <button onclick="playAudioDirect('${escapeQuotes(item.audio_url)}', '${safeTitle}', '${escapeQuotes(item.source_name || '')}', '${key}', '', ${item.rank || 'null'})" class="btn-subnav-pill" style="padding: 4px 10px; font-size: 11px;" type="button" title="Listen to spoken audio">
                         🎧 Listen
                       </button>
                     ` : ''}
@@ -2925,6 +2934,11 @@
                       <a href="${safeExternalUrl(v.url)}" target="_blank" rel="noopener noreferrer" onclick="handleVideoPlay('${v.video_id || ''}', '${safeUrl}', '${ch.id}')">${esc(v.title)}</a>
                     </h3>
                     <div class="flex items-center gap-1.5 flex-shrink-0">
+                      ${v.audio_url ? `
+                        <button onclick="playAudioDirect('${escapeQuotes(v.audio_url)}', '${safeTitle}', '${escapeQuotes(ch.name || '')}', '${vidKey}', '${ch.id}')" class="btn-subnav-pill" style="padding: 2px 8px; font-size: 11px;" type="button" title="Listen to video summary">
+                          🎧 Listen
+                        </button>
+                      ` : ''}
                       ${vDeferred && !isWatched ? `<span class="deferred-tag">↓ Bottom</span>` : ''}
                       ${!isWatched ? `
                         <button onclick="toggleItemDeferred('${vidKey}', '${safeUrl}')" class="btn-bottom-sm ${vDeferred ? 'is-deferred' : ''}" type="button">
@@ -2965,9 +2979,10 @@
           </a>
         ` : '';
 
-        const listenBtn = ch.summary_audio_url ? `
-          <button onclick="playSummaryAudio('${ch.id}')" class="btn-subnav-pill" title="Listen to Summary">
-            <span>🔊 Listen</span>
+        const hasChannelAudio = (ch.videos || []).some(v => Boolean(v.audio_url)) || Boolean(ch.summary_audio_url) || Boolean(ch.has_audio && ch.audio_url);
+        const listenBtn = hasChannelAudio ? `
+          <button onclick="queueChannel('${currentWeekKey}', '${ch.id}')" class="btn-subnav-pill" title="Listen to Summary">
+            <span>🎧 Play Summaries</span>
           </button>
         ` : '';
 
@@ -3036,14 +3051,65 @@
 
     // Heard store (audio tracks listened to 90%+)
     function heardKey(src) { return 'tubelm_heard:' + src; }
+    function pruneHeardStore() {
+      try {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('tubelm_heard:')) keys.push(k);
+        }
+        if (keys.length > 1000) {
+          keys.slice(0, 200).forEach(k => localStorage.removeItem(k));
+        }
+      } catch (_) {}
+    }
     function isHeard(src) {
       if (!src) return false;
-      try { return localStorage.getItem(heardKey(src)) === '1'; } catch (_) { return false; }
+      try {
+        if (localStorage.getItem(heardKey(src)) === '1') return true;
+        if (localStorage.getItem(`tubelm_heard:${currentWeekKey}:${src}`) === '1') return true;
+      } catch (_) { return false; }
+      return false;
     }
     function markHeard(src) {
-      if (!src || isHeard(src)) return;
-      try { localStorage.setItem(heardKey(src), '1'); } catch (_) {}
+      if (!src) return;
+      try {
+        localStorage.setItem(heardKey(src), '1');
+        localStorage.setItem(`tubelm_heard:${currentWeekKey}:${src}`, '1');
+        pruneHeardStore();
+      } catch (_) {}
       renderSidebar();
+    }
+    function isHeardTrack(track) {
+      if (!track) return false;
+      if (typeof track === 'string') return isHeard(track);
+      const wk = track.weekKey || currentWeekKey;
+      const k = track.key || track.videoId || track.url;
+      try {
+        if (k && localStorage.getItem(`tubelm_heard:${wk}:${k}`) === '1') return true;
+        if (track.src && localStorage.getItem('tubelm_heard:' + track.src) === '1') return true;
+        if (track.src && localStorage.getItem(`tubelm_heard:${wk}:${track.src}`) === '1') return true;
+      } catch (_) {}
+      return false;
+    }
+    function markHeardTrack(track) {
+      if (!track) return;
+      const wk = track.weekKey || currentWeekKey;
+      const k = track.key || track.videoId || track.url;
+      try {
+        if (k) localStorage.setItem(`tubelm_heard:${wk}:${k}`, '1');
+        if (track.src) {
+          localStorage.setItem('tubelm_heard:' + track.src, '1');
+          localStorage.setItem(`tubelm_heard:${wk}:${track.src}`, '1');
+        }
+        pruneHeardStore();
+      } catch (_) {}
+      if (track.videoId || track.url) {
+        markVideoWatchedState(track.videoId, track.url, true);
+        if (track.channelId) syncChannelReadStateForVideo(track.videoId || track.url, track.channelId, wk);
+      }
+      renderSidebar();
+      renderActiveView();
     }
 
     // Brief mode
@@ -3176,12 +3242,35 @@
     const player = { queue: [], index: -1, speed: 1.0 };
     function savePlayer() {
       try {
-        localStorage.setItem('tubelm_player', JSON.stringify({ queue: player.queue, index: player.index, speed: player.speed }));
+        localStorage.setItem('tubelm_player_v2', JSON.stringify({ queue: player.queue, index: player.index, speed: player.speed }));
       } catch (_) {}
     }
     function loadPlayer() {
       try {
-        const raw = JSON.parse(localStorage.getItem('tubelm_player') || 'null');
+        let raw = JSON.parse(localStorage.getItem('tubelm_player_v2') || 'null');
+        if (!raw || !Array.isArray(raw.queue)) {
+          const legacy = JSON.parse(localStorage.getItem('tubelm_player') || 'null');
+          if (legacy && Array.isArray(legacy.queue)) {
+            raw = {
+              queue: legacy.queue.map(t => ({
+                key: t.key || t.src || '',
+                videoId: t.videoId || '',
+                url: t.url || '',
+                src: t.src,
+                title: t.title,
+                channelName: t.channelName || '',
+                channelId: t.chId || '',
+                category: t.category || null,
+                rank: t.rank || null,
+                weekKey: t.weekKey || currentWeekKey,
+                summary: Boolean(t.summary)
+              })),
+              index: legacy.index,
+              speed: legacy.speed
+            };
+            savePlayer();
+          }
+        }
         if (raw && Array.isArray(raw.queue)) {
           player.queue = raw.queue.filter(t => t && t.src);
           player.index = Number(raw.index);
@@ -3196,40 +3285,170 @@
       const wData = SITE_DATA.weeks[weekKey] || {};
       return ((wData.channels || []).find(c => c.id === chId)) || null;
     }
-    function buildQueue(weekKey, opts) {
-      const unheardOnly = !opts || opts.unheardOnly !== false;
-      const weekData = SITE_DATA.weeks[weekKey || currentWeekKey] || { channels: [] };
-      const list = (weekData.channels || []).filter(ch => (ch.has_audio && ch.audio_url) || ch.summary_audio_url).map(ch => {
-        const isFull = Boolean(ch.has_audio && ch.audio_url);
-        return {
-          ch,
-          src: isFull ? ch.audio_url : ch.summary_audio_url,
-          summary: !isFull,
-        };
-      }).filter(item =>
-        item.src &&
-        (currentCategoryId === 'all' || item.ch.category === currentCategoryId) &&
-        (!unheardOnly || !isHeard(item.src))
-      );
-      list.sort((a, b) => {
-        const ca = CATEGORY_ORDER.indexOf(a.ch.category);
-        const cb = CATEGORY_ORDER.indexOf(b.ch.category);
+    function queueTop20(weekKey) {
+      const wk = weekKey || currentWeekKey;
+      const wData = SITE_DATA.weeks[wk] || {};
+      const top20 = wData.top20 || {};
+      const items = (top20.items || []).filter(it => Boolean(it.audio_url));
+      if (!items.length) return;
+      const tracks = items.map((it, idx) => ({
+        key: it.video_id || it.url || ('top20_' + (it.rank || idx + 1)),
+        videoId: it.video_id || '',
+        url: it.url || '',
+        src: it.audio_url,
+        title: it.title || 'Top 20 Video',
+        channelName: it.source_name || '',
+        channelId: '',
+        category: '',
+        rank: it.rank || (idx + 1),
+        weekKey: wk,
+        summary: true
+      }));
+      player.queue = tracks;
+      player.index = 0;
+      savePlayer();
+      playIndex(0);
+    }
+    function queueChannel(weekKey, chId) {
+      const wk = weekKey || currentWeekKey;
+      const wData = SITE_DATA.weeks[wk] || {};
+      const ch = (wData.channels || []).find(c => c.id === chId);
+      if (!ch) return;
+      const tracks = [];
+      (ch.videos || []).forEach(v => {
+        if (v.audio_url) {
+          tracks.push({
+            key: v.video_id || v.url || '',
+            videoId: v.video_id || '',
+            url: v.url || '',
+            src: v.audio_url,
+            title: v.title,
+            channelName: ch.name,
+            channelId: ch.id,
+            category: ch.category,
+            rank: null,
+            weekKey: wk,
+            summary: true
+          });
+        }
+      });
+      // Fallback for legacy weeks with channel overview audio
+      if (!tracks.length && ch.summary_audio_url) {
+        tracks.push({
+          key: 'ch_' + ch.id,
+          videoId: '',
+          url: '',
+          src: ch.summary_audio_url,
+          title: ch.name + ' (Summary)',
+          channelName: ch.name,
+          channelId: ch.id,
+          category: ch.category,
+          rank: null,
+          weekKey: wk,
+          summary: true
+        });
+      }
+      if (!tracks.length) return;
+      player.queue = tracks;
+      player.index = 0;
+      savePlayer();
+      playIndex(0);
+    }
+    function queueAll(weekKey) {
+      const wk = weekKey || currentWeekKey;
+      const wData = SITE_DATA.weeks[wk] || {};
+      const tracks = [];
+      const seenKeys = new Set();
+      const seenSrcs = new Set();
+
+      // 1. Top 20 items first (#1 to #20)
+      const top20 = wData.top20 || {};
+      (top20.items || []).forEach((it, idx) => {
+        if (it.audio_url && !seenSrcs.has(it.audio_url)) {
+          const k = it.video_id || it.url || ('top20_' + (it.rank || idx + 1));
+          seenKeys.add(k);
+          if (it.video_id) seenKeys.add(it.video_id);
+          if (it.url) seenKeys.add(it.url);
+          seenSrcs.add(it.audio_url);
+          tracks.push({
+            key: k,
+            videoId: it.video_id || '',
+            url: it.url || '',
+            src: it.audio_url,
+            title: it.title,
+            channelName: it.source_name || '',
+            channelId: '',
+            category: '',
+            rank: it.rank || (idx + 1),
+            weekKey: wk,
+            summary: true
+          });
+        }
+      });
+
+      // 2. Remaining channel videos grouped by CATEGORY_ORDER with set-minus deduplication
+      const channels = [...(wData.channels || [])];
+      channels.sort((a, b) => {
+        const ca = CATEGORY_ORDER.indexOf(a.category);
+        const cb = CATEGORY_ORDER.indexOf(b.category);
         const ra = ca < 0 ? 99 : ca;
         const rb = cb < 0 ? 99 : cb;
         if (ra !== rb) return ra - rb;
-        return String(a.ch.name || '').localeCompare(String(b.ch.name || ''));
+        return String(a.name || '').localeCompare(String(b.name || ''));
       });
-      player.queue = list.map(item => ({
-        chId: item.ch.id,
-        weekKey: weekKey || currentWeekKey,
-        src: item.src,
-        title: item.summary ? `${item.ch.name} (Summary)` : item.ch.name,
-        category: item.ch.category,
-        summary: item.summary,
-      }));
-      player.index = -1;
+
+      channels.forEach(ch => {
+        (ch.videos || []).forEach(v => {
+          if (!v.audio_url) return;
+          const k = v.video_id || v.url || '';
+          if ((k && seenKeys.has(k)) || seenSrcs.has(v.audio_url)) return;
+          if (k) seenKeys.add(k);
+          if (v.video_id) seenKeys.add(v.video_id);
+          if (v.url) seenKeys.add(v.url);
+          seenSrcs.add(v.audio_url);
+          tracks.push({
+            key: k,
+            videoId: v.video_id || '',
+            url: v.url || '',
+            src: v.audio_url,
+            title: v.title,
+            channelName: ch.name,
+            channelId: ch.id,
+            category: ch.category,
+            rank: null,
+            weekKey: wk,
+            summary: true
+          });
+        });
+        if (ch.summary_audio_url && !seenSrcs.has(ch.summary_audio_url)) {
+          const hasAnyVid = (ch.videos || []).some(v => v.audio_url);
+          if (!hasAnyVid) {
+            seenSrcs.add(ch.summary_audio_url);
+            tracks.push({
+              key: 'ch_' + ch.id,
+              videoId: '',
+              url: '',
+              src: ch.summary_audio_url,
+              title: ch.name + ' (Summary)',
+              channelName: ch.name,
+              channelId: ch.id,
+              category: ch.category,
+              rank: null,
+              weekKey: wk,
+              summary: true
+            });
+          }
+        }
+      });
+
+      if (!tracks.length) return;
+      player.queue = tracks;
+      player.index = 0;
       savePlayer();
-      updateMiniPlayer();
+      playIndex(0);
+    }
+    function buildQueue(weekKey, opts) {
+      queueAll(weekKey);
     }
     function playIndex(i) {
       if (i < 0 || i >= player.queue.length) return;
@@ -3272,7 +3491,7 @@
     }
     function queueNext() {
       let i = player.index + 1;
-      while (i < player.queue.length && isHeard(player.queue[i].src)) i++;
+      while (i < player.queue.length && isHeardTrack(player.queue[i])) i++;
       if (i >= player.queue.length) {
         isAudioPlaying = false;
         try { if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused'; } catch (_) {}
@@ -3286,57 +3505,53 @@
       if (player.index > 0) playIndex(player.index - 1);
     }
     function playAllUnheard() {
-      buildQueue(currentWeekKey, { unheardOnly: true });
-      if (!player.queue.length) {
-        buildQueue(currentWeekKey, { unheardOnly: false });
-      }
-      if (!player.queue.length) return;
-      playIndex(0);
+      queueAll(currentWeekKey);
     }
     function playChannelAudio(chId) {
-      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
-      const ch = (weekData.channels || []).find(c => c.id === chId);
-      if (!ch) return;
-      const src = (ch.has_audio && ch.audio_url) ? ch.audio_url : ch.summary_audio_url;
-      if (!src) return;
-      const isSummary = !ch.audio_url;
-      const trackTitle = isSummary ? `${ch.name} (Summary)` : ch.name;
-      const idx = player.queue.findIndex(t => t.src === src);
-      if (idx >= 0 && idx === player.index) {
-        if (globalAudio.paused) {
-          globalAudio.play().then(() => {
-            isAudioPlaying = true;
-            updatePlayIcon();
-            updateMiniPlayer();
-          }).catch(() => {});
-        } else {
-          globalAudio.pause();
-          isAudioPlaying = false;
-          updatePlayIcon();
-          updateMiniPlayer();
-        }
-        return;
-      }
-      if (idx >= 0) { playIndex(idx); return; }
-      player.queue.splice(player.index + 1, 0,
-        { chId: ch.id, weekKey: currentWeekKey, src: src, title: trackTitle, category: ch.category, summary: isSummary });
-      playIndex(player.index + 1);
+      queueChannel(currentWeekKey, chId);
     }
     function enqueueChannel(chId) {
       const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
       const ch = (weekData.channels || []).find(c => c.id === chId);
       if (!ch) return;
-      const src = (ch.has_audio && ch.audio_url) ? ch.audio_url : ch.summary_audio_url;
-      if (!src) return;
-      const isSummary = !ch.audio_url;
-      const trackTitle = isSummary ? `${ch.name} (Summary)` : ch.name;
-      if (!player.queue.some(t => t.src === src)) {
-        player.queue.push({ chId: ch.id, weekKey: currentWeekKey, src: src, title: trackTitle, category: ch.category, summary: isSummary });
-        savePlayer();
+      let added = 0;
+      (ch.videos || []).forEach(v => {
+        if (v.audio_url && !player.queue.some(t => t.src === v.audio_url)) {
+          player.queue.push({
+            key: v.video_id || v.url || '',
+            videoId: v.video_id || '',
+            url: v.url || '',
+            src: v.audio_url,
+            title: v.title,
+            channelName: ch.name,
+            channelId: ch.id,
+            category: ch.category,
+            rank: null,
+            weekKey: currentWeekKey,
+            summary: true
+          });
+          added++;
+        }
+      });
+      if (!added && ch.summary_audio_url && !player.queue.some(t => t.src === ch.summary_audio_url)) {
+        player.queue.push({
+          key: 'ch_' + ch.id,
+          videoId: '',
+          url: '',
+          src: ch.summary_audio_url,
+          title: ch.name + ' (Summary)',
+          channelName: ch.name,
+          channelId: ch.id,
+          category: ch.category,
+          rank: null,
+          weekKey: currentWeekKey,
+          summary: true
+        });
       }
+      savePlayer();
       updateMiniPlayer();
     }
-    function playAudioDirect(src, title, channelName) {
+    function playAudioDirect(src, title, channelName, vidKey, chId, rank) {
       if (!src) return;
       const displayTitle = channelName ? `${channelName} · ${title || 'Audio'}` : (title || 'TubeLM Audio');
       const idx = player.queue.findIndex(t => t.src === src);
@@ -3356,47 +3571,45 @@
         return;
       }
       if (idx >= 0) { playIndex(idx); return; }
-      player.queue.splice(player.index + 1, 0, {
-        chId: null,
-        weekKey: currentWeekKey,
+      let vId = '';
+      let vUrl = '';
+      if (vidKey) {
+        if (vidKey.startsWith('http')) {
+          vUrl = vidKey;
+          const match = vidKey.match(/(?:v=|\/embed\/|\/shorts\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+          if (match) vId = match[1];
+        } else if (vidKey.length === 11) {
+          vId = vidKey;
+        }
+      }
+      const track = {
+        key: vidKey || src,
+        videoId: vId,
+        url: vUrl,
         src: src,
-        title: displayTitle,
+        title: title || displayTitle,
+        channelName: channelName || '',
+        channelId: chId || '',
         category: null,
+        rank: rank || null,
+        weekKey: currentWeekKey,
         summary: true
-      });
+      };
+      player.queue.splice(player.index + 1, 0, track);
       playIndex(player.index + 1);
     }
     function openMiniTrack() {
       const t = player.queue[player.index];
       if (!t) return;
       if (t.weekKey && t.weekKey !== currentWeekKey && SITE_DATA.weeks[t.weekKey]) switchWeek(t.weekKey);
-      if (t.chId) selectChannel(t.chId);
+      if (t.rank) {
+        selectTop20();
+      } else if (t.channelId || t.chId) {
+        selectChannel(t.channelId || t.chId);
+      }
     }
     function playSummaryAudio(chId) {
-      const weekData = SITE_DATA.weeks[currentWeekKey] || { channels: [] };
-      const ch = (weekData.channels || []).find(c => c.id === chId);
-      if (!ch || !ch.summary_audio_url) return;
-      const idx = player.queue.findIndex(t => t.src === ch.summary_audio_url);
-      if (idx >= 0 && idx === player.index) {
-        if (globalAudio.paused) {
-          globalAudio.play().then(() => {
-            isAudioPlaying = true;
-            updatePlayIcon();
-            updateMiniPlayer();
-          }).catch(() => {});
-        } else {
-          globalAudio.pause();
-          isAudioPlaying = false;
-          updatePlayIcon();
-          updateMiniPlayer();
-        }
-        return;
-      }
-      if (idx >= 0) { playIndex(idx); return; }
-      player.queue.splice(player.index + 1, 0,
-        { chId: ch.id, weekKey: currentWeekKey, src: ch.summary_audio_url,
-          title: ch.name + ' (Summary)', category: ch.category, summary: true });
-      playIndex(player.index + 1);
+      queueChannel(currentWeekKey, chId);
     }
     function toggleMiniPlay() {
       if (!player.queue.length || player.index < 0) return;
@@ -3446,14 +3659,36 @@
       } catch (_) {}
       if (!hasQueue) return;
       const t = player.queue[player.index];
-      const ch = findChannel(t.weekKey, t.chId) || {};
+      const ch = findChannel(t.weekKey, t.channelId || t.chId) || {};
       const titleEl = document.getElementById('mini-title');
       const subEl = document.getElementById('mini-sub');
       const playEl = document.getElementById('mini-play');
       const speedEl = document.getElementById('mini-speed');
       const progEl = document.getElementById('mini-progress');
-      if (titleEl) titleEl.textContent = t.title || ch.name || 'TubeLM';
-      if (subEl) subEl.textContent = t.summary ? 'Spoken Summary' : (ch.category ? ((CATEGORY_CONFIG[ch.category] && CATEGORY_CONFIG[ch.category].label) || ch.category) : 'NotebookLM Podcast');
+      const artEl = document.querySelector('.mini-art');
+      if (artEl) {
+        if (t.rank) artEl.textContent = '#' + t.rank;
+        else if (t.channelName) artEl.textContent = t.channelName.slice(0, 2).toUpperCase();
+        else if (ch.name) artEl.textContent = ch.name.slice(0, 2).toUpperCase();
+        else artEl.textContent = 'TL';
+      }
+      if (titleEl) {
+        if (t.channelName && t.title) {
+          titleEl.textContent = `${t.channelName} · ${t.title}`;
+        } else {
+          titleEl.textContent = t.title || ch.name || 'TubeLM';
+        }
+      }
+      if (subEl) {
+        if (t.rank) {
+          subEl.textContent = `Top 20 #${t.rank} · Spoken Summary`;
+        } else {
+          const cat = t.category || ch.category;
+          const catLabel = cat ? ((CATEGORY_CONFIG[cat] && CATEGORY_CONFIG[cat].label) || cat) : '';
+          subEl.textContent = catLabel ? `${catLabel} · Spoken Summary` : (t.summary ? 'Spoken Summary' : 'NotebookLM Podcast');
+        }
+      }
+      if (speedEl) speedEl.textContent = `${player.speed || 1.0}x`;
       const sameSrc = currentAudioSrc === t.src;
       let cur = 0;
       let dur = 0;
@@ -3508,12 +3743,13 @@
       if (!('mediaSession' in navigator)) return;
       const t = player.queue[player.index];
       if (!t) return;
-      const ch = findChannel(t.weekKey, t.chId) || {};
+      const ch = findChannel(t.weekKey, t.channelId || t.chId) || {};
       const wData = SITE_DATA.weeks[t.weekKey] || {};
+      const cat = t.category || ch.category || '';
       try {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: t.title || ch.name || 'TubeLM',
-          artist: 'TubeLM · ' + (ch.category || t.category || ''),
+          artist: (t.channelName || ch.name || 'TubeLM') + (t.rank ? ` · Top 20 #${t.rank}` : (cat ? ` · ${cat}` : '')),
           album: 'Week of ' + (wData.run_date || ''),
           artwork: [
             { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -3584,9 +3820,15 @@
       try { localStorage.setItem('tubelm_pos:' + currentAudioSrc, String(globalAudio.currentTime)); } catch (_) {}
       try {
         const d = globalAudio.duration;
-        if (currentAudioSrc && d && isFinite(d) && d > 0 && !isHeard(currentAudioSrc) &&
-            globalAudio.currentTime / d >= 0.9) {
-          markHeard(currentAudioSrc);
+        if (currentAudioSrc && d && isFinite(d) && d > 0 && globalAudio.currentTime / d >= 0.9) {
+          if (player.queue.length > 0 && player.index >= 0) {
+            const curr = player.queue[player.index];
+            if (curr && curr.src === currentAudioSrc && !isHeardTrack(curr)) {
+              markHeardTrack(curr);
+            }
+          } else if (!isHeard(currentAudioSrc)) {
+            markHeard(currentAudioSrc);
+          }
         }
       } catch (_) {}
       updateMiniPlayer();
@@ -3602,7 +3844,13 @@
     });
 
     globalAudio.onended = () => {
-      if (player.queue.length > 0 && player.index >= 0) { queueNext(); return; }
+      if (player.queue.length > 0 && player.index >= 0) {
+        const curr = player.queue[player.index];
+        if (curr) markHeardTrack(curr);
+        queueNext();
+        return;
+      }
+      if (currentAudioSrc) markHeard(currentAudioSrc);
       isAudioPlaying = false;
       updatePlayIcon();
       updateMiniPlayer();

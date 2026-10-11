@@ -760,3 +760,273 @@ Verified present but absent from the plan:
 10. N=0 iOS empty-state copy + four-gate quarantine relaxation.
 11. UAT harness rewrite scope (extend 13 checks) + `--build-only`-first rule + R2-less
    oversize recovery path.
+
+---
+
+## Video-Level Audio Summaries & Playlist Queues — Plan Review (code-verified 2026-10-11)
+
+Source: working-tree `.workflow/REQUIREMENTS.md` (§§1–5) + `.workflow/IMPLEMENTATION_PLAN.md`
+(Phases 1–4 + verification + guardrails). Code verified against `desktop/tts_service.py`,
+`desktop/paths.py`, `desktop/web_reader.py`, `desktop/audio_storage.py`,
+`desktop/main.py:730-735`, `desktop/email_service.py:42-89`,
+`desktop/templates/reader.html:3038-3609`.
+Prior sections of this file stand except where noted (schema divergence is resolved —
+`data.json` export exists with `schema_version: 1`; do not re-litigate).
+
+Scale anchor (unchanged): single-person personal use, ~37 sources, 2-week rolling
+retention, Friday-overnight window, GitHub Pages + R2 + LiveContainer. No new
+dependencies, no server logic changes, no background daemons.
+
+Status: REQUIREMENTS rewrite is sound (Q1–Q5 in `FRONTIER_REQUIREMENTS_REVIEW.md`
+already resolve the ambiguities). The plan is directionally right but under-specified
+in six places below. Fix contracts before synthesis, or per-video files will misjoin.
+
+### P0-1 — Dual identity namespaces will misjoin (blocker, fix before any synthesis)
+
+- Plan defines two different keys: `clean_video_safe_id` → `video_id` or
+  `sha256(url)[:12]` (Phase 1, filename namespace) vs `_canonical_video_key` →
+  `video_id → canonical URL → sha256(title_lower)[:16]` (Phase 2, join namespace).
+  `[:12]` vs `[:16]`, raw-URL vs canonical-URL, plus the existing third
+  implementation `_make_item_id` (`web_reader.py:92-113`: `id → url(≤200) → title-hash`)
+  used by `id`/`read_ids`/mobile export. Synthesis keyed by one, join keyed by
+  another, identity keyed by a third — RSS articles and `youtu.be` vs `watch?v=`
+  pairs will orphan.
+- Case-sensitivity unstated: `_clean_video_id` (`:81-89`), `_VIDEO_ID_RE` (`:40`),
+  and `extract_youtube_video_id` (`:200-209`) are case-sensitive by construction
+  (YouTube ids are case-sensitive). Any `lower()` in the new helper breaks joins.
+- URL canonicalization unstated: `extract_youtube_video_id` handles `v=`, `/embed/`,
+  `youtu.be/`, `/v/` but NOT `shorts/` — the same video via Shorts URL yields two keys.
+  Tracking params (`?si=`, `&t=`) also fork keys.
+- Filename → join link missing: Phase 1 names files by `safe_id`, Phase 2 joins by
+  canonical key, but no manifest maps canonical → filename. `web_reader.py` must
+  resolve `canonical key → summary_video_{date}_{safe_id}.mp3` by existence check
+  or map, or Top-20 wiring finds nothing.
+
+Recommendation:
+1. One helper, two thin wrappers: `_canonical_video_key(item)` (exact 11-char id
+   when `extract_youtube_video_id(url) or video_id` yields a match — compare exact,
+   never lowercase; else canonical URL `youtu.be → youtube.com/watch?v=`, strip
+   tracking params, `shorts/` + `embed/` normalized; else `sha256(title-lower)[:16]`)
+   for joins, `clean_video_safe_id(video)` for filenames (`video_id` when it passes
+   `_VIDEO_ID_RE`, else `sha256(url)[:12]`). Document why truncations differ
+   (filename brevity vs join collision margin) or unify to one length.
+2. Extend `extract_youtube_video_id` to `shorts/` (one alternation), reuse it in both
+   helpers — do not write a second URL parser.
+3. Reuse, do not duplicate `_make_item_id`: either extend it with canonicalization
+   or make the new key a wrapper around it. Three identity functions will drift.
+4. `parse_channel_digest_json` must passthrough `sidecar items[i].audio_url` when
+   present, else resolve via `audio_dir / f"summary_video_{run_date}_{safe_id}.mp3"`
+   existence — state which. Apply the Top-20 join to BOTH sidecar-Top
+   (`build_reader_site:1079-1098`) and HTML-`parse_top20_digest` paths.
+5. Fix the symbol name: plan says `build_web_reader()` — no such symbol; the
+   function is `build_reader_site`. Same class of error as the prior P0.
+
+### P0-2 — Triple synthesis sites + inline runtime blowup (blocker)
+
+- Plan synthesizes in three places: `main.py` inline per-video loop (Phase 2, around
+  `:730-735`), `_backfill_week_async` per-video mode (Phase 1), and the existing
+  build-time backfill (`web_reader.py:1113-1121`, `if generate_tts and not
+  PYTEST_CURRENT_TEST`). All three writing `summary_video_*.mp3` with
+  `force=False` skip-if-exists is idempotent but wasteful; worse, the inline loop
+  runs synchronously per channel inside the `INTER_CHANNEL_COOLDOWN = 120`s
+  pipeline: ~150–200 edge-tts calls × ~20–40 s each = ~50–100 min PLUS 37×120 s
+  cooldown ≈ 74 min → 2–3 h overnight-window breach. Failure degrades to `False`
+  by design (`tts_service.py:1-6`), so partial-audio weeks are normal — yet Phase 2
+  eliminates the channel-audio fallback with no partial-week rendering rule beyond
+  "audio_url = ''".
+- R2 N+1: `upload_audio` is idempotent via `head_object` (`audio_storage.py:50-54`)
+  but 200 sequential `head_object` + conditional uploads per build adds minutes
+  with no concurrency and no per-run summary.
+- `main.py:731-733` currently calls `generate_summary_tts(result.get("summary_text",""))`
+  synchronously per channel. Dropping a per-video inner loop there preserves the
+  bottleneck in its worst position.
+
+Recommendation: single synthesis site. `main.py` writes sidecar text only (no TTS
+inline); one async per-video backfill (`_backfill_week_async` per-video mode,
+concurrency 3 preserved, `return_exceptions=True` already at `:269`) does all
+synthesis with `{scanned, generated, skipped-no-text, failed}` logging; the
+`web_reader.py:1113-1121` build-time block becomes skip-when-sidecar-audio-present
+(keep as degraded fallback for `--build-only` runs, not primary). `force=False`
+idempotency stays. Measure week-one runtime before raising concurrency — 3 is the
+proven edge-tts ceiling.
+
+### P0-3 — Split-text fragility has no unmatched policy (blocker)
+
+- Phase 2 leans on `_split_markdown_summary_by_videos` (`email_service.py:42-89`):
+  splits on `"\n## "` only (LLM emitting `###` or bare text → `{}`), matches on
+  `cleaned_header in v_title or reverse` else word-overlap `>= 2` (short/generic
+  titles fail silently), keyed by raw `url` (empty-URL items collide on `""`).
+  `parse_channel_digest_json` (`web_reader.py:555-561`) already calls it but drops
+  unmatched without a count. Phase 2 names no fallback for the 2-of-5-matched case.
+- `clean_text_for_speech` (`tts_service.py:78-109`) vs `_strip_citations`
+  (`email_service.py:36-39`) have divergent citation regexes; Phase 1 extends only
+  the former (slash/backslash/backtick + pause insertion). Drift risk on the next
+  citation-format change.
+
+Recommendation: unmatched → `audio_url = ""` (hidden button, never dead button,
+never channel fallback) + per-channel `unmatched_video_count` in logs. Key the
+split map by canonical key (P0-1), not raw URL. Unify citation stripping in one
+helper or record the divergence as intentional (email uses `\s*` prefix, TTS does
+not — state which is canonical). Generic pause rule over hard-coded headings:
+any heading line without terminal punctuation gets `". "` appended before the
+final `" ".join(t.split())` normalize (order matters — insert pauses BEFORE
+whitespace collapse), rather than enumerating `The Hook / The Mechanics…` strings
+that rot when the LLM rewords headings. Slash rule: `and/or → and or` plus
+isolated-slash strip, but preserve fractions/dates via word-boundary guards;
+test `AC/DC`, `1/2`, `2026/10/11` explicitly.
+
+### P1-1 — Retention / R2 / deploy ordering gaps
+
+- Regex fix is correct (`r"^(?:summary_(?:video_)?)?(\d{4}-\d{2}-\d{2})_"` covers
+  `summary_`, `summary_video_`, bare) but Phase 1 lists it under
+  "`paths.py` / `web_reader.py`" — the regex lives only in `web_reader.py:38`
+  (`paths.py` holds only `TOP_DIGEST_FILENAME_RE`). Land the one-line regex fix
+  BEFORE the first synthesis run (Slice 0), or one week of per-video files evades
+  `purge_old_digests_and_audio` (`:121`) locally while R2 purge (`audio_storage.py:75`,
+  `/YYYY-MM-DD/` in key) stays safe — split-brain retention for a week.
+- R2-first ordering must mirror the channel path (`web_reader.py:1123-1130`):
+  upload `summary_video_*.mp3` → on remote URL delete local `site/audio` copy,
+  else retain as fallback. Plan omits this; without it `site/audio/` holds
+  ~400 files (~50–100 MB) when R2 is unconfigured and the orphan `gh-pages`
+  force-push balloons. Per-file 5 MB gate (`:1319-1323`) passes for TTS
+  (~50–300 KB) — but one stray NotebookLM `.m4a` still fails the whole deploy
+  with no recovery order. Record `--compress-audio` / manual-exclusion fallback.
+- Skip `optimize_audio_for_web` (ffmpeg 64k mono) for `summary_video_*` — it targets
+  NotebookLM podcasts, not edge-tts MP3s. Re-transcoding 200 small files wastes
+  build minutes.
+- Historical-week rule (§2.D) needs a week-scoped guard the plan never names:
+  `hasPerVideoTracks(weekKey)` → hide `Play All Top 20` / `Play Summaries` /
+  per-card `Listen` when zero, keep legacy channel-audio button. `main()` deploys
+  by default (`:1392`, `if args.deploy or not args.build_only`) — UAT must run
+  `--build-only` first or every test build force-pushes `gh-pages`.
+- Deprecation checklist (deletion-only, name both sites): disable channel-TTS
+  synthesis in `backfill_week` (`tts_service.py:278`) AND the `web_reader.py:1111-1131`
+  block; keep tolerant-read of existing `summary_{date}_{ch}.mp3` /
+  `summary_audio_url` for historical weeks. NotebookLM `audio_url` deep-dives untouched.
+
+### P1-2 — Frontend queue migration + heard↔watched coupling pitfalls
+
+- Storage migration: persisted `tubelm_player` has old shape
+  `{chId, weekKey, src, title, category, summary}` (`reader.html:3222-3229`);
+  new track is `{key, videoId, url, src, title, channelName, channelId, category,
+  rank, weekKey}` with `chId` → `channelId` rename. `loadPlayer` (`:3182-3194`)
+  filters `t && t.src` only — old queues restore with missing `key/videoId/url/rank`,
+  breaking set-minus dedupe (needs `key`) and auto-watched (needs `videoId/url`).
+  Version the key (`tubelm_player_v2`) or backfill `key` via canonical helper on
+  load and drop un-migratable tracks. Same for `toggleAudio` (`:3544-3568`) which
+  bypasses the queue — scope it to historical-week monolithic playback only;
+  route all new buttons (`Play All Top 20`, `Play Summaries`, per-card `Listen`
+  via `playAudioDirect`-replacement) through `playIndex`/`queueNext`.
+- Heard keys: today `tubelm_heard:{src}` (`:3038-3047`), unbounded, URL-form
+  sensitive (`audio/…` vs R2 `https://…` fork keys). New scheme
+  `tubelm_heard:{week}:{key}` with `src` alias is right, but `isHeard` must check
+  BOTH on read (or users re-hear everything post-upgrade), and writes need a prune
+  cap (latest ~1000, mirroring `MAX_READ_IDS = 5000` in `web_reader.py:117`) or
+  150 tracks/week × 2 weeks exhausts `localStorage`.
+- Trigger: keep `timeupdate ≥ 0.9 AND isFinite(duration)` OR `ended` as the single
+  mark path calling both `markHeard(key)` and `markVideoWatchedState(videoId, url,
+  true)` via the track-carried `{videoId, url}` lookup. Preserve the
+  `d && isFinite(d) && d > 0` guard (`:3587`); document seek-gaming (seek-to-95%
+  counts) and saved-pos-restore-past-90%-counts as accepted for a one-user player
+  — do not special-case them. Forward-skip = `queueNext` only; `queuePrev` never
+  skips; `playAllUnheard` unheard-only with fallback-to-full (`:3288-3295`) preserved.
+- Restore hardening: on `loadPlayer`, drop tracks whose `weekKey` is not
+  `current/prev` and surface "Queued track unavailable (week purged)" in the
+  mini-player instead of the current console-only warning (`playIndex` catch,
+  `:3259-3266`). `setMediaSessionMeta` currently resolves via
+  `findChannel(t.weekKey, t.chId)` — with `chId: null` Top-20 tracks it resolves
+  `{}`; switch metadata to track fields directly.
+- Out-of-scope freeze (note as non-goals so they are not filed as regressions):
+  Brief mode `🔊 Listen` (`:3089`), RSS `feed.xml` enclosures (Top-10-only, `:779`),
+  email digest links. iOS `resolveAudioUrl` channel-fallback
+  (`RootTabView.swift:530-544`) + `mergeFeedAudio` video backfill (`:563-594`)
+  must be deleted in an iOS follow-up or the banned fallback survives on-device —
+  Phase 4 is silent here (see P1-3).
+
+### P1-3 — Verification names are wrong; iOS divergence is silent
+
+- `from desktop.web_reader import build_web_reader` — no such symbol (see P0-1.5).
+  Phase 2 verification (`pytest test_web_reader.py`) and Phase 3 (`web_reader.py
+  --build-only`) are valid commands but insufficient gates. Append vector tests,
+  not just "run the file".
+- Phase 4 "Monitor `build-ios.yml` / `verify.yml` to compile iOS app" overstates a
+  web-only change (Python + vanilla JS + static deploy). Either scope iOS
+  explicitly OUT of v1 (web ships; iOS fallback-removal + per-video wiring is a
+  sequenced follow-up) or add the iOS slice now. Shipping web-hide-button while
+  iOS keeps channel-fallback reintroduces exactly the mislabeled-audio §2.B bans,
+  permanently disagreeing on watched state (web-at-90% vs iOS-at-start,
+  `RootTabView.swift:546-550`).
+
+### P2 — Over-engineering cuts (plan is already lean; hold these lines)
+
+- Hard-coded heading-pause list → generic terminal-punctuation rule (P0-3).
+- Dual-key maps (raw + normalized channel keys, `web_reader.py:1171-1178,1248-1256`)
+  → normalized-only once the canonical video key lands (~half the keys, one path).
+- No server-side (build-time) `.m3u` playlists, no heard-sync via worker (heard stays
+  device-local; `readIDs` sync is the cross-device watched bit), no fuzzy title
+  matching for join misses (honest empty state over wrong-video audio), no mass
+  backfill (decision-log Q6), no new TTS provider or player library, no service-worker
+  changes (audio cache-first already handles `summary_video_*` via `/audio/` prefix).
+- Keep per-scope queues (Top-20 / channel / site-wide) with the existing
+  NotebookLM-vs-TTS separation (`reader.html:3163` comment); do not merge into one
+  always-mixed queue. Keep `force=False` idempotency; do not re-spec it.
+
+### Suggested slice order (dependency-safe)
+
+1. **Slice 0 — contract lock (no synthesis):** `safe_id` + canonical-key helpers +
+   `shorts/` extract fix + `_AUDIO_DATE_RE` extension + sidecar shape
+   (`items[i].audio_url/audio_path`) + vector unit tests. Regex lands before any MP3.
+2. **Slice 1 — TTS service:** `clean_text_for_speech` extensions (slash/backtick/
+   pause, order-sensitive) + `generate_video_summary_tts` + `_backfill_week_async`
+   per-video mode + deprecation checklist (both sites) + `{scanned, generated,
+   skipped, failed}` counts. Parallelizable with Slice 2 only after Slice 0.
+3. **Slice 2 — pipeline + join:** `main.py` sidecar text (no inline TTS) +
+   `parse_channel_digest_json` passthrough + `build_reader_site` Top-20/channel
+   join (both Top paths) + `_normalize_mobile_*` video-audio preservation (delete
+   both channel fallbacks `:1188-1191, :1265-1266`). `main.py` vs `web_reader.py`
+   are file-disjoint — may parallelize after Slice 0; do not parallelize two
+   `web_reader.py` hunks (regex vs join overlap).
+4. **Slice 3 — reader.html queue:** `buildVideoQueue` primitive + `queueTop20` /
+   `queueChannel` / `queueAll` (Top-20 rank 1→20, set-minus remainder by
+   `CATEGORY_ORDER` then channel then digest order, `audio_url == ""` skipped with
+   "N of 20 have audio" note) + heard-alias + 90%-or-ended watched coupling +
+   `tubelm_player_v2` migration + historical-week guard. Starts only after
+   `data.json` carries video audio.
+5. **Slice 4 — UAT / deploy:** `--build-only` first, localhost Playwright (never
+   `file://` for `data.json` fetch), extend — don't replace — existing checks,
+   R2/compress fallback documented, live `run_date` smoke with empty-`run_date`
+   handling. iOS fallback-removal sequenced as follow-up, not parallel.
+
+### Verification additions (append to plan §4)
+
+- Automated: cleaning vector (`and/or`, `AC/DC`, `1/2`, backticks, `\$`, `[1]/[2-4]`,
+  heading-pause-before-collapse); `safe_id` YouTube-vs-RSS pair; canonical-key
+  vector (watch / `youtu.be` / `shorts` / `embed` / bare / RSS / trailing-slash /
+  query-param); join roundtrip (Top-20 ↔ channel with mismatched URL forms);
+  no-fallback test (`audio_url == ""` when unjoined); mobile normalization preserves
+  video audio without channel fallback; queue test (rank order, set-minus dedupe,
+  `summary` flag reuse — do NOT introduce parallel `isSummary`); heard forward-skip
+  vs backward-no-skip; 90%-guard with `NaN/Infinity` duration; `loadPlayer`
+  purge-of-stale-weeks.
+- Manual: partial-week render (N-of-20 note, no dead buttons); corrupt/restored
+  queue drill (purged-week tracks → mini-player notice); seek-to-95% documents
+  heard; saved-pos-past-90% documents heard; historical-week guard (queue buttons
+  hidden, legacy channel audio intact); oversize-audio drill (stray >5 MB without
+  R2 → documented recovery); `--build-only`-before-push discipline.
+- Negative controls already in `UAT_PLAN.md` (corrupt cache, empty cache,
+  unplayable item) — link them; Slice 5's checklist alone is insufficient exit.
+
+### Decisions needed (blocking Slice 0 / Slice 2)
+
+1. `safe_id [:12]` vs canonical `[:16]` — unify or record why different; exact
+   (case-sensitive) id compare confirmed.
+2. Single synthesis site (recommend async backfill, `main.py` text-only) vs inline.
+3. `build_web_reader` → `build_reader_site` rename + sidecar-audio passthrough rule.
+4. Heard migration: `tubelm_player_v2` vs in-place backfill; `isHeard` dual-check +
+   ~1000-key prune cap accepted.
+5. Historical-week guard (`hasPerVideoTracks`) + R2-first post-upload site/audio
+   deletion + skip-`optimize` for `summary_video_*` accepted.
+6. iOS scope: web-only v1 + sequenced fallback-removal follow-up (recommend) vs
+   in-scope iOS slice now.
+7. Brief / RSS / email as explicit non-goals confirmed.
+

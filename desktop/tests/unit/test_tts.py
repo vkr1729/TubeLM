@@ -4,7 +4,15 @@ from pathlib import Path
 
 
 import tts_service
-from tts_service import backfill_week, clean_text_for_speech, generate_summary_tts
+from tts_service import (
+    backfill_video_summaries,
+    backfill_week,
+    clean_text_for_speech,
+    clean_video_safe_id,
+    generate_summary_tts,
+    generate_video_summary_tts,
+    video_summary_filename,
+)
 
 
 class TestCleanText:
@@ -24,6 +32,57 @@ class TestCleanText:
 
     def test_whitespace_normalized(self):
         assert clean_text_for_speech("a\n\nb   c") == "a b c"
+
+    def test_heading_pause_insertion(self):
+        text = "### 1. The Hook\nImagine losing $35 Billion.\n\n### The Takeaway\nAlways manage risk."
+        clean = clean_text_for_speech(text)
+        assert "1. The Hook. Imagine losing $35 Billion." in clean
+        assert "The Takeaway. Always manage risk." in clean
+
+    def test_slash_and_backslash_cleaning(self):
+        text = r"Trading \$35 Billion and/or CoreWeave w/ margin in 2026/10/11 at 1/2 price `code`."
+        clean = clean_text_for_speech(text)
+        assert r"\$" not in clean and "$" in clean
+        assert "and or" in clean
+        assert "with margin" in clean
+        assert "2026/10/11" in clean
+        assert "1/2" in clean
+        assert "`" not in clean
+
+
+class TestVideoSummaryHelpers:
+    def test_clean_video_safe_id(self):
+        assert clean_video_safe_id({"video_id": "7K_sA6o1dOE"}) == "7K_sA6o1dOE"
+        assert clean_video_safe_id({"url": "https://www.youtube.com/watch?v=J3ljHm57yU0"}) == "J3ljHm57yU0"
+        assert clean_video_safe_id({"url": "https://youtu.be/J3ljHm57yU0"}) == "J3ljHm57yU0"
+        assert clean_video_safe_id({"url": "https://www.youtube.com/shorts/J3ljHm57yU0"}) == "J3ljHm57yU0"
+        # RSS / non-YouTube url falls back to sha256(url)[:12]
+        rss_item = {"url": "https://technologyreview.com/article-123"}
+        safe_id = clean_video_safe_id(rss_item)
+        assert len(safe_id) == 12
+        assert safe_id == clean_video_safe_id(rss_item)
+
+    def test_video_summary_filename(self):
+        assert video_summary_filename("2026-10-11", "7K_sA6o1dOE") == "summary_video_2026-10-11_7K_sA6o1dOE.mp3"
+
+    def test_generate_video_summary_tts_announces_title_and_channel(self, tmp_path, monkeypatch):
+        spoken = []
+        def fake_generate(text, path, voice=None, rate=None, force=False):
+            spoken.append(text)
+            path.write_bytes(b"tts")
+            return True
+
+        monkeypatch.setattr(tts_service, "generate_summary_tts", fake_generate)
+        out = tmp_path / "out.mp3"
+        res = generate_video_summary_tts(
+            "How to Lose $35 Billion",
+            "ColdFusion",
+            "### The Hook\nLeopold Aschenbrenner managed 45 billion dollars.",
+            out,
+        )
+        assert res is True
+        assert len(spoken) == 1
+        assert spoken[0].startswith("How to Lose $35 Billion, by ColdFusion. The Hook. Leopold Aschenbrenner")
 
 
 class TestGenerate:

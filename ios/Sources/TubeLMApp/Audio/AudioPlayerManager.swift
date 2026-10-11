@@ -34,6 +34,12 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
                 guard let self = self else { return }
                 guard let finished = notification.object as? AVPlayerItem,
                       finished == self.player?.currentItem else { return }
+                if !self.queue.isEmpty {
+                    let nextItem = self.queue.items[0]
+                    self.queue.remove(id: nextItem.id)
+                    self.playTrack(title: nextItem.title, source: nextItem.sourceName, urlString: nextItem.audioUrl)
+                    return
+                }
                 self.isPlaying = false
                 self.updateNowPlayingInfo()
             }
@@ -91,6 +97,18 @@ public final class AudioPlayerManager: NSObject, ObservableObject {
         commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
             self?.skip(seconds: -15)
             return .success
+        }
+        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self = self else { return .commandFailed }
+                if !self.queue.isEmpty {
+                    let nextItem = self.queue.items[0]
+                    self.queue.remove(id: nextItem.id)
+                    self.playTrack(title: nextItem.title, source: nextItem.sourceName, urlString: nextItem.audioUrl)
+                    return .success
+                }
+                return .noSuchContent
+            }
         }
     }
 

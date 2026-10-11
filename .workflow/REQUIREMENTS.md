@@ -1,124 +1,105 @@
-# Requirements Specification: TubeLM Web & Mobile Sync
+# Requirements Specification: TubeLM Video-Level Audio Summaries & Playlist Queues
 
 ## 1. Project Overview & Target User Anchor
 - **Project Name:** TubeLM (Personal YouTube & RSS Intelligence Digest)
 - **Target User & Scale:** **Single-Person Personal Use Exclusively**.
-  - *Hard Constraint:* Strictly reject enterprise complexity, authentication frameworks, microservices, or complex distributed databases.
-  - *Web Reader:* Hosted on GitHub Pages (`https://vkr1729.github.io/TubeLM/`) with data synced via Cloudflare Worker/R2.
-  - *iOS App:* Native Swift/SwiftUI application running in LiveContainer on iOS with offline caching and background Cloudflare sync.
-- **Primary Objective:** Fix critical breakdown where Top 20/Top 14 digest is not formed or displayed on GitHub Pages, restore synchronization with the iOS app, streamline pipeline retries (removing preliminary digest), and fix unreliable audio summary playback.
+  - *Hard Constraint:* Strictly reject enterprise complexity, authentication frameworks, microservices, or complex caching.
+  - *Web Reader:* Hosted on GitHub Pages (`https://vkr1729.github.io/TubeLM/`) with static site data synced via Cloudflare Worker/R2.
+  - *iOS App:* Native Swift/SwiftUI application running in LiveContainer on iOS with offline caching and background sync.
+- **Primary Objective:** Transition from monolithic channel-level audio summaries to granular video-level audio summaries. When listening to a video card (especially in the Top 20 briefing), the player should play only that video's summary instead of reading the summaries of all videos from that channel. Provide dedicated playlist queues (Top 20, channel-level, and site-wide) that automatically track listened items, skip heard summaries, and sync watched status.
 
 ---
 
 ## 2. Functional Requirements (Scope Matrix)
 
-### A. Dynamic Top Digest & Pattern Matching
-- **Pattern Generalization:** Generalize all Top digest detection from hardcoded `"Top_20"` / `"Top_10"` checks to robust regex pattern matching `r"^(\d{4}-\d{2}-\d{2})_(?:TubeLM_)?Top_(\d+)_digest\.(html|json)$"` (with `re.IGNORECASE`) across:
-  - `desktop/paths.py` (central `is_top_digest_file` and `parse_top_digest_count` helpers).
-  - `desktop/web_reader.py` (line 1061 and everywhere file matching occurs).
-  - `desktop/tts_service.py` (line 255 to properly skip Top digests during channel TTS synthesis).
-  - `desktop/scripts/download_top10.py` and `desktop/scripts/send_top10_from_digests.py` (preserving exclusion polarity).
-  - `desktop/tests/unit/`.
-- **Dynamic Count Support:** The Top digest must support any candidate count (e.g., 14, 20) without failing:
-  - Web Reader reading pane header dynamically displays "Top {N} curated videos" (or honest empty state if N=0).
-  - Sidebar count label displays "{N} items".
-  - Never parse a Top digest as a regular channel.
-  - Mobile `data.json` exports `top20.candidate_count: N` and `top20.items: [...]`.
-  - iOS app `ContentStore.swift` and `BriefingView.swift` accept and render any valid feed where `channels` or `top20.items` are present (works with 14, 20, or honest empty state for N=0).
+### A. Video-Level Audio Synthesis & Storage
+- **Per-Video Synthesis:**
+  - Generate audio summaries for each individual video across all channels.
+  - Because Top 20 items are drawn directly from these channel videos, every Top 20 video references its corresponding video-level audio summary without duplicate synthesis.
+  - If a video's summary text is `< 20 chars`, skip synthesis and set `audio_url = ""` (renders no listen button—never a dead button).
+- **Spoken Script Format & Human Pacing:**
+  - Narration announces the title and channel first, followed by the video summary breakdown:
+    `"<Video Title>, by <Channel Name>. <Summary Breakdown>"`
+  - **Enhanced Speech Cleaning:**
+    - Strip all markdown hashes (`#`, `##`, `###`), stray slashes (`/`), backslashes (`\`, `\$`), backticks (`` ` ``), and bracketed citations (`[1]`, `[2-4]`).
+    - Convert slashes like `and/or` into natural words (`and or`), and strip isolated slashes so the voice never verbalizes "slash" or "hashtag".
+    - Strip escaped characters like `\$` so it pronounces currency normally without saying "backslash".
+  - **Strategic Natural Pauses:**
+    - Insert natural punctuation pauses (`. `, `... `, or clean sentence terminations) after title/channel announcements and between major sections (`The Hook.`, `The Mechanics and Evidence.`, `The Core Principle.`).
+    - Ensure section headings end with a terminal pause so headings do not run into body sentences.
+- **File Naming & Cloudflare R2 Upload:**
+  - Deterministic naming: `summary_video_{run_date}_{safe_id}.mp3`.
+  - `safe_id` uses the exact 11-char YouTube `video_id` when valid; for non-YouTube articles or RSS items, uses `sha256(url)[:12]` to eliminate slug collisions.
+  - Stored in `~/.tubelm/audio/` and synced to `site/audio/`.
+  - Uploaded to Cloudflare R2 under `tubelm/audio/{run_date}/summary_video_{run_date}_{safe_id}.mp3`.
+  - Extend retention regex `_AUDIO_DATE_RE` in `web_reader.py` to `r"^(?:summary_(?:video_)?)?(\d{4}-\d{2}-\d{2})_"` to automatically purge per-video files under the 2-week rolling window.
+- **Deprecate Monolithic Channel TTS:**
+  - Deprecate generating single monolithic channel-concatenated summary MP3s. Channel-level listening will queue the individual video summary tracks.
+  - NotebookLM 2-host audio overviews (when generated) remain available as full channel deep-dives.
 
-### B. Removal of Preliminary / Interim Digest & New Retry Thresholds
-- **Eliminate Interim Digest:** Completely remove the interim / preliminary Top digest logic from `desktop/main.py` and `desktop/top10_service.py`:
-  - No interim email is sent during pass 1.
-  - No interim HTML or JSON files (`*_interim_digest.*`) are created.
-  - Only a single, finalized Top digest is produced after channel iterations complete.
-- **Channel Execution & Retry Thresholds:**
-  - **Iteration 1 (Initial Run):** Process all sources once. If success rate is **>= 80%**, proceed immediately to digest generation and publish (skip further retries).
-  - **Iteration 2 (First Retry):** If Iteration 1 < 80%, retry failed sources. If cumulative success rate reaches **>= 70%**, proceed to digest generation and publish.
-  - **Iteration 3 (Final Retry):** If cumulative success rate is **< 70%** after Iteration 2, retry remaining failed sources once more. Regardless of outcome after Iteration 3 (even if < 70%), proceed to digest generation and publish.
+### B. Top 20 & Channel Video Audio Wiring
+- **Canonical Join Key:**
+  - Exact YouTube `video_id` -> canonical URL (`youtube.com/watch?v=...`) -> title hash.
+  - Both Top 20 items and channel cards join to audio using this canonical key.
+  - If no audio file exists, set `audio_url = ""` (card renders no listen button; old channel-audio fallback is eliminated).
+- **Top 20 Cards:**
+  - Clicking `🎧 Listen` on a Top 20 card plays only that specific video's summary audio.
+- **Channel Cards:**
+  - Each individual video card inside a channel view displays a `🎧 Listen` button to play that video's summary.
+- **Data Contracts (`data.json` & Mobile Feed):**
+  - Ensure `_normalize_mobile_item()` and `_normalize_mobile_video()` attach the video-level `audio_url` to both Top 20 items and channel video objects.
 
-### C. Audio Summary Playback Reliability (Web & iOS)
-- **Web Reader Audio Unification:**
-  - In `desktop/templates/reader.html`, support `summary_audio_url` as a first-class audio source:
-    - Display the channel Audio Overview player whenever `ch.summary_audio_url` OR `ch.audio_url` is present.
-    - Fix `playChannelAudio(chId)` and `enqueueChannel(chId)` to fall back to `summary_audio_url`.
-    - Add an audio listen button on Editorial Picks / Top digest cards so users can listen to spoken summaries directly from the briefing.
-    - Fix `buildQueue()` to include spoken summaries when NotebookLM podcasts are absent, so "Play All Unheard" works.
-    - Fix `playIndex(i)` audio loading race conditions: handle asynchronous `.play()` properly, listen to `loadedmetadata` / `canplay` before playback, avoid swallowing errors silently, and keep play/pause icons synchronized with actual `HTMLAudioElement` playback state.
-- **iOS App Audio Reliability:**
-  - In `RootTabView.swift`, enhance `resolveAudioUrl` with fuzzy/slug normalization so channel names with punctuation or slight formatting differences (e.g. `Peter Attia MD` vs `Peter Attia, MD`, `Nutrition Made Simple!`) resolve their summary audio URL reliably.
-  - In `desktop/web_reader.py`, ensure `_normalize_mobile_item` and `_normalize_mobile_video` directly embed the resolved `audio_url` from the channel's `summary_audio_url` if not already set.
-  - In `AudioPlayerManager.swift`, sanitize and percent-encode URL strings if `URL(string:)` returns nil, use `player.play()` with playback rate, and observe `AVPlayerItem.status` to handle network stalls gracefully.
+### C. Playlist Queues & Mini-Player
+- **Track Data Shape:**
+  - Queue items carry `{key, videoId, url, src, title, channelName, channelId, category, rank, weekKey}`.
+  - Mini-player title format: `"${Channel Name} · ${Video Title}"`.
+- **Top 20 Playlist Queue:**
+  - Add `🎧 Play All Top 20 Summaries` button in the Editorial Picks / Top 20 header.
+  - Queues all Top 20 video summary tracks in rank order (#1 through #20).
+- **Channel-Level Playlist Queue:**
+  - Replace old channel `🔊 Listen` with `🎧 Play Summaries`.
+  - Queues all video summaries for that specific channel in digest order.
+- **Site-Wide Playlist Queue:**
+  - "► Play Summaries" queues Top 20 summaries first (#1 through #20), followed by remaining channel video summaries organized by category with **set-minus deduplication** (so Top 20 videos do not play twice).
+- **Heard Tracking & Automatic Skipping:**
+  - Key heard status by canonical key: `tubelm_heard:{week}:{key}` (with `src` alias).
+  - Forward progression (`queueNext`) automatically skips already-heard tracks.
+  - Backward navigation (`queuePrev`) does not skip.
+- **Automatic Watched/Read Synchronization:**
+  - When a video's summary audio reaches 90%+ playback (or ends), it is marked as `heard`, and the video card is automatically marked as `Watched ✓` (or `Read ✓`).
 
-### D. Automated UAT & Release Automation (Stage 5)
-- **Web Reader Playwright UAT:** Run Playwright browser tests against the built static site:
-  - Verify Editorial Picks render correctly with dynamic counts (e.g., Top 14 or Top 20).
-  - Verify channel list contains only actual channels (no `TubeLM_Top_*` as channels).
-  - Verify audio playback controls and audio element loading.
-  - Verify light/dark theme toggle and mobile responsiveness.
-- **iOS App Automated CI Build:**
-  - Push changes to GitHub.
-  - Trigger and monitor GitHub Actions workflow (`.github/workflows/build-ios.yml` / `verify.yml`) on macOS runners.
-  - Verify iOS tests pass and `.ipa` builds successfully.
-- **Deployment:** Automatically deploy the repaired `gh-pages` branch and ensure live site `https://vkr1729.github.io/TubeLM/` is up-to-date and synced.
+### D. Historical Runs Policy
+- Historical weeks remain as-is (no retroactive mass backfill required during builds). Video-level audio is generated on pipeline runs and respected whenever present.
+- If a historical week has no per-video audio, hide the new queue buttons and preserve legacy channel audio.
 
 ---
 
 ## 3. Interview Record & Decision Log
+
 | # | Functional Question | Recommended Approach | Evaluated Alternatives | User Decision / Rationale |
 |---|---------------------|----------------------|------------------------|---------------------------|
-| 1 | Target Persona & Scale | Single-user personal CLI/app | Multi-tenant SaaS | Confirmed: Single-user personal use exclusively |
-| 2 | Iteration 2 Retry Threshold | Publish if >= 70% after Iteration 2; Iteration 3 only if < 70% | Require >= 90% after Iteration 2 | Confirmed: Publish if >= 70% after Iter 2; Iter 3 only if < 70% (unconditional publish after Iter 3) |
-| 3 | Dynamic Top Digest Count | Support dynamic counts (1 to 20+) via regex matching & dynamic UI | Force/pad exactly 20 items | Confirmed: Dynamic counts supported smoothly across web, JSON, and iOS |
-| 4 | Removal of Interim Digest | Completely remove preliminary/interim digest | Keep as config flag | Confirmed: Completely remove preliminary/interim digest; single final digest only |
-| 5 | Summary Audio Playback | Unify summary TTS audio in Web player and iOS with robust slug matching and error handling | Keep separate audio tracks | Confirmed: Fix hit-or-miss audio playback across Web Reader and iOS App |
+| 1 | Scope of video-level audio generation | Generate video-level audio for every individual video across all channels (naturally covering Top 20 as well). | A) Top 20 only; B) Top 20 only + deprecate channels. | **Confirmed:** Generate per video across all channels so Top 20 is automatically covered without re-synthesis. |
+| 2 | Spoken audio script format | Announce title and channel first, followed by summary: `"<Title>, by <Channel Name>. <Summary>"`. | A) Direct summary text only; B) Include "Why it matters" editorial blurb. | **Confirmed:** Title & channel announcement first, followed by full video summary breakdown. |
+| 3 | Auto-mark Watched on audio completion | Automatically mark video as Watched/Read once its audio summary is listened to (90%+ completed). | Keep them separate (audio heard is separate from card watched). | **Confirmed:** Auto-mark Watched/Read at 90%+ audio completion. |
+| 4 | Channel-level listening architecture | Synthesize per video; channel "Play All" queues individual video tracks in the player. Deprecate monolithic concatenated channel TTS. | Keep both monolithic channel MP3 and per-video MP3s. | **Confirmed:** Deprecate monolithic channel TTS; queue individual video tracks for better scrubbing and progress. |
+| 5 | Site-wide playlist ordering | Queue Top 20 summaries first (#1 to #20), followed by remaining channel videos by category. | A) Strictly by category; B) Top 20 and categories strictly separated. | **Confirmed:** Top 20 first, followed by remaining videos by category with set-minus deduplication. |
+| 6 | Historical week backfill policy | No historical backfill; generate on subsequent pipeline runs and leave historical weeks as-is. | Auto-backfill current week during `--build-only`. | **Confirmed:** No mass backfill; generate on future pipeline runs. |
+| 7 | Speech formatting & strategic pauses | Strip all `#`, `/`, `\`, backticks, escaped symbols; insert natural punctuation pauses between sections and announcements. | Raw text stripping only without section cadence pauses. | **Confirmed:** Enhanced text cleaning with natural human cadence pauses. |
 
 ---
 
-## 4. Frontier Model Probing Insights & Scope Gaps (Resolved)
+## 4. Frontier Model Probing Insights & Scope Gaps
+- **Q1:** Per-video text source defined as `f"{title}, by {channel}. " + clean_text_for_speech(summary)`; skip if < 20 chars; safe_id uses video_id or sha256(url)[:12].
+- **Q2:** Extended `_AUDIO_DATE_RE` retention regex to `summary_video_` prefix; deprecated monolithic channel TTS generation.
+- **Q3:** Canonical join key: `video_id` -> canonical URL -> title hash. Eliminated channel-level audio fallback on video cards.
+- **Q4:** Coupled 90%+ audio completion to `markVideoWatchedState` and `tubelm_heard` store. Forward skip on `queueNext` only.
+- **Q5:** Track shape with canonical key, set-minus deduplication in site-wide queue, and resilient player load.
 
-### Q1: Canonical N & Match Pattern (§2.A)
-- **Canonical N:** Defined as `len(items)` after deduplication. Filename digits are informational hints.
-- **Regex Pattern:** `r".*_TubeLM_Top_(\d+)_digest\.(html|json)$"` (interim-free, as interim is completely removed).
-- **Match Sites Enumeration:** Centralize detection in a helper function and update:
-  - `desktop/web_reader.py:1061`
-  - `desktop/tts_service.py:255`
-  - `desktop/scripts/download_top10.py:31`
-  - `desktop/scripts/send_top10_from_digests.py:48`
-- **Dynamic Caps & Display:** Replace hardcoded caps (iOS `prefix(20)`, `reader.html:2744` "Top 20", RSS `top20_items[:10]`) with dynamic count `N`.
-- **Empty Digest (N=0):** Honest empty state ("No Top picks this week — 0 candidates found") instead of corrupt cache / crash path.
+---
 
-### Q2: Cumulative Success Rate & Partial Publish (§2.B)
-- **Success Rate Formula:** Cumulative rate = `len(completed_source_keys) / total_initial_handlers`.
-  - Sources with no new content count as completed/successful.
-  - Failures in discovery or processing leave the source key out of `completed_source_keys`.
-  - Quota-deferrals pause or exit as before without triggering phantom retries.
-- **Retry Scope:** Retries (Iterations 2 & 3) strictly execute only `failed_handlers = [h for h in initial_handlers if h.source_key not in completed_source_keys]`. This prevents double-recording Top-10 candidate batches.
-- **Threshold Gating:**
-  - Iteration 1: If cumulative rate $\ge 80\%$ (0.80), break to digest generation & publish.
-  - Iteration 2: Retry failed sources. If cumulative rate $\ge 70\%$ (0.70), break to digest generation & publish.
-  - Iteration 3: Retry remaining failed sources. Proceed to digest generation & publish unconditionally.
-- **Partial Publish Disclosure:** When published with $< 100\%$ source success, include a one-line notice in the digest: *"Digest compiled from X of Y channels (Z channels unavailable or deferred)."*
-
-### Q3: Interim Removal Blast Radius (§2.B)
-- **Code Surfaces to Cleanse:**
-  - `desktop/main.py`: Remove `interim_top10_sent` flag, Stage 0 interim trigger block (`lines 795-815`).
-  - `desktop/top10_service.py`: Remove `is_interim` argument, interim batch recording, interim skip branches, `_interim` filename suffix, and `rotate_downloads` coupling. Maintain tolerant-read compatibility for existing batch files containing legacy keys.
-  - `desktop/email_service.py`: Remove "EARLY EDITION" and "FINAL EDITION" interim label logic.
-- **Artifact Sweep:** One-time cleanup script/step to purge stale `*_interim_digest.*` files from `downloads/` and `site/`.
-
-### Q4: Audio Playback Architecture & Resolution (§2.C)
-- **Build-Time Normalization:** Normalize channel names and source names at build time in `desktop/web_reader.py` (lowercase, strip whitespace, strip punctuation e.g. `,`, `!`, `.`) to ensure `source_name` joined with `channel_audio_map` never misses due to punctuation discrepancies.
-- **Web Queue Composition (`buildQueue`):** Channel contributions fall back to `summary_audio_url` only when `audio_url` (NotebookLM) is absent. Add `isSummary` attribute to queue items to isolate `isHeard` tracking.
-- **Web Audio Lifecycle (`playIndex`):** Eliminate dual-start race conditions. Await `canplay`, execute `.play()`, and drive play/pause UI state strictly from player promise outcomes and native events. Surface playback load errors to the mini-player UI.
-- **iOS Audio Handling:** In `AudioPlayerManager.swift`, sanitize and percent-encode absolute URL strings; keep `play()` + playback rate; implement item-scoped `AVPlayerItem.status` KVO observation with teardown on track replace to handle stalls.
-
-### Q5: Runnable Exit Criteria & Release Ordering (§2.D)
-- **Localhost Playwright UAT:** Serve built static site directory locally (`http://localhost:...`) rather than `file://`. Assertions:
-  - Editorial Picks header reflects dynamic count.
-  - Channel list contains zero `TubeLM_Top_*` digest entries.
-  - Audio player controls present and audio elements load (`canplay` verified).
-  - Theme toggle (`tubelm-theme`) persists in `localStorage` across reloads.
-  - Responsive layouts render cleanly across viewports: 390px (mobile), 768px (tablet), 1280px (desktop).
-- **iOS CI Build:** Trigger GitHub Actions `.github/workflows/build-ios.yml` on push; verify Swift tests and IPA generation pass on macOS runners.
-- **Atomic Deployment:** Scan `site/` for files $> 5\text{MB}$ before push; deploy audio to R2/Worker, write `data.json` last, push `gh-pages`, verify live `https://vkr1729.github.io/TubeLM/data.json` matches local `run_date`.
-
+## 5. UI Specification
+- **Selected Archetype:** Existing TubeLM Modern High-Density Web Reader (`desktop/templates/reader.html`) with Neon Lime / Obsidian color palette.
+- **Key View Enhancements:**
+  1. *Top 20 / Editorial Picks View:* Add `🎧 Play All Top 20 Summaries` action button in the header alongside `Watch on YouTube`. Card-level `🎧 Listen` buttons now trigger individual video audio.
+  2. *Channel View:* Replace channel header `🔊 Listen` with `🎧 Play Summaries` queue button. Add `🎧 Listen` buttons to each video card.
+  3. *Mini-Player Drawer:* Updates track title dynamically with `"${Channel Name} · ${Video Title}"` and advances track-by-track.

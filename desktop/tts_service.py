@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -96,16 +97,50 @@ def clean_text_for_speech(text: str) -> str:
     # Remove raw URLs so voice never spells out http/https
     t = re.sub(r"https?://\S+", "", t)
     t = re.sub(r"\bwww\.\S+", "", t)
-    # Remove headers #, ##, ###
-    t = re.sub(r"^#{1,6}\s+", "", t, flags=re.MULTILINE)
+
+    # Remove escaped characters e.g. \$ -> $ (so voice says "thirty five dollars", not "backslash dollar")
+    t = t.replace(r"\$", "$").replace(r"\_", "_").replace(r"\*", "*").replace("\\", "")
+
+    # Strategic pause insertion for Markdown headers (BEFORE stripping hashes and collapsing whitespace):
+    # Match any header line (e.g. "### 1. The Hook" or "## Key Takeaways")
+    # If it doesn't end with terminal punctuation (. ! ? :), append ". " so neural TTS pauses naturally!
+    def _header_replacer(m):
+        header_text = m.group(1).strip()
+        if not header_text:
+            return ""
+        if header_text[-1] not in ".!?:":
+            return f"\n{header_text}.\n\n"
+        return f"\n{header_text}\n\n"
+
+    t = re.sub(r"^#{1,6}\s+(.+)$", _header_replacer, t, flags=re.MULTILINE)
+    # Remove any remaining leading/isolated hashes so "#" is never verbalized
+    t = re.sub(r"#+", "", t)
+
     # Remove bold/italics
     t = re.sub(r"[*_]{1,3}([^*_]+)[*_]{1,3}", r"\1", t)
     t = re.sub(r"[*_]", "", t)
+
+    # Remove backticks
+    t = re.sub(r"`+([^`]+)`+", r"\1", t)
+    t = re.sub(r"`+", "", t)
+
+    # Handle slashes gracefully:
+    # Convert 'and/or' -> 'and or', 'w/' -> 'with', 'w/o' -> 'without'
+    t = re.sub(r"\band/or\b", "and or", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bw/(?=\s|$)", "with", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bw/o(?=\s|$)", "without", t, flags=re.IGNORECASE)
+    # Isolated slashes surrounded by spaces ' / ' -> ', '
+    t = re.sub(r"\s+/\s+", ", ", t)
+    # Slashes between letters e.g. "input/output" -> "input, output"
+    t = re.sub(r"(?<=[a-zA-Z])/(?=[a-zA-Z])", ", ", t)
+
     # Remove list bullet markers
-    t = re.sub(r"^\s*[-*+]\s+", "", t, flags=re.MULTILINE)
+    t = re.sub(r"^\s*[-*+•]\s+", "", t, flags=re.MULTILINE)
     # Strip remaining angle brackets
     t = re.sub(r"[<>]", "", t)
-    # Normalize whitespace
+
+    # Normalize multiple punctuation or spaces, maintaining clean pauses
+    t = re.sub(r"\s*\.\s*\.", ".", t)
     return " ".join(t.split())
 
 
@@ -185,6 +220,50 @@ def generate_summary_tts(
         return False
 
 
+def clean_video_safe_id(video: dict[str, Any]) -> str:
+    """Return a deterministic filesystem-safe identifier for video-level audio.
+
+    YouTube videos get their exact 11-char video ID. Non-YouTube items
+    (e.g. RSS articles) or items with invalid IDs get sha256(url)[:12]
+    or sha256(title)[:12].
+    """
+    raw_id = str(video.get("video_id") or "").strip()
+    if re.fullmatch(r"^[A-Za-z0-9_-]{11}$", raw_id):
+        return raw_id
+    url = str(video.get("url") or video.get("link") or "").strip()
+    if url:
+        yt_match = re.search(r"(?:v=|\/embed\/|youtu\.be\/|\/v\/|\/shorts\/)([0-9A-Za-z_-]{11})", url)
+        if yt_match:
+            return yt_match.group(1)
+        return hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
+    title = str(video.get("title") or "").strip().lower()
+    return hashlib.sha256(title.encode("utf-8")).hexdigest()[:12]
+
+
+def video_summary_filename(run_date: str, safe_id: str) -> str:
+    """Return canonical filename for a video-level summary audio file."""
+    return f"summary_video_{run_date}_{safe_id}.mp3"
+
+
+def generate_video_summary_tts(
+    title: str,
+    channel_name: str,
+    summary_md: str,
+    output_path: Path,
+    voice: str | None = None,
+    rate: str | None = None,
+    force: bool = False,
+) -> bool:
+    """Generate audio summary for a single video. Loop-agnostic."""
+    clean_body = clean_text_for_speech(summary_md)
+    if not clean_body or len(clean_body) < 20:
+        return False
+    clean_title = clean_text_for_speech(title)
+    clean_channel = clean_text_for_speech(channel_name)
+    spoken_text = f"{clean_title}, by {clean_channel}. {clean_body}"
+    return generate_summary_tts(spoken_text, output_path, voice=voice, rate=rate, force=force)
+
+
 def _plain_text_from_digest(path: Path) -> str:
     """Extract plain summary text from a *_digest.json sidecar or *_digest.html file."""
     try:
@@ -225,6 +304,7 @@ async def _backfill_week_async(
     rate: str | None = None,
     force: bool = False,
     concurrency: int = 3,
+    per_video: bool = False,
 ) -> dict[str, int]:
     import paths
     from paths import safe_channel_name
@@ -237,33 +317,88 @@ async def _backfill_week_async(
     tasks = []
     sem = asyncio.Semaphore(concurrency)
 
-    async def process_one(digest: Path, tts_path: Path):
-        async with sem:
-            text = _plain_text_from_digest(digest)
-            generate_fn = globals().get("generate_summary_tts")
-            try:
-                if generate_fn is not None and generate_fn is not _generate_audio_async:
-                    return await asyncio.to_thread(
-                        generate_fn, text, tts_path, voice=voice, rate=rate, force=force
-                    )
-                return await _generate_audio_async(text, tts_path, voice=voice, rate=rate, force=force)
-            except Exception as exc:
-                logger.warning("Failed TTS for %s: %s", tts_path.name, exc)
-                return False
+    if per_video:
+        import json
+        from email_service import _split_markdown_summary_by_videos, _strip_citations
 
-    for digest in files:
-        if paths.is_top_digest_file(digest):
-            continue
-        safe = safe_channel_name(digest.stem[len(run_date) + 1:].removesuffix("_digest"))
-        if not safe or safe in seen:
-            continue
-        seen.add(safe)
-        stats["scanned"] += 1
-        tts_path = audio_dir / f"summary_{run_date}_{safe}.mp3"
-        if not force and tts_path.exists() and tts_path.stat().st_size > 0:
-            stats["skipped"] += 1
-            continue
-        tasks.append(process_one(digest, tts_path))
+        async def process_video(title: str, ch_name: str, vid_text: str, tts_path: Path):
+            async with sem:
+                generate_fn = globals().get("generate_video_summary_tts")
+                try:
+                    if generate_fn is not None:
+                        return await asyncio.to_thread(
+                            generate_fn, title, ch_name, vid_text, tts_path, voice=voice, rate=rate, force=force
+                        )
+                    clean_body = clean_text_for_speech(vid_text)
+                    if not clean_body or len(clean_body) < 20:
+                        return False
+                    clean_title = clean_text_for_speech(title)
+                    clean_channel = clean_text_for_speech(ch_name)
+                    spoken_text = f"{clean_title}, by {clean_channel}. {clean_body}"
+                    return await _generate_audio_async(spoken_text, tts_path, voice=voice, rate=rate, force=force)
+                except Exception as exc:
+                    logger.warning("Failed video TTS for %s: %s", tts_path.name, exc)
+                    return False
+
+        for digest in files:
+            if paths.is_top_digest_file(digest) or digest.suffix != ".json":
+                continue
+            try:
+                data = json.loads(digest.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            ch_name = str(data.get("channel_name") or digest.stem[len(run_date) + 1:].removesuffix("_digest"))
+            items = data.get("items") or []
+            summary_text = str(data.get("summary_text") or "")
+            if not items or not summary_text:
+                continue
+            per_item = _split_markdown_summary_by_videos(_strip_citations(summary_text), items, ch_name)
+            for v in items:
+                if not isinstance(v, dict):
+                    continue
+                safe_id = clean_video_safe_id(v)
+                vid_summary = per_item.get(v.get("url") or "")
+                if not vid_summary and len(items) == 1:
+                    vid_summary = summary_text
+                if not vid_summary:
+                    continue
+                tts_filename = video_summary_filename(run_date, safe_id)
+                tts_path = audio_dir / tts_filename
+                stats["scanned"] += 1
+                if not force and tts_path.exists() and tts_path.stat().st_size > 0:
+                    stats["skipped"] += 1
+                    continue
+                tasks.append(process_video(str(v.get("title") or ""), ch_name, vid_summary, tts_path))
+    else:
+        async def process_one(digest: Path, tts_path: Path):
+            async with sem:
+                text = _plain_text_from_digest(digest)
+                generate_fn = globals().get("generate_summary_tts")
+                try:
+                    if generate_fn is not None and generate_fn is not _generate_audio_async:
+                        return await asyncio.to_thread(
+                            generate_fn, text, tts_path, voice=voice, rate=rate, force=force
+                        )
+                    return await _generate_audio_async(text, tts_path, voice=voice, rate=rate, force=force)
+                except Exception as exc:
+                    logger.warning("Failed TTS for %s: %s", tts_path.name, exc)
+                    return False
+
+        for digest in files:
+            if paths.is_top_digest_file(digest):
+                continue
+            safe = safe_channel_name(digest.stem[len(run_date) + 1:].removesuffix("_digest"))
+            if not safe or safe in seen:
+                continue
+            seen.add(safe)
+            stats["scanned"] += 1
+            tts_path = audio_dir / f"summary_{run_date}_{safe}.mp3"
+            if not force and tts_path.exists() and tts_path.stat().st_size > 0:
+                stats["skipped"] += 1
+                continue
+            tasks.append(process_one(digest, tts_path))
 
     if tasks:
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -283,14 +418,16 @@ def backfill_week(
     rate: str | None = None,
     force: bool = False,
     concurrency: int = 3,
+    per_video: bool = False,
 ) -> dict[str, int]:
-    """Generate missing (or force-regenerated) summary_*.mp3 files for one run date. Returns counts."""
+    """Generate missing (or force-regenerated) summary MP3 files for one run date. Returns counts."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(
             _backfill_week_async(
-                summaries_dir, audio_dir, run_date, voice=voice, rate=rate, force=force, concurrency=concurrency
+                summaries_dir, audio_dir, run_date, voice=voice, rate=rate, force=force,
+                concurrency=concurrency, per_video=per_video
             )
         )
     import concurrent.futures
@@ -299,14 +436,38 @@ def backfill_week(
         return pool.submit(
             asyncio.run,
             _backfill_week_async(
-                summaries_dir, audio_dir, run_date, voice=voice, rate=rate, force=force, concurrency=concurrency
+                summaries_dir, audio_dir, run_date, voice=voice, rate=rate, force=force,
+                concurrency=concurrency, per_video=per_video
             ),
         ).result()
+
+
+def backfill_video_summaries(
+    summaries_dir: Path,
+    audio_dir: Path,
+    run_date: str,
+    voice: str | None = None,
+    rate: str | None = None,
+    force: bool = False,
+    concurrency: int = 3,
+) -> dict[str, int]:
+    """Generate missing video-level summary MP3s for one run date. Returns counts."""
+    return backfill_week(
+        summaries_dir,
+        audio_dir,
+        run_date,
+        voice=voice,
+        rate=rate,
+        force=force,
+        concurrency=concurrency,
+        per_video=True,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Backfill neural summary TTS audio.")
     parser.add_argument("--backfill", action="store_true", help="Generate missing summary MP3s.")
+    parser.add_argument("--videos", action="store_true", help="Generate video-level audio summaries instead of channel-level.")
     parser.add_argument("--date", default=None, help="Run date YYYY-MM-DD (default: latest in summaries dir).")
     parser.add_argument("--force", action="store_true", help="Force re-generation of existing summary MP3s.")
     parser.add_argument("--voice", default=None, help="TTS voice override (e.g. en-US-BrianMultilingualNeural).")
@@ -333,7 +494,8 @@ def main(argv: list[str] | None = None) -> int:
             print("No digests found.")
             return 1
         run_date = dates[0]
-    stats = backfill_week(
+    backfill_fn = backfill_video_summaries if args.videos else backfill_week
+    stats = backfill_fn(
         summaries_dir,
         audio_dir,
         run_date,
@@ -341,7 +503,8 @@ def main(argv: list[str] | None = None) -> int:
         rate=args.rate,
         force=args.force,
     )
-    print(f"Backfill {run_date}: scanned={stats['scanned']} generated={stats['generated']} "
+    label = "Video summary backfill" if args.videos else "Backfill"
+    print(f"{label} {run_date}: scanned={stats['scanned']} generated={stats['generated']} "
           f"skipped={stats['skipped']} failed={stats['failed']}")
     return 0
 

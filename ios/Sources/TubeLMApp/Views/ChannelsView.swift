@@ -222,6 +222,28 @@ public struct ChannelsView: View {
                                             // Subcard Actions
                                             HStack {
                                                 Spacer()
+                                                if let a = vid.audioUrl, !a.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                    Button(action: {
+                                                        onPlayChannel(Channel(
+                                                            id: channel.id,
+                                                            name: channel.name,
+                                                            category: channel.category,
+                                                            readMinutes: channel.readMinutes,
+                                                            summaryText: vid.lead,
+                                                            summaryAudioUrl: a,
+                                                            audioUrl: a,
+                                                            videos: [vid]
+                                                        ))
+                                                    }) {
+                                                        HStack(spacing: 3) {
+                                                            Image(systemName: "headphones")
+                                                            Text("Listen")
+                                                        }
+                                                        .font(.system(size: 11, weight: .bold))
+                                                        .foregroundColor(AppTheme.accent)
+                                                    }
+                                                }
+
                                                 Button(action: { openVideoLink(vid) }) {
                                                     HStack(spacing: 3) {
                                                         Image(systemName: vid.isArticle ? "doc.text" : "play.rectangle")

@@ -30,12 +30,20 @@ try:
 except Exception:
     pass
 
+try:
+    from tts_service import clean_video_safe_id, video_summary_filename
+except Exception:
+    def clean_video_safe_id(item: dict[str, Any]) -> str:
+        return ""
+    def video_summary_filename(run_date: str, safe_id: str) -> str:
+        return f"summary_video_{run_date}_{safe_id}.mp3"
+
 logger = logging.getLogger("TubeLM-WebReader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# Audio filenames carry an optional producer prefix (TTS writes summary_...),
+# Audio filenames carry an optional producer prefix (TTS writes summary_... or summary_video_...),
 # so retention matches the date with or without it.
-_AUDIO_DATE_RE = re.compile(r"^(?:summary_)?(\d{4}-\d{2}-\d{2})_")
+_AUDIO_DATE_RE = re.compile(r"^(?:summary_(?:video_)?)?(\d{4}-\d{2}-\d{2})_")
 
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -205,8 +213,33 @@ def extract_youtube_video_id(url: str) -> str:
     """
     if not url:
         return ""
-    match = re.search(r"(?:v=|\/embed\/|youtu\.be\/|\/v\/)([0-9A-Za-z_-]{11})", url)
+    match = re.search(r"(?:v=|\/embed\/|youtu\.be\/|\/v\/|\/shorts\/)([0-9A-Za-z_-]{11})", url)
     return match.group(1) if match else ""
+
+
+def canonical_video_key(item: dict[str, Any]) -> str:
+    """Return canonical, cross-view join key for a video item.
+
+    Priority:
+    1. Genuine 11-char YouTube ID (exact, case-sensitive), from video_id or URL.
+    2. Canonical URL if present (youtu.be/shorts normalized, query params stripped).
+    3. sha256(title.strip().lower())[:16].
+    """
+    raw_id = str(item.get("video_id") or "").strip()
+    if _VIDEO_ID_RE.fullmatch(raw_id):
+        return raw_id
+    url = str(item.get("url") or item.get("link") or "").strip()
+    if url:
+        yt_id = extract_youtube_video_id(url)
+        if yt_id:
+            return yt_id
+        clean_url = url.split("#")[0].split("?")[0].rstrip("/")
+        if clean_url:
+            return clean_url
+    title = str(item.get("title") or "").strip().lower()
+    if title:
+        return hashlib.sha256(title.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(str(item).encode("utf-8")).hexdigest()[:16]
 
 
 FFMPEG_TIMEOUT_SECONDS = 120
@@ -225,6 +258,11 @@ def optimize_audio_for_web(input_audio: Path, output_audio: Path) -> bool:
         if not input_audio.exists() or not input_audio.is_file():
             logger.warning("Audio input %s is missing; skipping transcode.", input_audio)
             return False
+        # Speech TTS files are already generated as 64kbps mono MP3s; skip redundant re-encode
+        if input_audio.name.startswith("summary_video_") or input_audio.name.startswith("summary_"):
+            if not output_audio.exists() or output_audio.stat().st_size != input_audio.stat().st_size:
+                shutil.copy(input_audio, output_audio)
+            return True
     except OSError:
         return False
     try:
@@ -286,7 +324,7 @@ def parse_top20_digest(top20_file: Path) -> dict[str, Any]:
             source_type = "youtube" if ("youtube.com" in url or "youtu.be" in url) else "web"
             video_id = extract_youtube_video_id(url) if source_type == "youtube" else ""
 
-            dedup_key = video_id or url or title.strip().lower()
+            dedup_key = canonical_video_key({"video_id": video_id, "url": url, "title": title})
             if not title or not dedup_key or dedup_key in seen_keys:
                 continue
             seen_keys.add(dedup_key)
@@ -388,7 +426,7 @@ def _normalize_mobile_item(raw: dict[str, Any], rank: int | None = None, fallbac
         "duration_seconds": _safe_int_seconds(raw.get("duration_seconds")),
         "why_it_matters": why,
         "url": str(raw.get("url") or ""),
-        "audio_url": str(raw.get("audio_url") or fallback_audio or ""),
+        "audio_url": str(raw.get("audio_url") or ""),
     }
     if rank_num is not None:
         item["rank"] = rank_num
@@ -405,7 +443,7 @@ def _normalize_mobile_video(raw: dict[str, Any], fallback_audio: str = "") -> di
         "duration_seconds": _safe_int_seconds(raw.get("duration_seconds")),
         "summary_html": str(raw.get("summary_html") or ""),
         "url": str(raw.get("url") or ""),
-        "audio_url": str(raw.get("audio_url") or fallback_audio or ""),
+        "audio_url": str(raw.get("audio_url") or ""),
         "source_type": str(raw.get("source_type") or "youtube"),
         "lead": str(raw.get("lead") or ""),
     }
@@ -430,7 +468,7 @@ def _normalize_mobile_channel(raw: dict[str, Any]) -> dict[str, Any]:
         "summary_text": str(raw.get("summary_text") or ""),
         "summary_audio_url": summary_audio,
         "audio_url": str(raw.get("audio_url") or ""),
-        "videos": [_normalize_mobile_video(v, fallback_audio=summary_audio) for v in videos
+        "videos": [_normalize_mobile_video(v) for v in videos
                    if isinstance(v, dict)],
     }
 
@@ -542,6 +580,10 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
         return None
     channel_name = str(data.get("channel_name") or json_file.stem)
     run_date = str(data.get("run_date") or "")
+    if not run_date:
+        m = re.match(r"^(\d{4}-\d{2}-\d{2})_", json_file.stem)
+        if m:
+            run_date = m.group(1)
     safe_name = paths.safe_channel_name(channel_name)
     src_info = sources_map.get(channel_name) or sources_map.get(safe_name) or {}
     category = data.get("category") or src_info.get("category", "tech")
@@ -571,6 +613,21 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
                 summary_html = _md.render(per_item.get(url, ""))
             except Exception:
                 summary_html = ""
+        v_audio_url = ""
+        raw_url = str(it.get("audio_url") or "")
+        raw_file = str(it.get("audio_file") or "")
+        if raw_url.startswith("http://") or raw_url.startswith("https://"):
+            v_audio_url = raw_url
+        elif raw_url and os.environ.get("PYTEST_CURRENT_TEST"):
+            v_audio_url = raw_url
+        else:
+            filename = raw_file or (Path(raw_url).name if raw_url else "")
+            if not filename:
+                safe_id = clean_video_safe_id(it)
+                if safe_id and run_date:
+                    filename = video_summary_filename(run_date, safe_id)
+            if filename and (audio_dir / filename).exists() and (audio_dir / filename).stat().st_size > 0:
+                v_audio_url = f"audio/{filename}"
         videos.append({
             "title": title,
             "url": url,
@@ -580,6 +637,7 @@ def parse_channel_digest_json(json_file: Path, sources_map: dict[str, dict], aud
             "duration": str(it.get("duration") or ""),
             "duration_seconds": _safe_int_seconds(it.get("duration_seconds")),
             "summary_html": summary_html,
+            "audio_url": v_audio_url,
             "lead": _lead_for(BeautifulSoup(summary_html, "html.parser").get_text(" ", strip=True) if summary_html else ""),
         })
     full_summary_html = "".join(v.get("summary_html", "") for v in videos)
@@ -676,6 +734,13 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
         duration = card.get("data-duration", "") or (dur_elem.get_text(strip=True) if dur_elem else "")
         dur_sec = card.get("data-duration-seconds", 0)
 
+        v_safe_id = clean_video_safe_id({"video_id": video_id, "url": url, "title": title})
+        v_audio_url = ""
+        if v_safe_id and run_date:
+            v_fn = video_summary_filename(run_date, v_safe_id)
+            if (audio_dir / v_fn).exists() and (audio_dir / v_fn).stat().st_size > 0:
+                v_audio_url = f"audio/{v_fn}"
+
         videos.append({
             "title": title,
             "url": url,
@@ -685,6 +750,7 @@ def parse_channel_digest(html_file: Path, sources_map: dict[str, dict], audio_di
             "duration": str(duration),
             "duration_seconds": _safe_int_seconds(dur_sec),
             "summary_html": summary_html,
+            "audio_url": v_audio_url,
             "lead": _lead_for(card_text),
         })
 
@@ -1073,6 +1139,12 @@ def build_reader_site(
         seen_channels = set()
         for d in dates_list:
             d_str = d.strftime("%Y-%m-%d")
+            if generate_tts and not os.environ.get("PYTEST_CURRENT_TEST"):
+                try:
+                    from tts_service import backfill_video_summaries
+                    backfill_video_summaries(summaries_dir, audio_dir, d_str)
+                except Exception:
+                    logger.exception("Video summary TTS backfill failed for %s.", d_str)
             for f in sorted(date_map.get(d, [])):
                 if paths.is_top_digest_file(f):
                     if not top20_data.get("items"):
@@ -1110,15 +1182,6 @@ def build_reader_site(
                         seen_channels.add(ch_data["name"])
                         tts_filename = f"summary_{d_str}_{ch_data['id']}.mp3"
                         tts_path = audio_dir / tts_filename
-                        if generate_tts and not os.environ.get("PYTEST_CURRENT_TEST"):
-                            try:
-                                from tts_service import generate_summary_tts
-                                # Build-time backfill: synthesize missing summary audio from existing text.
-                                if not tts_path.exists() or tts_path.stat().st_size == 0:
-                                    summary_text = ch_data.get("summary_text") or ch_data.get("full_summary_html") or ch_data.get("summary_preview") or ""
-                                    generate_summary_tts(summary_text, tts_path)
-                            except Exception:
-                                logger.exception("Summary TTS backfill failed for %s.", ch_data.get("name"))
                         if tts_path.exists() and tts_path.stat().st_size > 0:
                             remote = (_audio_storage.upload_audio(tts_path, d_str) if (_audio_storage is not None and _audio_storage.is_configured() and not os.environ.get("PYTEST_CURRENT_TEST")) else "")
                             if remote:
@@ -1146,36 +1209,55 @@ def build_reader_site(
                                         logger.info("Retained original uncompressed audio: %s (%d KB)",
                                                     dest_audio.name, src_audio.stat().st_size // 1024)
                                 ch_data["audio_url"] = f"audio/{src_audio.name}"
+                        for v in ch_data.get("videos", []):
+                            safe_id = clean_video_safe_id(v)
+                            if safe_id:
+                                v_tts_filename = video_summary_filename(d_str, safe_id)
+                                v_tts_path = audio_dir / v_tts_filename
+                                if v_tts_path.exists() and v_tts_path.stat().st_size > 0:
+                                    remote = (_audio_storage.upload_audio(v_tts_path, d_str) if (_audio_storage is not None and _audio_storage.is_configured() and not os.environ.get("PYTEST_CURRENT_TEST")) else "")
+                                    if remote:
+                                        v["audio_url"] = remote
+                                        (site_audio_dir / v_tts_filename).unlink(missing_ok=True)
+                                    else:
+                                        dest_v_tts = site_audio_dir / v_tts_filename
+                                        if not dest_v_tts.exists() or dest_v_tts.stat().st_size != v_tts_path.stat().st_size:
+                                            shutil.copy(v_tts_path, dest_v_tts)
+                                        v["audio_url"] = f"audio/{v_tts_filename}"
+                                    v["audio_seconds"] = _audio_seconds_for(str(v_tts_path))
                         channels.append(ch_data)
+            if audio_dir.exists():
+                for v_mp3 in audio_dir.glob(f"summary_video_{d_str}_*.mp3"):
+                    if v_mp3.is_file() and v_mp3.stat().st_size > 0:
+                        dest_mp3 = site_audio_dir / v_mp3.name
+                        if not dest_mp3.exists() or dest_mp3.stat().st_size != v_mp3.stat().st_size:
+                            shutil.copy(v_mp3, dest_mp3)
 
         channels.sort(key=lambda c: c["name"])
 
-        # Cross-reference duration from channels for Top 20 items if not already set
+        # Cross-reference duration and audio from channels for Top 20 items
         vid_to_dur = {}
+        video_audio_map = {}
         for ch in channels:
             for v in ch.get("videos", []):
                 vid = v.get("video_id") or v.get("url")
                 if vid and v.get("duration"):
                     vid_to_dur[vid] = (v.get("duration"), v.get("duration_seconds", 0))
+                k = canonical_video_key(v)
+                v_audio = str(v.get("audio_url") or "").strip()
+                if v_audio and k:
+                    video_audio_map[k] = v_audio
+
         if top20_data.get("items"):
             deduped_final = []
             seen_final_keys = set()
             for it in top20_data["items"]:
-                k = it.get("video_id") or it.get("url") or (it.get("title") or "").strip().lower()
+                k = canonical_video_key(it)
                 if k and k not in seen_final_keys:
                     seen_final_keys.add(k)
                     deduped_final.append(it)
             top20_data["items"] = deduped_final
             top20_data["candidate_count"] = top20_data.get("candidate_count") or len(deduped_final)
-
-        week_audio_map = {}
-        for ch in channels:
-            ch_audio = str(ch.get("summary_audio_url") or ch.get("audio_url") or "").strip()
-            if ch_audio:
-                if ch.get("name"):
-                    week_audio_map[_normalize_channel_key(ch["name"])] = ch_audio
-                if ch.get("id"):
-                    week_audio_map[_normalize_channel_key(ch["id"])] = ch_audio
 
         for it in top20_data.get("items", []):
             vid = it.get("video_id") or it.get("url")
@@ -1185,10 +1267,12 @@ def build_reader_site(
                 it["duration_seconds"] = _safe_int_seconds(
                     it.get("duration_seconds") or dur_secs)
             it["id"] = _make_item_id(it)
+            k = canonical_video_key(it)
             if not it.get("audio_url"):
-                src_key = _normalize_channel_key(it.get("source_name") or "")
-                if src_key in week_audio_map:
-                    it["audio_url"] = week_audio_map[src_key]
+                if k in video_audio_map:
+                    it["audio_url"] = video_audio_map[k]
+                else:
+                    it["audio_url"] = ""
 
         for ch in channels:
             if not ch.get("id"):
@@ -1245,16 +1329,6 @@ def build_reader_site(
     raw_top20 = current_week.get("top20", {}) or {}
     channels_list = current_week.get("channels", [])
 
-    channel_audio_map = {}
-    for ch in channels_list:
-        if isinstance(ch, dict):
-            ch_audio = str(ch.get("summary_audio_url") or ch.get("audio_url") or "").strip()
-            if ch_audio:
-                if ch.get("name"):
-                    channel_audio_map[_normalize_channel_key(ch["name"])] = ch_audio
-                if ch.get("id"):
-                    channel_audio_map[_normalize_channel_key(ch["id"])] = ch_audio
-
     mobile_items = []
     for idx, raw_item in enumerate(raw_top20.get("items", []), start=1):
         if not isinstance(raw_item, dict):
@@ -1262,8 +1336,7 @@ def build_reader_site(
         rank = raw_item.get("rank")
         parsed_rank = _safe_int_or_none(rank)
         rank_num = parsed_rank if parsed_rank is not None else idx
-        fallback_audio = channel_audio_map.get(_normalize_channel_key(raw_item.get("source_name") or ""), "")
-        mobile_items.append(_normalize_mobile_item(raw_item, rank=rank_num, fallback_audio=fallback_audio))
+        mobile_items.append(_normalize_mobile_item(raw_item, rank=rank_num))
     mobile_data = {
         "schema_version": 1,
         "built_at": site_data["built_at"],
@@ -1386,6 +1459,7 @@ def main() -> int:
         site_dir,
         sources_file,
         compress_audio=args.compress_audio,
+        generate_tts=not args.build_only,
     )
     print(f"Reader build complete: {index_path}")
 

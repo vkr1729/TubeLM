@@ -278,10 +278,11 @@ final class AutomatedSimulatorUATTests: XCTestCase {
             XCTAssertTrue(audio.hasPrefix("https://") || audio.hasPrefix("http://"), "Audio URL must use http/https")
         }
 
-        // Verify channels have summary audio URLs
+        // Verify channels have summary audio URLs or video audio URLs
         for channel in feed.channels {
             let chAudio = (channel.summaryAudioUrl ?? channel.audioUrl)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            XCTAssertFalse(chAudio.isEmpty, "Channel '\(channel.name)' must have a summary audio URL")
+            let hasVideoAudio = channel.videos.contains { !($0.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }
+            XCTAssertTrue(!chAudio.isEmpty || hasVideoAudio, "Channel '\(channel.name)' must have a summary audio URL or video audio URLs")
             let resolved = CommuteQueueModel.resolveChannelPlayback(for: channel, readIDs: [])
             XCTAssertNotNil(resolved.audioUrl, "resolveChannelPlayback must return a valid audioUrl")
         }

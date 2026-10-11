@@ -621,6 +621,10 @@ Run in order: SEC gate → BR/CH/BK → PD → RF → SY → TH → DT → RB �
 | RB-03 | Blank sync ids rejected | P1 | R/X.6 | device+peer | after gate |
 | RB-04 | Garbage sync bodies are 4xx, no corruption | P1 | O | host+device | after gate |
 | RB-05 | Tap-storm + rotation stability | P1 | D/E | device | after gate |
+| VA-01 | Video-level audio summaries synthesized and bound per video | P0 | R5.4 | host+device | after gate |
+| VA-02 | Title & channel name spoken intro before summary body | P0 | R5.4 | host+device | after gate |
+| VA-03 | Continuous playlist queueing (Top 20, Channel, Site-wide) | P0 | R2 | device+web | after gate |
+| VA-04 | 90%+ / onended playback auto-marks watched & heard | P0 | R2 | device+web | after gate |
 | PF-01 | Snappy cold start + 120 Hz scroll | P0 | R1 | device | after gate |
 | PF-02 | Zero-touch weekly refresh | P0 | R1, R2 | device | after gate |
 | PF-03 | 8-session commute loop | P1 | R1 | device | after gate |

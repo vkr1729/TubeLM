@@ -531,6 +531,22 @@ public struct RootTabView: View {
         if let direct = item.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !direct.isEmpty {
             return direct
         }
+        if let vid = item.videoId, !vid.isEmpty {
+            for ch in feed?.channels ?? [] {
+                if let v = ch.videos.first(where: { $0.videoId == vid }),
+                   let a = v.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !a.isEmpty {
+                    return a
+                }
+            }
+        }
+        if let u = item.url, !u.isEmpty {
+            for ch in feed?.channels ?? [] {
+                if let v = ch.videos.first(where: { $0.url == u }),
+                   let a = v.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !a.isEmpty {
+                    return a
+                }
+            }
+        }
         if let ch = feed?.channels.first(where: {
             $0.name.caseInsensitiveCompare(item.sourceName) == .orderedSame ||
             $0.id.caseInsensitiveCompare(item.sourceName) == .orderedSame
@@ -550,6 +566,12 @@ public struct RootTabView: View {
     }
 
     private func playChannelAudio(_ channel: Channel) {
+        if channel.videos.count == 1, let singleVid = channel.videos.first {
+            markVideoRead(singleVid)
+            let audio = singleVid.audioUrl ?? channel.summaryAudioUrl ?? channel.audioUrl
+            player.playTrack(title: "\(channel.name) · \(singleVid.title)", source: channel.name, urlString: audio)
+            return
+        }
         let resolved = CommuteQueueModel.resolveChannelPlayback(for: channel, readIDs: readIDs)
         player.playTrack(title: "\(channel.name): \(resolved.title)", source: channel.name, urlString: resolved.audioUrl)
     }

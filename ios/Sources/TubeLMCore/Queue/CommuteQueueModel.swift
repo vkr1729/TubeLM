@@ -91,7 +91,7 @@ public struct CommuteQueueModel: Sendable {
             return (
                 title: "Channel Overview",
                 itemsToPlay: channel.videos,
-                audioUrl: audioFallback
+                audioUrl: audioFallback ?? channel.videos.lazy.compactMap { playable($0.audioUrl) }.first
             )
         }
     }
