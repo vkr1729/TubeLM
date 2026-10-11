@@ -5,7 +5,6 @@ from pathlib import Path
 
 import tts_service
 from tts_service import (
-    backfill_video_summaries,
     backfill_week,
     clean_text_for_speech,
     clean_video_safe_id,

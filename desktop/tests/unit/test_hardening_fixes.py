@@ -172,6 +172,8 @@ class TestRunnerStop:
         monkeypatch.setattr(gui, "ENV_FILE", tmp_path / ".env")
         monkeypatch.setattr(gui, "STATE_FILE", tmp_path / "state.json")
         monkeypatch.setattr(gui, "SUMMARIES_DIR", tmp_path / "summaries")
+        monkeypatch.setattr(gui.runner, "is_running", False)
+        monkeypatch.setattr(gui.runner, "process", None)
         tmp_path.mkdir(parents=True, exist_ok=True)
         gui.app.config["TESTING"] = True
         with gui.app.test_client() as client:
