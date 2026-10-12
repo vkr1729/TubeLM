@@ -48,6 +48,12 @@ class TestCleanText:
         assert "1/2" in clean
         assert "`" not in clean
 
+    def test_bold_header_pause_insertion(self):
+        text = "**The Hook**\nWhy would Taiwan Semiconductor contemplate spending tens of billions?\n\n**The Mechanics & Evidence**\nEconomic logic rests on supply chains."
+        clean = clean_text_for_speech(text)
+        assert clean.startswith("The Hook. Why would")
+        assert "The Mechanics & Evidence. Economic logic" in clean
+
 
 class TestVideoSummaryHelpers:
     def test_clean_video_safe_id(self):
@@ -82,6 +88,25 @@ class TestVideoSummaryHelpers:
         assert res is True
         assert len(spoken) == 1
         assert spoken[0].startswith("How to Lose $35 Billion, by ColdFusion. The Hook. Leopold Aschenbrenner")
+
+    def test_generate_video_summary_tts_accepts_dict_and_kwargs(self, tmp_path, monkeypatch):
+        spoken = []
+
+        def fake_generate(text, out_p, voice=None, rate=None, force=False):
+            spoken.append(text)
+            return True
+
+        monkeypatch.setattr(tts_service, "generate_summary_tts", fake_generate)
+        out = tmp_path / "out.mp3"
+        item = {"title": "AI Boom Breakdown", "url": "https://youtu.be/12345"}
+        res = generate_video_summary_tts(
+            item,
+            "Bloomberg Originals",
+            out,
+            summary_text="Capital flows directly into data centers and hardware.",
+        )
+        assert res is True
+        assert spoken[0].startswith("AI Boom Breakdown, by Bloomberg Originals. Capital flows directly")
 
 
 class TestGenerate:

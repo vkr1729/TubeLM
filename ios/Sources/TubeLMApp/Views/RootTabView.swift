@@ -547,15 +547,6 @@ public struct RootTabView: View {
                 }
             }
         }
-        if let ch = feed?.channels.first(where: {
-            $0.name.caseInsensitiveCompare(item.sourceName) == .orderedSame ||
-            $0.id.caseInsensitiveCompare(item.sourceName) == .orderedSame
-        }) {
-            let chAudio = (ch.summaryAudioUrl ?? ch.audioUrl)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let chAudio = chAudio, !chAudio.isEmpty {
-                return chAudio
-            }
-        }
         return nil
     }
 
@@ -600,7 +591,14 @@ public struct RootTabView: View {
 
             let mergedVideos = ch.videos.map { vid -> VideoItem in
                 let vidAudio = vid.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let resolvedVidAudio = vidAudio.isEmpty ? (summaryAudio ?? fallbackAudio) : vidAudio
+                let resolvedVidAudio: String?
+                if !vidAudio.isEmpty {
+                    resolvedVidAudio = vidAudio
+                } else if ch.videos.count == 1 {
+                    resolvedVidAudio = summaryAudio ?? fallbackAudio
+                } else {
+                    resolvedVidAudio = nil
+                }
                 return VideoItem(
                     id: vid.id,
                     videoId: vid.videoId,
@@ -629,8 +627,7 @@ public struct RootTabView: View {
 
         let mergedItems = incoming.top20.items.map { it -> FeedItem in
             let itemAudio = it.audioUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let fallbackAudio = itemAudio.isEmpty ? channelAudioMap[it.sourceName.lowercased()] : nil
-            let finalAudio = itemAudio.isEmpty ? fallbackAudio : itemAudio
+            let finalAudio = !itemAudio.isEmpty ? itemAudio : nil
             return FeedItem(
                 id: it.id,
                 videoId: it.videoId,

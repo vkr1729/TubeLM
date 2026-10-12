@@ -79,7 +79,7 @@ public struct CommuteQueueModel: Sendable {
                   !trimmed.isEmpty else { return nil }
             return trimmed
         }
-        let audioFallback = playable(channel.summaryAudioUrl) ?? playable(channel.audioUrl)
+        let audioFallback = channel.videos.count == 1 ? (playable(channel.summaryAudioUrl) ?? playable(channel.audioUrl)) : nil
         let unwatched = unwatchedVideos(for: channel, readIDs: readIDs)
         if !unwatched.isEmpty {
             return (
@@ -91,7 +91,7 @@ public struct CommuteQueueModel: Sendable {
             return (
                 title: "Channel Overview",
                 itemsToPlay: channel.videos,
-                audioUrl: audioFallback ?? channel.videos.lazy.compactMap { playable($0.audioUrl) }.first
+                audioUrl: unwatched.lazy.compactMap { playable($0.audioUrl) }.first ?? audioFallback ?? channel.videos.lazy.compactMap { playable($0.audioUrl) }.first
             )
         }
     }

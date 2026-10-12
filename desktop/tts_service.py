@@ -117,6 +117,17 @@ def clean_text_for_speech(text: str) -> str:
     # Remove any remaining leading/isolated hashes so "#" is never verbalized
     t = re.sub(r"#+", "", t)
 
+    # Strategic pause insertion for bold section titles on their own line (e.g. "**The Hook**", "**The Science & Evidence**")
+    def _bold_header_replacer(m):
+        content = m.group(1).strip()
+        if not content:
+            return ""
+        if content[-1] not in ".!?:":
+            return f"\n{content}.\n\n"
+        return f"\n{content}\n\n"
+
+    t = re.sub(r"^\s*[*_]{2}(.+?)[*_]{2}\s*$", _bold_header_replacer, t, flags=re.MULTILINE)
+
     # Remove bold/italics
     t = re.sub(r"[*_]{1,3}([^*_]+)[*_]{1,3}", r"\1", t)
     t = re.sub(r"[*_]", "", t)
@@ -247,22 +258,40 @@ def video_summary_filename(run_date: str, safe_id: str) -> str:
 
 
 def generate_video_summary_tts(
-    title: str,
+    title: str | dict[str, Any],
     channel_name: str,
-    summary_md: str,
-    output_path: Path,
+    summary_md: str | Path = "",
+    output_path: Path | None = None,
     voice: str | None = None,
     rate: str | None = None,
     force: bool = False,
+    **kwargs: Any,
 ) -> bool:
-    """Generate audio summary for a single video. Loop-agnostic."""
-    clean_body = clean_text_for_speech(summary_md)
+    """Generate audio summary for a single video. Loop-agnostic and resilient to parameter order/aliases."""
+    if isinstance(title, dict):
+        vid_dict = title
+        title_str = str(vid_dict.get("title") or "")
+    else:
+        title_str = str(title or "")
+
+    # Handle summary_text alias or Path swap
+    if isinstance(summary_md, Path) and output_path is None:
+        out_p = summary_md
+        body_text = str(kwargs.get("summary_text") or kwargs.get("summary_md") or "")
+    else:
+        out_p = output_path
+        body_text = str(summary_md or kwargs.get("summary_text") or kwargs.get("summary_md") or "")
+
+    if out_p is None:
+        return False
+
+    clean_body = clean_text_for_speech(body_text)
     if not clean_body or len(clean_body) < 20:
         return False
-    clean_title = clean_text_for_speech(title)
+    clean_title = clean_text_for_speech(title_str)
     clean_channel = clean_text_for_speech(channel_name)
     spoken_text = f"{clean_title}, by {clean_channel}. {clean_body}"
-    return generate_summary_tts(spoken_text, output_path, voice=voice, rate=rate, force=force)
+    return generate_summary_tts(spoken_text, out_p, voice=voice, rate=rate, force=force)
 
 
 def _plain_text_from_digest(path: Path) -> str:
@@ -322,6 +351,54 @@ async def _backfill_week_async(
         import json
         from email_service import _split_markdown_summary_by_videos, _strip_citations
 
+        # Reconstruct missing channel .json sidecars from stage_0_digest.md if present
+        stage0_path = summaries_dir / f"{run_date}_stage_0_digest.md"
+        if stage0_path.exists():
+            try:
+                from sources_loader import load_sources
+                sources_list = load_sources(paths.get_sources_file())
+                sources_map = {s["name"]: s for s in sources_list}
+                sources_map.update({safe_channel_name(s["name"]): s for s in sources_list})
+            except Exception:
+                sources_map = {}
+
+            try:
+                md_text = stage0_path.read_text(encoding="utf-8")
+                sections = re.split(r"\n---\n\n## ", md_text)
+                for s in sections[1:]:
+                    lines = s.splitlines()
+                    ch_name = lines[0].strip()
+                    safe_ch = safe_channel_name(ch_name)
+                    json_sidecar_path = summaries_dir / f"{run_date}_{safe_ch}_digest.json"
+                    if not json_sidecar_path.exists():
+                        items = []
+                        for line in lines:
+                            m = re.match(r"^- \[(.*?)\]\((.*?)\)", line)
+                            if m:
+                                url = m.group(2)
+                                v_id = ""
+                                yt_m = re.search(r"(?:v=|\/embed\/|youtu\.be\/|\/v\/|\/shorts\/)([0-9A-Za-z_-]{11})", url)
+                                if yt_m:
+                                    v_id = yt_m.group(1)
+                                items.append({"title": m.group(1), "url": url, "video_id": v_id})
+                        if "### AI Summary" in s:
+                            ai_sum = s.split("### AI Summary")[1].strip()
+                        else:
+                            ai_sum = s
+                        src_meta = sources_map.get(ch_name) or sources_map.get(safe_ch) or {}
+                        sidecar_data = {
+                            "run_date": run_date,
+                            "channel_name": ch_name,
+                            "source_type": src_meta.get("type", "youtube"),
+                            "category": src_meta.get("category", "tech"),
+                            "summary_text": ai_sum,
+                            "items": items,
+                        }
+                        json_sidecar_path.write_text(json.dumps(sidecar_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                        files.append(json_sidecar_path)
+            except Exception as e:
+                logger.warning("Failed reconstructing sidecars from stage 0 digest: %s", e)
+
         async def process_video(title: str, ch_name: str, vid_text: str, tts_path: Path):
             async with sem:
                 generate_fn = globals().get("generate_video_summary_tts")
@@ -340,6 +417,8 @@ async def _backfill_week_async(
                 except Exception as exc:
                     logger.warning("Failed video TTS for %s: %s", tts_path.name, exc)
                     return False
+
+        sidecars_to_update: list[tuple[Path, dict[str, Any]]] = []
 
         for digest in files:
             if paths.is_top_digest_file(digest) or digest.suffix != ".json":
@@ -370,8 +449,81 @@ async def _backfill_week_async(
                 stats["scanned"] += 1
                 if not force and tts_path.exists() and tts_path.stat().st_size > 0:
                     stats["skipped"] += 1
-                    continue
-                tasks.append(process_video(str(v.get("title") or ""), ch_name, vid_summary, tts_path))
+                else:
+                    tasks.append(process_video(str(v.get("title") or ""), ch_name, vid_summary, tts_path))
+            sidecars_to_update.append((digest, data))
+
+        # Also queue Top 20 items directly
+        top20_json_path = summaries_dir / f"{run_date}_TubeLM_Top_20_digest.json"
+        top20_data: dict[str, Any] | None = None
+        if top20_json_path.exists():
+            try:
+                top20_data = json.loads(top20_json_path.read_text(encoding="utf-8"))
+                for it in top20_data.get("items", []):
+                    if not isinstance(it, dict):
+                        continue
+                    safe_id = clean_video_safe_id(it)
+                    if not safe_id:
+                        continue
+                    tts_filename = video_summary_filename(run_date, safe_id)
+                    tts_path = audio_dir / tts_filename
+                    it_sum = str(it.get("summary") or "")
+                    if it_sum:
+                        stats["scanned"] += 1
+                        if not force and tts_path.exists() and tts_path.stat().st_size > 0:
+                            stats["skipped"] += 1
+                        else:
+                            tasks.append(process_video(str(it.get("title") or ""), str(it.get("source_name") or ""), it_sum, tts_path))
+            except Exception as e:
+                logger.warning("Failed queuing Top 20 items: %s", e)
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for ok in results:
+                if ok is True:
+                    stats["generated"] += 1
+                else:
+                    stats["failed"] += 1
+
+        # Now update channel sidecars with generated audio URLs
+        for digest, data in sidecars_to_update:
+            modified = False
+            for v in data.get("items", []):
+                if isinstance(v, dict):
+                    safe_id = clean_video_safe_id(v)
+                    if safe_id:
+                        tts_filename = video_summary_filename(run_date, safe_id)
+                        tts_path = audio_dir / tts_filename
+                        if tts_path.exists() and tts_path.stat().st_size > 0:
+                            if v.get("audio_url") != f"audio/{tts_filename}":
+                                v["audio_file"] = tts_filename
+                                v["audio_url"] = f"audio/{tts_filename}"
+                                modified = True
+            if modified:
+                try:
+                    digest.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+                except Exception as e:
+                    logger.warning("Failed updating sidecar %s: %s", digest.name, e)
+
+        # Update Top 20 digest json with generated audio URLs
+        if top20_json_path.exists() and top20_data is not None:
+            top20_modified = False
+            for it in top20_data.get("items", []):
+                if isinstance(it, dict):
+                    safe_id = clean_video_safe_id(it)
+                    if safe_id:
+                        tts_filename = video_summary_filename(run_date, safe_id)
+                        tts_path = audio_dir / tts_filename
+                        if tts_path.exists() and tts_path.stat().st_size > 0:
+                            if it.get("audio_url") != f"audio/{tts_filename}":
+                                it["audio_url"] = f"audio/{tts_filename}"
+                                top20_modified = True
+            if top20_modified:
+                try:
+                    top20_json_path.write_text(json.dumps(top20_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                except Exception as e:
+                    logger.warning("Failed updating Top 20 json %s: %s", top20_json_path.name, e)
+
     else:
         async def process_one(digest: Path, tts_path: Path):
             async with sem:
@@ -401,13 +553,14 @@ async def _backfill_week_async(
                 continue
             tasks.append(process_one(digest, tts_path))
 
-    if tasks:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for ok in results:
-            if ok is True:
-                stats["generated"] += 1
-            else:
-                stats["failed"] += 1
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for ok in results:
+                if ok is True:
+                    stats["generated"] += 1
+                else:
+                    stats["failed"] += 1
+
     return stats
 
 

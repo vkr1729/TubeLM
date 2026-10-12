@@ -728,8 +728,15 @@ async def async_main(
                                     v_path = audio_dir / v_file
                                     v_url = v.get("url", "")
                                     v_sum = per_item.get(v_url, "")
+                                    if not v_sum and len(items) == 1:
+                                        v_sum = summary_text
                                     if not v_path.exists() or v_path.stat().st_size == 0:
-                                        generate_video_summary_tts(v, handler.name, v_path, summary_text=v_sum)
+                                        generate_video_summary_tts(
+                                            title=str(v.get("title") or ""),
+                                            channel_name=handler.name,
+                                            summary_md=v_sum,
+                                            output_path=v_path,
+                                        )
                                     if v_path.exists() and v_path.stat().st_size > 0:
                                         v["audio_file"] = v_file
                                         v["audio_url"] = f"audio/{v_file}"

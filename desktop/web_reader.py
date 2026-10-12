@@ -1272,7 +1272,15 @@ def build_reader_site(
                 if k in video_audio_map:
                     it["audio_url"] = video_audio_map[k]
                 else:
-                    it["audio_url"] = ""
+                    safe_id = clean_video_safe_id(it)
+                    if safe_id and d_str:
+                        fn = video_summary_filename(d_str, safe_id)
+                        if (audio_dir / fn).exists() and (audio_dir / fn).stat().st_size > 0:
+                            it["audio_url"] = f"audio/{fn}"
+                        else:
+                            it["audio_url"] = ""
+                    else:
+                        it["audio_url"] = ""
 
         for ch in channels:
             if not ch.get("id"):
